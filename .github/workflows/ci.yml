@@ -1,0 +1,110 @@
+# CI del back de Galpón Mates: calidad, unitarios, migraciones + seed, E2E y contrato.
+#
+# El front se clona al lado (`frontend/`), como en la máquina de desarrollo, porque el contrato
+# (`openapi.yaml`) vive ahí y es la fuente de verdad. Si el repo del front es privado, hace falta
+# el secreto `FRONTEND_REPO_TOKEN` (un token de solo lectura de ese repo).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Calidad, tests y contrato
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Postgres y Redis de servicio: para aplicar las migraciones y el seed como en desarrollo.
+    # Los E2E levantan sus propios contenedores con Testcontainers (Docker ya está en el runner).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: galpon
+          POSTGRES_PASSWORD: galpon
+          POSTGRES_DB: galpon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U galpon -d galpon"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgresql://galpon:galpon@localhost:5432/galpon
+      REDIS_URL: redis://localhost:6379
+      CONTRACT_PATH: ../frontend/docs/api/openapi.yaml
+
+    steps:
+      - name: Checkout del back
+        uses: actions/checkout@v5
+        with:
+          path: backend
+
+      - name: Checkout del front (contrato)
+        uses: actions/checkout@v5
+        with:
+          repository: LucasGonzalezRighi/Galp-nMatesE-comersFront-End
+          path: frontend
+          token: ${{ secrets.FRONTEND_REPO_TOKEN || github.token }}
+
+      - name: Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (versiones fijadas y fronteras)
+        run: npm run lint
+
+      - name: Formato
+        run: npm run format:check
+
+      - name: Tests unitarios
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Migraciones y seed (dos veces, son idempotentes)
+        run: |
+          npx prisma migrate deploy
+          npm run db:seed
+          npm run db:seed
+
+      - name: Tests E2E (Testcontainers)
+        run: npm run test:e2e
+
+      - name: Contrato contra el openapi.yaml del front
+        run: npm run contract:check
