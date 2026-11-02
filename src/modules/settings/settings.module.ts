@@ -8,12 +8,15 @@ import { GetPublicSettingsQuery } from './application/queries/get-public-setting
 import { GetStoreSettingsQuery } from './application/queries/get-store-settings.query'
 import { CachedSettingsRepository } from './infrastructure/cached-settings.repository'
 import { PrismaSettingsRepository } from './infrastructure/prisma-settings.repository'
+import { SettingsController } from './interface/settings.controller'
 
 /**
- * Ajustes de la tienda con caché (`settings:*`, 300 s). Exporta {@link GetPublicSettingsQuery}
- * (para el controlador) y {@link GetStoreSettingsQuery} (para otros módulos, como el catálogo).
+ * Ajustes de la tienda con caché (`settings:*`, 300 s). Sirve `GET /settings/public` y exporta
+ * {@link GetPublicSettingsQuery} y {@link GetStoreSettingsQuery} (para otros módulos, como el
+ * catálogo).
  */
 @Module({
+  controllers: [SettingsController],
   providers: [
     PrismaSettingsRepository,
     { provide: SETTINGS_REPOSITORY, useClass: CachedSettingsRepository },

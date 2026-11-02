@@ -21,7 +21,22 @@ import {
  * Operaciones (`MÉTODO /ruta`, rutas relativas a `/api/v1`) que el back ya implementa: tienen que
  * coincidir con el contrato. Las demás operaciones del contrato se listan como pendientes.
  */
-const IMPLEMENTED_PATHS: readonly string[] = []
+const IMPLEMENTED_PATHS: readonly string[] = [
+  // B2: lecturas públicas del catálogo, contenidos, reseñas y ajustes.
+  'GET /categories',
+  'GET /products',
+  'GET /products/{slug}',
+  'GET /products/{slug}/related',
+  'GET /products/{slug}/reviews',
+  'GET /reviews/featured',
+  'GET /content/home',
+  'GET /content/about',
+  'GET /content/faq',
+  'GET /content/footer',
+  'GET /content/product-tabs',
+  'GET /content/legal/{document}',
+  'GET /settings/public',
+]
 
 /** Operaciones que Swagger genera y el contrato no tiene, a propósito. */
 const EXTRA_OPERATIONS: readonly string[] = ['GET /health']

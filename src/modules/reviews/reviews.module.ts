@@ -13,13 +13,16 @@ import { ListFeaturedReviewsQuery } from './application/queries/list-featured-re
 import { ListProductReviewsQuery } from './application/queries/list-product-reviews.query'
 import { CatalogProductLookupAdapter } from './infrastructure/catalog-product-lookup.adapter'
 import { PrismaReviewRepository } from './infrastructure/prisma-review.repository'
+import { ReviewsController } from './interface/reviews.controller'
 
 /**
  * Reseñas (lectura): las aprobadas de un producto con sus estadísticas y las destacadas del
- * inicio. Sin caché (spec §3.2). El envío de reseñas llega en B7.
+ * inicio, en `GET /products/{slug}/reviews` y `GET /reviews/featured`. Sin caché (spec §3.2).
+ * El envío de reseñas llega en B7.
  */
 @Module({
   imports: [CatalogModule],
+  controllers: [ReviewsController],
   providers: [
     { provide: REVIEW_REPOSITORY, useClass: PrismaReviewRepository },
     { provide: PRODUCT_LOOKUP_PORT, useClass: CatalogProductLookupAdapter },

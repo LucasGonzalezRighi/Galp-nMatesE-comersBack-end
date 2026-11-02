@@ -23,6 +23,44 @@ npm run dev   # nest start --watch en http://localhost:3001
 El puerto es `3001` (variable `PORT`). Todas las rutas llevan el prefijo `/api/v1`; por ejemplo,
 `GET http://localhost:3001/api/v1/health`.
 
+## Probar la tienda contra este back
+
+Las 13 lecturas públicas del contrato (`/categories`, `/products…`, `/reviews/featured`,
+`/content/*`, `/settings/public`) ya responden contra Postgres. Para ver la tienda del front con
+estos datos:
+
+1. Acá, con Docker Desktop abierto:
+
+   ```bash
+   npm run db:up   # docker compose up -d --wait
+   npm run db:migrate && npm run db:seed
+   npm run dev   # http://localhost:3001/api/v1
+   ```
+
+2. En el front (`../frontend`), un `apps/store/.env.local` (está ignorado por git) con:
+
+   ```dotenv
+   API_MODE=live
+   NEXT_PUBLIC_API_MODE=live
+   API_BASE_URL=http://localhost:3001
+   REVALIDATE_SECRET=<32 caracteres o más>
+   NEXT_PUBLIC_MP_PUBLIC_KEY=TEST-00000000-0000-0000-0000-000000000000
+   ```
+
+3. Desde `../frontend`, compilar y servir la tienda en otro puerto (el 3000 queda para el
+   `next dev` de siempre):
+
+   ```bash
+   npm run build -w @galpon/store
+   npx next start apps/store --port 4300
+   ```
+
+   `http://localhost:4300/` y `/tienda` tienen que mostrar los 27 productos del seed. Al terminar,
+   cerrá `next start` y `npm run dev`, y `npm run db:down` si no vas a seguir.
+
+Las escrituras (carrito, pedidos, pagos, cuenta, admin) llegan en B3 en adelante: hasta entonces,
+esas pantallas de la tienda fallan en modo `live`. `POST /products/{slug}/reviews` llega en B7.
+
 ## Scripts
 
 | Script                 | Qué hace                                                                        |

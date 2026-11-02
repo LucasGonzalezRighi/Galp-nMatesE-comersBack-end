@@ -22,16 +22,19 @@ import { ContentProductTabsAdapter } from './infrastructure/content-product-tabs
 import { PrismaCategoryRepository } from './infrastructure/prisma-category.repository'
 import { PrismaProductRepository } from './infrastructure/prisma-product.repository'
 import { SettingsPriceDisplayAdapter } from './infrastructure/settings-price-display.adapter'
+import { CategoriesController } from './interface/categories.controller'
+import { ProductsController } from './interface/products.controller'
 
 /**
  * Catálogo: líneas y productos publicados. Los repositorios Prisma van decorados con la caché
  * (`catalog:*`, 60 s); el precio sin IVA sale de `settings` y las pestañas de `content`.
  *
- * Exporta las queries (para los controladores) y {@link PRODUCT_REPOSITORY} (para que otros
- * módulos, como `reviews`, resuelvan un producto por slug).
+ * Sirve `GET /categories` y `GET /products…`. Exporta las queries y {@link PRODUCT_REPOSITORY}
+ * (para que otros módulos, como `reviews`, resuelvan un producto por slug).
  */
 @Module({
   imports: [SettingsModule, ContentModule],
+  controllers: [CategoriesController, ProductsController],
   providers: [
     PrismaProductRepository,
     PrismaCategoryRepository,

@@ -3,6 +3,9 @@ import { DocumentBuilder, type OpenAPIObject, SwaggerModule } from '@nestjs/swag
 
 import { API_PREFIX } from './app.setup'
 import type { Env } from './config/env'
+import { CATALOG_OPENAPI_SCHEMAS } from './modules/catalog/interface/dto/catalog.response.dto'
+import { REVIEWS_OPENAPI_SCHEMAS } from './modules/reviews/interface/dto/reviews.response.dto'
+import { SHARED_OPENAPI_SCHEMAS } from './shared/infrastructure/http/openapi'
 
 /** Ruta de Swagger UI, fuera del prefijo `/api/v1`: `/api/docs` (y el JSON en `/api/docs-json`). */
 export const SWAGGER_PATH = 'api/docs'
@@ -27,6 +30,12 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addApiKey({ type: 'apiKey', in: 'header', name: 'X-CSRF-Token' }, 'csrfToken')
     .addApiKey({ type: 'apiKey', in: 'header', name: 'X-Order-Token' }, 'orderToken')
     .build()
+  // Los esquemas que no salen de una clase (montos con nombre, `allOf`, `Problem`) se suman acá;
+  // `createDocument` los junta con los que genera de los DTOs.
+  config.components = {
+    ...config.components,
+    schemas: { ...SHARED_OPENAPI_SCHEMAS, ...CATALOG_OPENAPI_SCHEMAS, ...REVIEWS_OPENAPI_SCHEMAS },
+  }
   return SwaggerModule.createDocument(app, config, { ignoreGlobalPrefix: true })
 }
 

@@ -26,6 +26,7 @@ const CONSTRAINT_CODES: ReadonlyMap<string, string> = new Map([
   ['isUuid', 'invalid_uuid'],
   ['isEnum', 'invalid_value'],
   ['isIn', 'invalid_value'],
+  ['matches', 'invalid_format'],
 ])
 
 /** Mensaje en español de un campo que no está en el DTO (`forbidNonWhitelisted`). */
