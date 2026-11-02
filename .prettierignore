@@ -1,0 +1,7 @@
+package-lock.json
+node_modules
+dist
+coverage
+# Spec, plan y notas de trabajo del flujo de desarrollo: se editan como texto y no se reformatean
+docs/superpowers/**
+.superpowers

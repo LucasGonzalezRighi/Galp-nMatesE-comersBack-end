@@ -1,0 +1,67 @@
+{
+  "name": "@galpon/backend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "API de Galpón Mates: monolito modular en NestJS con arquitectura hexagonal.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.18",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "node scripts/check-dependency-versions.mjs && eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:e2e": "vitest run -c vitest.e2e.config.mts",
+    "prepare": "lefthook install"
+  },
+  "dependencies": {
+    "@nest-lab/throttler-storage-redis": "1.2.0",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/config": "12.0.1",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "@nestjs/swagger": "12.1.0",
+    "@nestjs/terminus": "12.1.0",
+    "@nestjs/throttler": "6.7.1",
+    "helmet": "8.3.0",
+    "ioredis": "6.0.0",
+    "nestjs-pino": "5.3.1",
+    "pino": "10.4.0",
+    "pino-http": "11.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@nestjs/cli": "12.0.11",
+    "@nestjs/testing": "12.3.2",
+    "@swc/core": "1.16.21",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "@types/supertest": "7.2.1",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-boundaries": "7.4.1",
+    "lefthook": "2.2.2",
+    "prettier": "3.9.10",
+    "supertest": "7.3.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "unplugin-swc": "2.0.0",
+    "vitest": "5.0.5",
+    "yaml": "2.9.1"
+  },
+  "overrides": {
+    "@nest-lab/throttler-storage-redis": {
+      "@nestjs/common": "$@nestjs/common",
+      "@nestjs/core": "$@nestjs/core"
+    }
+  }
+}
