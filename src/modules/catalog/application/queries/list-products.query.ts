@@ -13,10 +13,11 @@ export const MAX_PRODUCTS_PAGE_SIZE = 100
  * colapsados; vacía = sin búsqueda), ids recortados, únicos y ordenados, y `featured` solo si es
  * `true`. Así filtros equivalentes comparten la misma clave de caché.
  *
- * @throws {RangeError} En español, si la página, el tamaño, el orden o el grupo no son válidos.
+ * @throws {RangeError} En español, si la página (un entero seguro desde 1), el tamaño, el orden o
+ * el grupo no son válidos.
  */
 function normalizeFilter(filter: ProductFilter): ProductFilter {
-  if (!Number.isInteger(filter.page) || filter.page < 1) {
+  if (!Number.isSafeInteger(filter.page) || filter.page < 1) {
     throw new RangeError(
       `La página tiene que ser un entero desde 1; se recibió ${String(filter.page)}.`,
     )

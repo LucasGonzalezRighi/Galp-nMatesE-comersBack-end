@@ -39,12 +39,16 @@ const ORDER_BY: Record<ProductSortOrder, Prisma.Sql> = {
   az: Prisma.sql`p.name COLLATE "es-x-icu" ASC, p.sequence ASC`,
 }
 
+/** Postgres no guarda el carácter NUL en un `text`: un filtro de texto con NUL no coincide con nada. */
+const NUL = '\u0000'
+
 /**
  * Arma el `WHERE` del listado (siempre solo publicados).
  *
- * @returns Las condiciones, o `null` si el filtro de ids no deja ningún id posible.
+ * @returns Las condiciones, o `null` si el filtro de ids o de texto no deja ninguna fila posible.
  */
 function whereClause(filter: ProductFilter): Prisma.Sql | null {
+  if (filter.q?.includes(NUL) === true || filter.category?.includes(NUL) === true) return null
   const conditions = [Prisma.sql`p.status = 'published'`]
   if (filter.category !== undefined) conditions.push(Prisma.sql`c.slug = ${filter.category}`)
   if (filter.group !== undefined) {
@@ -70,7 +74,9 @@ export class PrismaProductRepository implements ProductRepository {
    * {@inheritDoc ProductRepository.list}
    *
    * Filtra, ordena y pagina en SQL (búsqueda sin acentos e intercalación española) y después lee
-   * los productos de la página con sus relaciones.
+   * los productos de la página con sus relaciones. Una página más allá del último producto (aunque
+   * su desplazamiento no entre en un `int` ni en un entero seguro) devuelve `items` vacío y el
+   * `total` real, sin error.
    */
   async list(filter: ProductFilter): Promise<ProductList> {
     const where = whereClause(filter)
@@ -81,12 +87,14 @@ export class PrismaProductRepository implements ProductRepository {
         SELECT count(*)::int AS total
         FROM products p JOIN categories c ON c.id = p.category_id
         WHERE ${where}`,
-      this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT p.id
-        FROM products p JOIN categories c ON c.id = p.category_id
-        WHERE ${where}
-        ORDER BY ${ORDER_BY[filter.sort]}
-        LIMIT ${filter.pageSize}::int OFFSET ${offset}::int`,
+      Number.isSafeInteger(offset)
+        ? this.prisma.$queryRaw<{ id: string }[]>`
+            SELECT p.id
+            FROM products p JOIN categories c ON c.id = p.category_id
+            WHERE ${where}
+            ORDER BY ${ORDER_BY[filter.sort]}
+            LIMIT ${filter.pageSize}::int OFFSET ${offset}::bigint`
+        : Promise.resolve<{ id: string }[]>([]),
     ])
     const ids = page.map(({ id }) => id)
     const rows =

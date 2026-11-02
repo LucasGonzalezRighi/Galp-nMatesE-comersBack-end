@@ -161,6 +161,9 @@ describe('ListProductsQuery', () => {
   it('rechaza una paginación o un orden inválidos con errores en español', async () => {
     const query = new ListProductsQuery(new InMemoryProductRepository(CATALOG), WITH_NET)
     await expect(query.execute({ sort: 'az', page: 0, pageSize: 24 })).rejects.toThrow(/página/)
+    await expect(query.execute({ sort: 'az', page: 2 ** 53, pageSize: 24 })).rejects.toThrow(
+      /página/,
+    )
     await expect(query.execute({ sort: 'az', page: 1, pageSize: 101 })).rejects.toThrow(/tamaño/)
     await expect(query.execute({ sort: 'otro' as 'az', page: 1, pageSize: 24 })).rejects.toThrow(
       /orden/,

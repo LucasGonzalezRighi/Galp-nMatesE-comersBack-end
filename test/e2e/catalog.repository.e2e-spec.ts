@@ -120,7 +120,9 @@ describe('lecturas del catálogo, contenidos, reseñas y ajustes (Postgres + Red
       pageSize: 100,
     })
     const none = await list.execute({ q: 'zzz', sort: 'destacados', page: 1, pageSize: 100 })
+    const withNul = await list.execute({ q: '\u0000', sort: 'destacados', page: 1, pageSize: 100 })
 
+    expect(withNul).toMatchObject({ items: [], total: 0 })
     expect(byName.total).toBe(8)
     expect(byName.items.every(({ categorySlug }) => categorySlug === 'bombillones')).toBe(true)
     expect(byLine.items.map(({ categorySlug }) => categorySlug)).toContain('imperiales')
@@ -156,6 +158,13 @@ describe('lecturas del catálogo, contenidos, reseñas y ajustes (Postgres + Red
       pageSize: 100,
     })
 
+    const farPage = await list.execute({
+      sort: 'destacados',
+      page: 2_000_000_000,
+      pageSize: 24,
+    })
+
+    expect(farPage).toMatchObject({ items: [], page: 2_000_000_000, total: 27 })
     expect(all.total).toBe(27)
     expect(all.items.slice(0, 8).every(({ featured: isFeatured }) => isFeatured)).toBe(true)
     const names = torpedos.items.map(({ name }) => name)
