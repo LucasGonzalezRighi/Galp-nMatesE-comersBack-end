@@ -24,7 +24,8 @@ const LAYERS = ['domain', 'application', 'infrastructure', 'interface']
 const DOMAIN_EXTERNALS = ['uuid']
 
 module.exports = defineConfig(
-  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**']),
+  // `src/generated/**`: cliente de Prisma 7 (generator `prisma-client`, `output = "../src/generated/prisma"`).
+  globalIgnores(['dist/**', 'coverage/**', 'node_modules/**', 'src/generated/**']),
   {
     files: ['**/*.{ts,mts,js,mjs}'],
     extends: [

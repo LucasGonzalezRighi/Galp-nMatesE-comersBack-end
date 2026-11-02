@@ -30,7 +30,7 @@ El puerto es `3001` (variable `PORT`). Todas las rutas llevan el prefijo `/api/v
 | `npm run dev`          | Levanta la API en modo watch (`nest start --watch`).                            |
 | `npm run build`        | Compila a `dist/` con `tsconfig.build.json`.                                    |
 | `npm start`            | Corre la versión compilada (`node dist/main`).                                  |
-| `npm run typecheck`    | `tsc --noEmit` sobre `src/`, `test/` y las configs de vitest.                   |
+| `npm run typecheck`    | `tsc --noEmit` sobre `src/`, `test/`, `prisma/` y las configs.                  |
 | `npm run lint`         | Verifica las versiones fijadas y corre ESLint (incluye las fronteras de capas). |
 | `npm run format`       | Formatea todo con Prettier.                                                     |
 | `npm run format:check` | Revisa el formato sin escribir.                                                 |
@@ -40,8 +40,8 @@ El puerto es `3001` (variable `PORT`). Todas las rutas llevan el prefijo `/api/v
 ## Calidad
 
 - **TypeScript estricto** (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), sin
-  `any` ni `!`. Única concesión: `strictPropertyInitialization` apagado, porque los DTOs de Nest se
-  completan fuera del constructor.
+  `any` ni `!` de expresión. `strict` queda completo, con `strictPropertyInitialization` incluido:
+  los DTOs de Nest declaran sus campos con inicializador o con `prop!: T` (asignación definida).
 - **Fronteras hexagonales** con `eslint-plugin-boundaries` (spec §3.1): `domain` no importa nada
   externo (solo `uuid`), `application` solo `domain`, `infrastructure` implementa los puertos e
   `interface` llama a `application` (y puede usar la infraestructura compartida de

@@ -11,9 +11,6 @@
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    // Los DTOs de Nest (class-validator / class-transformer) se completan fuera del constructor:
-    // sin esto harían falta `!` en cada propiedad, que el repo no permite.
-    "strictPropertyInitialization": false,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "esModuleInterop": true,
@@ -25,5 +22,12 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["src", "test", "vitest.config.mts", "vitest.e2e.config.mts"]
+  "include": [
+    "src",
+    "test",
+    "prisma",
+    "prisma.config.ts",
+    "vitest.config.mts",
+    "vitest.e2e.config.mts"
+  ]
 }

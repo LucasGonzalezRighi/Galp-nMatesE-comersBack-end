@@ -2,6 +2,8 @@ package-lock.json
 node_modules
 dist
 coverage
+# Cliente de Prisma generado (generator `prisma-client`, output ../src/generated/prisma)
+src/generated
 # Spec, plan y notas de trabajo del flujo de desarrollo: se editan como texto y no se reformatean
 docs/superpowers/**
 .superpowers
