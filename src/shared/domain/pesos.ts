@@ -1,8 +1,8 @@
 /**
  * Monto en pesos argentinos enteros (los `*_ars` del contrato): value object inmutable.
  *
- * Nunca tiene decimales ni es negativo; las operaciones devuelven un `Pesos` nuevo. Los
- * descuentos se redondean al peso más cercano.
+ * Nunca tiene decimales ni es negativo; las operaciones devuelven un `Pesos` nuevo. En los
+ * descuentos se redondea el ahorro al peso más cercano y el total es el monto menos ese ahorro.
  *
  * @example
  * Pesos.of(1999).percentOff(15).toNumber() // 1699
@@ -55,19 +55,33 @@ export class Pesos {
   }
 
   /**
-   * Aplica un descuento porcentual y redondea al peso más cercano.
+   * Calcula el ahorro de un descuento porcentual, redondeado al peso más cercano.
+   *
+   * Es la misma cuenta que hace el front (`Math.round(total * porcentaje / 100)`): se redondea el
+   * ahorro, no el total. Así el carrito y el pedido coinciden al peso.
+   *
+   * @param percent - Porcentaje de descuento, de 0 a 100.
+   * @returns El monto que se ahorra.
+   * @throws {RangeError} En español, si `percent` no es un número entre 0 y 100.
+   */
+  percentOf(percent: number): Pesos {
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      throw new RangeError(
+        `El porcentaje de descuento tiene que estar entre 0 y 100 (llegó ${String(percent)})`,
+      )
+    }
+    return Pesos.of(Math.round((this.amount * percent) / 100))
+  }
+
+  /**
+   * Aplica un descuento porcentual: el monto menos su ahorro ({@link Pesos.percentOf}).
    *
    * @param percent - Porcentaje de descuento, de 0 a 100.
    * @returns El monto con el descuento aplicado.
    * @throws {RangeError} En español, si `percent` no es un número entre 0 y 100.
    */
   percentOff(percent: number): Pesos {
-    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
-      throw new RangeError(
-        `El porcentaje de descuento tiene que estar entre 0 y 100 (llegó ${String(percent)})`,
-      )
-    }
-    return Pesos.of(Math.round((this.amount * (100 - percent)) / 100))
+    return Pesos.of(this.amount - this.percentOf(percent).amount)
   }
 
   /**

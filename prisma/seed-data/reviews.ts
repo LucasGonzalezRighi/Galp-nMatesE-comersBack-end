@@ -11,6 +11,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-09-15T15:00:00Z',
     status: 'approved',
     featured: true,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-imperial-premium',
@@ -20,6 +21,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-08-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-imperial-premium',
@@ -29,6 +31,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-07-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-torpedo-premium',
@@ -38,6 +41,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-09-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-torpedo-premium',
@@ -47,6 +51,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-06-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'torpedo-crudo-con-base-y-anillos',
@@ -56,6 +61,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-08-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-camionero-criollo-con-pelo',
@@ -65,6 +71,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-09-15T15:00:00Z',
     status: 'approved',
     featured: true,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-camionero-criollo-con-pelo',
@@ -74,6 +81,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-07-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'bombillon-premium-curvo',
@@ -83,6 +91,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-09-15T15:00:00Z',
     status: 'approved',
     featured: true,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'bombillon-premium-curvo',
@@ -92,6 +101,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-08-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'bombillon-100-alpaca',
@@ -101,6 +111,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-07-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'yerba-canarias-serena-1-kg',
@@ -110,6 +121,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-09-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-ranchero-manchas-blancas',
@@ -119,6 +131,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-08-15T15:00:00Z',
     status: 'approved',
     featured: false,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'mate-torpedo-virola-de-alpaca-cincelada',
@@ -128,6 +141,7 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-10-15T15:00:00Z',
     status: 'approved',
     featured: true,
+    verifiedPurchase: true,
   },
   {
     productSlug: 'bombillon-100-alpaca',
@@ -137,5 +151,6 @@ export const SEED_REVIEWS: readonly SeedReview[] = [
     createdAt: '2026-10-15T15:00:00Z',
     status: 'approved',
     featured: true,
+    verifiedPurchase: true,
   },
 ]

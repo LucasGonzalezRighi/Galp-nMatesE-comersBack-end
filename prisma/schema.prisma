@@ -170,20 +170,23 @@ model Inventory {
 // ── Comunidad, soporte y plataforma (spec §4.5) ─────────────────────────────────────────────
 
 /// Reseña de un producto. `rating` admite medias estrellas (CHECK en la migración).
-/// `customerId` y `orderItemId` quedan sin FK hasta B3/B4; con `orderItemId` es "compra verificada".
+/// `customerId` y `orderItemId` quedan sin FK hasta B3/B4. `verifiedPurchase` guarda la "compra
+/// verificada" que devuelve el contrato: el seed la fija a mano (no hay pedidos todavía) y desde B4
+/// se calcula con `orderItemId` (si existe, es `true`).
 model Review {
-  id          String       @id @default(uuid(7)) @db.Uuid
-  productId   String       @map("product_id") @db.Uuid
-  customerId  String?      @map("customer_id") @db.Uuid
-  orderItemId String?      @unique @map("order_item_id") @db.Uuid
-  authorName  String       @map("author_name")
-  rating      Decimal      @db.Decimal(2, 1)
-  text        String
-  status      ReviewStatus @default(pending)
-  featured    Boolean      @default(false)
-  moderatedAt DateTime?    @map("moderated_at") @db.Timestamptz(3)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id               String       @id @default(uuid(7)) @db.Uuid
+  productId        String       @map("product_id") @db.Uuid
+  customerId       String?      @map("customer_id") @db.Uuid
+  orderItemId      String?      @unique @map("order_item_id") @db.Uuid
+  authorName       String       @map("author_name")
+  rating           Decimal      @db.Decimal(2, 1)
+  text             String
+  status           ReviewStatus @default(pending)
+  featured         Boolean      @default(false)
+  verifiedPurchase Boolean      @default(false) @map("verified_purchase")
+  moderatedAt      DateTime?    @map("moderated_at") @db.Timestamptz(3)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 

@@ -179,6 +179,7 @@ async function seedReviews(tx: Tx): Promise<void> {
       text: review.text,
       status: review.status,
       featured: review.featured,
+      verifiedPurchase: review.verifiedPurchase,
       moderatedAt: review.status === 'pending' ? null : createdAt,
     }
     await tx.review.upsert({

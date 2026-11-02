@@ -95,6 +95,7 @@ function mapFixtures(fixtures) {
   const reviews = FIXTURE_REVIEWS.map((r) => {
     const productSlug = productSlugs.get(r.productId)
     check(productSlug !== undefined, `la reseña ${r.id} apunta a ${r.productId}`)
+    check(typeof r.verifiedPurchase === 'boolean', `la reseña ${r.id} no trae verifiedPurchase`)
     return {
       productSlug,
       authorName: r.authorName,
@@ -103,6 +104,7 @@ function mapFixtures(fixtures) {
       createdAt: r.createdAt,
       status: r.status,
       featured: r.featured,
+      verifiedPurchase: r.verifiedPurchase,
     }
   })
 

@@ -138,6 +138,7 @@ describe('seed', () => {
     const reviews = await db().review.findMany()
     expect(reviews.filter((r) => r.featured)).toHaveLength(5)
     expect(reviews.every((r) => r.status === 'approved')).toBe(true)
+    expect(reviews.every((r) => r.verifiedPurchase)).toBe(true)
     expect(reviews.some((r) => r.rating.toString() === '4.5')).toBe(true)
 
     const keys = (await db().contentBlock.findMany({ orderBy: { key: 'asc' } })).map((c) => c.key)

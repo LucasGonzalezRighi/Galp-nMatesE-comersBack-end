@@ -26,7 +26,7 @@ El script carga las fixtures con `tsx`, las pasa a términos del back y reescrib
 | `product.status`                     | `products.status` (`published`, con `published_at` = fecha de alta)                                          |
 | `product.stock`                      | `inventory.on_hand` (0 = agotado), `reserved` 0                                                              |
 | `product.images[]`, `category.image` | `media_assets` (`provider` `local`, `public_id` y `url` tal cual) + `product_images` por posición            |
-| `review.*`                           | `reviews` con id UUID v5 de `(productSlug, authorName, createdAt)`; `verifiedPurchase` no se guarda          |
+| `review.*`                           | `reviews` con id UUID v5 de `(productSlug, authorName, createdAt)`; `verifiedPurchase` → `verified_purchase` |
 | `content.*`                          | `content_blocks` por `key`: `home`, `about`, `faq`, `footer`, `product-tabs`, `legal-terms`, `legal-privacy` |
 | `settings.*`                         | `settings` (fila `id = 1`) y `shipping_options` (por `method`)                                               |
 

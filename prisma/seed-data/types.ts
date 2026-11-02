@@ -91,6 +91,8 @@ export interface SeedReview {
   status: 'pending' | 'approved' | 'hidden'
   /** Si aparece en el inicio. */
   featured: boolean
+  /** Si es de una compra verificada (`reviews.verified_purchase`). */
+  verifiedPurchase: boolean
 }
 
 /** Clave de un contenido editable (`content_blocks.key`). */
