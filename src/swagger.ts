@@ -4,6 +4,7 @@ import { DocumentBuilder, type OpenAPIObject, SwaggerModule } from '@nestjs/swag
 import { API_PREFIX } from './app.setup'
 import type { Env } from './config/env'
 import { CATALOG_OPENAPI_SCHEMAS } from './modules/catalog/interface/dto/catalog.response.dto'
+import { IDENTITY_OPENAPI_SCHEMAS } from './modules/identity/interface/dto/identity.response.dto'
 import { REVIEWS_OPENAPI_SCHEMAS } from './modules/reviews/interface/dto/reviews.response.dto'
 import { SHARED_OPENAPI_SCHEMAS } from './shared/infrastructure/http/openapi'
 
@@ -34,7 +35,12 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
   // `createDocument` los junta con los que genera de los DTOs.
   config.components = {
     ...config.components,
-    schemas: { ...SHARED_OPENAPI_SCHEMAS, ...CATALOG_OPENAPI_SCHEMAS, ...REVIEWS_OPENAPI_SCHEMAS },
+    schemas: {
+      ...SHARED_OPENAPI_SCHEMAS,
+      ...CATALOG_OPENAPI_SCHEMAS,
+      ...REVIEWS_OPENAPI_SCHEMAS,
+      ...IDENTITY_OPENAPI_SCHEMAS,
+    },
   }
   return SwaggerModule.createDocument(app, config, { ignoreGlobalPrefix: true })
 }

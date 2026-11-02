@@ -36,6 +36,7 @@ import {
   type PasswordResetRepository,
 } from './application/ports/password-reset.repository.port'
 import { USER_REPOSITORY, type UserRepository } from './application/ports/user.repository.port'
+import { GetAdminSessionQuery } from './application/queries/get-admin-session.query'
 import { GetMeQuery } from './application/queries/get-me.query'
 import { ListMyAddressesQuery } from './application/queries/list-my-addresses.query'
 import { Argon2PasswordHasher } from './infrastructure/argon2-password.hasher'
@@ -45,6 +46,9 @@ import { PrismaCustomerRepository } from './infrastructure/prisma-customer.repos
 import { PrismaPasswordResetRepository } from './infrastructure/prisma-password-reset.repository'
 import { PrismaUserRepository } from './infrastructure/prisma-user.repository'
 import { RedisLoginAttempts } from './infrastructure/redis-login-attempts.adapter'
+import { AdminAuthController } from './interface/admin-auth.controller'
+import { AuthController } from './interface/auth.controller'
+import { MeController } from './interface/me.controller'
 
 /**
  * Identidad: cuentas de clientes y admins, sesiones, recuperación de contraseña y libreta de
@@ -53,10 +57,11 @@ import { RedisLoginAttempts } from './infrastructure/redis-login-attempts.adapte
  * hasta B7. Las sesiones y los secretos vienen de `RedisModule` (global) y el reloj de
  * `SharedModule`.
  *
- * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Exporta {@link GetMeQuery}
- * (la usa `orders` en B4).
+ * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Las rutas son las de
+ * `/auth`, `/me` y `/admin/auth` del contrato. Exporta {@link GetMeQuery} (la usa `orders` en B4).
  */
 @Module({
+  controllers: [AuthController, MeController, AdminAuthController],
   providers: [
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
     { provide: CUSTOMER_REPOSITORY, useClass: PrismaCustomerRepository },
@@ -201,6 +206,11 @@ import { RedisLoginAttempts } from './infrastructure/redis-login-attempts.adapte
         clock: Clock,
       ) => new AdminLoginCommand(users, hasher, attempts, sessions, clock),
       inject: [USER_REPOSITORY, PASSWORD_HASHER, LOGIN_ATTEMPTS_PORT, SESSION_PORT, CLOCK],
+    },
+    {
+      provide: GetAdminSessionQuery,
+      useFactory: (users: UserRepository) => new GetAdminSessionQuery(users),
+      inject: [USER_REPOSITORY],
     },
     {
       provide: ChangeAdminPasswordCommand,

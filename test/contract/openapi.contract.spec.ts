@@ -38,6 +38,25 @@ const IMPLEMENTED_PATHS: readonly string[] = [
   'GET /content/product-tabs',
   'GET /content/legal/{document}',
   'GET /settings/public',
+  // B3: identidad (sesión de la tienda, cuenta del cliente y sesión del dashboard).
+  'GET /auth/csrf',
+  'POST /auth/register',
+  'POST /auth/login',
+  'POST /auth/logout',
+  'POST /auth/password/forgot',
+  'POST /auth/password/reset',
+  'GET /me',
+  'PATCH /me',
+  'GET /me/orders',
+  'GET /me/addresses',
+  'POST /me/addresses',
+  'PATCH /me/addresses/{id}',
+  'DELETE /me/addresses/{id}',
+  'POST /admin/auth/login',
+  'POST /admin/auth/logout',
+  'GET /admin/auth/me',
+  'GET /admin/auth/csrf',
+  'POST /admin/auth/password',
 ]
 
 /** Operaciones que Swagger genera y el contrato no tiene, a propósito. */
