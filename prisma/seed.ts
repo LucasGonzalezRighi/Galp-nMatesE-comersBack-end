@@ -2,11 +2,14 @@
 // del front por `scripts/import-fixtures.mjs`). Se corre con `npm run db:seed` o
 // `npx prisma db seed`; es idempotente: cada fila se escribe con `upsert` por su clave natural y
 // una segunda corrida deja la base igual (pisa con los valores del diseño las filas que siembra).
+// La excepción es el admin semilla: se crea solo si no existe y nunca se pisa su contraseña.
 import { createHash } from 'node:crypto'
 
 import { PrismaPg } from '@prisma/adapter-pg'
+import { argon2id, hash } from 'argon2'
 
 import { Prisma, PrismaClient } from '../src/generated/prisma/client'
+import { SEED_ADMIN } from './seed-data/admin'
 import { SEED_CATEGORIES } from './seed-data/categories'
 import { SEED_CONTENT_BLOCKS } from './seed-data/content'
 import { SEED_PRODUCTS } from './seed-data/products'
@@ -14,7 +17,7 @@ import { SEED_REVIEWS } from './seed-data/reviews'
 import { SEED_SETTINGS, SEED_SHIPPING_OPTIONS } from './seed-data/settings'
 import type { SeedImage, SeedProduct, SeedReview } from './seed-data/types'
 
-/** Cuántas filas de cada tipo escribió (creó o actualizó) una corrida del seed. */
+/** Cuántas filas de cada tipo dejó sembradas (creó, actualizó o ya estaban) una corrida del seed. */
 export interface SeedSummary {
   /** Líneas del catálogo. */
   categories: number
@@ -24,10 +27,20 @@ export interface SeedSummary {
   reviews: number
   /** Contenidos editables. */
   contentBlocks: number
+  /** Usuarios semilla: el admin, recién creado o el que ya estaba. */
+  users: number
 }
 
 /** Cliente dentro de la transacción del seed. */
 type Tx = Prisma.TransactionClient
+
+/** Parámetros de argon2id de las contraseñas (Ruling B-6: 19 MiB, 2 pasadas, 1 hilo). */
+const PASSWORD_HASH_OPTIONS = {
+  type: argon2id,
+  memoryCost: 19_456,
+  timeCost: 2,
+  parallelism: 1,
+} as const
 
 /** Namespace UUID v5 fijo de las reseñas del seed (elegido una vez; no cambiarlo). */
 const REVIEW_NAMESPACE = '6f1c7a52-9a4e-4d3b-8f0e-2b7d5c1e9a30'
@@ -213,20 +226,49 @@ async function seedContentAndSettings(tx: Tx): Promise<void> {
 }
 
 /**
+ * Crea el admin semilla ({@link SEED_ADMIN}) si no existe, con la contraseña hasheada con
+ * argon2id. Si ya existe no toca nada: ni la contraseña (puede haberse cambiado desde el panel),
+ * ni el rol, ni el estado.
+ *
+ * @returns Cuántos usuarios semilla quedaron en la base (siempre 1).
+ */
+async function seedAdmin(tx: Tx): Promise<number> {
+  const existing = await tx.user.findUnique({
+    where: { email: SEED_ADMIN.email },
+    select: { id: true },
+  })
+  if (existing === null) {
+    await tx.user.create({
+      data: {
+        email: SEED_ADMIN.email,
+        passwordHash: await hash(SEED_ADMIN.password, PASSWORD_HASH_OPTIONS),
+        role: 'admin',
+        status: 'active',
+      },
+    })
+  }
+  return 1
+}
+
+/**
  * Carga en la base los datos del diseño: 6 líneas, 27 productos publicados con fotos y stock,
- * 15 reseñas aprobadas, los 7 contenidos editables, los ajustes y las opciones de envío.
+ * 15 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío y el admin
+ * semilla del panel.
  *
  * Es idempotente (todo es `upsert` por `slug`, `(productId, position)`, `key`, `id = 1`,
- * `method` o el id determinístico de la reseña) y corre en una sola transacción: o queda todo o
- * nada. Al final mueve la secuencia de `products.sequence` al máximo, porque el seed inserta los
- * correlativos a mano y el próximo alta no tiene que chocar.
+ * `method` o el id determinístico de la reseña; el admin se crea solo si falta y nunca se pisa su
+ * contraseña) y corre en una sola transacción: o queda todo o nada. Al final mueve la secuencia de
+ * `products.sequence` al máximo, porque el seed inserta los correlativos a mano y el próximo alta
+ * no tiene que chocar. Las reseñas y los contenidos que crea quedan sin cliente ni editor
+ * (`customer_id` y `updated_by` en null).
  *
  * @param prisma - Cliente de Prisma conectado a una base ya migrada.
- * @returns Cuántas filas de cada tipo escribió.
+ * @returns Cuántas filas de cada tipo dejó sembradas.
  * @throws {Error} Si un producto o una reseña apunta a algo que no está en el seed, o si la base
  *   rechaza una fila (la transacción se deshace entera).
  * @example
- * const summary = await seed(prisma) // { categories: 6, products: 27, reviews: 15, contentBlocks: 7 }
+ * const summary = await seed(prisma)
+ * // { categories: 6, products: 27, reviews: 15, contentBlocks: 7, users: 1 }
  */
 export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
   return prisma.$transaction(
@@ -236,11 +278,13 @@ export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
       await tx.$queryRaw`SELECT setval(pg_get_serial_sequence('products', 'sequence'), (SELECT MAX(sequence) FROM products))`
       await seedReviews(tx)
       await seedContentAndSettings(tx)
+      const users = await seedAdmin(tx)
       return {
         categories: SEED_CATEGORIES.length,
         products: SEED_PRODUCTS.length,
         reviews: SEED_REVIEWS.length,
         contentBlocks: SEED_CONTENT_BLOCKS.length,
+        users,
       }
     },
     { timeout: TRANSACTION_TIMEOUT_MS },
@@ -268,7 +312,8 @@ async function main(): Promise<void> {
     const summary = await seed(prisma)
     process.stdout.write(
       `Seed listo: ${String(summary.categories)} categorías, ${String(summary.products)} productos, ` +
-        `${String(summary.reviews)} reseñas y ${String(summary.contentBlocks)} contenidos.\n`,
+        `${String(summary.reviews)} reseñas, ${String(summary.contentBlocks)} contenidos y ` +
+        `${String(summary.users)} usuario admin (${SEED_ADMIN.email}).\n`,
     )
   } finally {
     await prisma.$disconnect()

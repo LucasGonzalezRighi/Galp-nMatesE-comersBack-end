@@ -95,13 +95,16 @@ Todas las del plan, sin cambios salvo las anotadas.
 | `eslint-config-prettier` / `prettier` / `lefthook`                                    | 10.1.8 / 3.9.10 / 2.2.2                                           |
 | `tsx` / `yaml`                                                                        | 4.23.15 / 2.9.1                                                   |
 | `@types/node` / `@types/express`                                                      | 22.20.5 / 5.0.6                                                   |
+| `argon2` / `cookie-parser` / `@types/cookie-parser` (B3, Task 1)                      | 0.45.1 / 1.4.7 / 1.4.10                                           |
 | Imágenes Docker (compose y Testcontainers) / CI                                       | `postgres:17-alpine`, `redis:8-alpine` / `postgres:17`, `redis:8` |
 
 Fuera del plan: `ioredis`, el throttler y su storage entraron en la Task 1; `pg`, `tsx` y
 `@types/pg` en la Task 3; `pino-http` 11 es el peer de `nestjs-pino` 5.3.1. `@nestjs/config` está
 instalado pero sin uso (el `ConfigModule` es propio, con zod). Node de la máquina: 22.20.0
 (`@nestjs/cli` avisa `EBADENGINE`: pide ≥ 22.22.3; todo funciona igual). `npm audit`: 22
-vulnerabilidades moderadas transitivas, sin revisar.
+vulnerabilidades moderadas transitivas, sin revisar. En B3, `argon2` 0.45.1 es la mayor 0.45.x
+publicada (también existe `1.0.0-alpha.1`, descartada por ser prerelease) y trae binarios
+precompilados (no compila con node-gyp); `@types/cookie-parser` 1.4.10 es la última 1.4.x.
 
 ### Estado de la verificación al cierre
 

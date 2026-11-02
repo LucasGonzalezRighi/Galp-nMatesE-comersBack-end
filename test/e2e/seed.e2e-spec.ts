@@ -1,7 +1,9 @@
 import { PrismaPg } from '@prisma/adapter-pg'
+import { argon2id, hash, verify } from 'argon2'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { seed } from '../../prisma/seed'
+import { SEED_ADMIN } from '../../prisma/seed-data/admin'
 import { PrismaClient } from '../../src/generated/prisma/client'
 import { startContainers, type TestContainers } from '../support/containers'
 
@@ -17,10 +19,11 @@ async function countAll(db: PrismaClient): Promise<Record<string, number>> {
       db.inventory.count(),
       db.review.count(),
     ])
-  const [contentBlocks, settings, shippingOptions] = await Promise.all([
+  const [contentBlocks, settings, shippingOptions, users] = await Promise.all([
     db.contentBlock.count(),
     db.settings.count(),
     db.shippingOption.count(),
+    db.user.count(),
   ])
   return {
     categories,
@@ -33,6 +36,7 @@ async function countAll(db: PrismaClient): Promise<Record<string, number>> {
     contentBlocks,
     settings,
     shippingOptions,
+    users,
   }
 }
 
@@ -44,6 +48,12 @@ describe('seed', () => {
   function db(): PrismaClient {
     if (prisma === undefined) throw new Error('El cliente de Prisma no se creó en beforeAll')
     return prisma
+  }
+
+  /** El `password_hash` del admin semilla. */
+  async function adminHash(): Promise<string> {
+    const admin = await db().user.findUniqueOrThrow({ where: { email: SEED_ADMIN.email } })
+    return admin.passwordHash
   }
 
   beforeAll(async () => {
@@ -61,12 +71,21 @@ describe('seed', () => {
   it('dos corridas seguidas dejan los mismos conteos (idempotente)', async () => {
     const first = await seed(db())
     const afterFirst = await countAll(db())
+    const hashAfterFirst = await adminHash()
     const second = await seed(db())
     const afterSecond = await countAll(db())
 
-    expect(first).toEqual({ categories: 6, products: 27, reviews: 15, contentBlocks: 7 })
+    expect(first).toEqual({
+      categories: 6,
+      products: 27,
+      reviews: 15,
+      contentBlocks: 7,
+      users: 1,
+    })
     expect(second).toEqual(first)
     expect(afterSecond).toEqual(afterFirst)
+    // argon2 sala cada hash: si la segunda corrida lo hubiera recalculado, sería distinto.
+    expect(await adminHash()).toBe(hashAfterFirst)
     expect(afterFirst).toMatchObject({
       categories: 6,
       products: 27,
@@ -76,6 +95,7 @@ describe('seed', () => {
       contentBlocks: 7,
       settings: 1,
       shippingOptions: 3,
+      users: 1,
     })
   })
 
@@ -162,5 +182,34 @@ describe('seed', () => {
       ['branch', 4900],
       ['pickup', 0],
     ])
+  })
+
+  it('siembra el admin con argon2id y deja en null los vínculos de reseñas y contenidos', async () => {
+    const admin = await db().user.findUniqueOrThrow({ where: { email: SEED_ADMIN.email } })
+    expect(admin).toMatchObject({
+      email: 'admin@galponmates.com.ar',
+      role: 'admin',
+      status: 'active',
+      lastLoginAt: null,
+    })
+    expect(admin.passwordHash).toMatch(/^\$argon2id\$v=19\$m=19456,p=1,t=2\$/)
+    expect(await verify(admin.passwordHash, 'galpon-demo-2026')).toBe(true)
+    expect(await db().customer.count()).toBe(0)
+
+    expect(await db().review.count({ where: { customerId: { not: null } } })).toBe(0)
+    expect(await db().contentBlock.count({ where: { updatedBy: { not: null } } })).toBe(0)
+  })
+
+  it('una nueva corrida no pisa la contraseña que se cambió desde el panel', async () => {
+    const changed = await hash('otra-clave-2026', { type: argon2id })
+    await db().user.update({
+      where: { email: SEED_ADMIN.email },
+      data: { passwordHash: changed },
+    })
+
+    await expect(seed(db())).resolves.toMatchObject({ users: 1 })
+
+    expect(await adminHash()).toBe(changed)
+    expect(await db().user.count()).toBe(1)
   })
 })

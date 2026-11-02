@@ -3,7 +3,12 @@
 Datos planos del diseño que `prisma/seed.ts` escribe en la base (`npm run db:seed` o `npx prisma db seed`, con la base ya migrada).
 
 - `types.ts`: las formas, a mano.
+- `admin.ts`: el admin semilla del panel, **a mano** (el script de abajo no lo genera ni lo pisa).
 - `categories.ts`, `products.ts`, `reviews.ts`, `content.ts`, `settings.ts`: **generados**, no se editan a mano.
+
+## Admin semilla
+
+`admin.ts` tiene las credenciales del modo demo del front: `admin@galponmates.com.ar` / `galpon-demo-2026`. El seed crea ese usuario (`role` `admin`, `status` `active`, contraseña hasheada con argon2id: 19 MiB, 2 pasadas, 1 hilo) **solo si no existe**; si ya está, no lo toca, así una nueva corrida no pisa la contraseña que se haya cambiado desde el panel. Para volver a la de demo, borrá el usuario y corré el seed de nuevo. Las reseñas y los contenidos sembrados quedan sin cliente ni editor (`reviews.customer_id` y `content_blocks.updated_by` en `null`).
 
 ## Regenerar desde las fixtures del front
 
@@ -32,4 +37,4 @@ El script carga las fixtures con `tsx`, las pasa a términos del back y reescrib
 
 ## Idempotencia
 
-Todo es `upsert` por clave natural (`slug`, `(product_id, position)`, `key`, `id = 1`, `method`, id determinístico de la reseña) en una sola transacción: dos corridas seguidas dejan la base igual. Una corrida **pisa con los valores del diseño** las filas que siembra (no toca las demás) y no cambia el `sequence` de un producto que ya existe.
+Todo es `upsert` por clave natural (`slug`, `(product_id, position)`, `key`, `id = 1`, `method`, id determinístico de la reseña) en una sola transacción: dos corridas seguidas dejan la base igual. Una corrida **pisa con los valores del diseño** las filas que siembra (no toca las demás) y no cambia el `sequence` de un producto que ya existe. La excepción es el admin semilla: se crea si falta y nunca se actualiza.
