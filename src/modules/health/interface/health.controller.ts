@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common'
 import { HealthCheck, type HealthCheckResult, HealthCheckService } from '@nestjs/terminus'
 
+import { PrismaHealthIndicator } from '../../../shared/infrastructure/prisma/prisma.health'
 import { RedisHealthIndicator } from '../../../shared/infrastructure/redis/redis.health'
 
 /**
@@ -8,26 +9,28 @@ import { RedisHealthIndicator } from '../../../shared/infrastructure/redis/redis
  *
  * - Todo bien: HTTP 200 y `status: 'ok'`.
  * - Redis caído: HTTP 200 y `status: 'degraded'` (la caché y el rate limiting fallan abiertos).
- * - Un indicador crítico caído (Postgres, cuando se sume): HTTP 503 y `status: 'error'`.
- *
- * Por ahora solo revisa Redis: el indicador de Postgres (`SELECT 1` con `PrismaService`) lo suma
- * la ola siguiente.
+ * - Postgres caído (crítico): HTTP 503 y `status: 'error'`, aunque Redis también esté caído.
  */
 @Controller('health')
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
+    private readonly database: PrismaHealthIndicator,
     private readonly redis: RedisHealthIndicator,
   ) {}
 
   /**
    * Revisa las dependencias de la API.
    *
-   * @returns El resultado de Terminus: `status`, `info`, `error` y `details` por indicador.
+   * @returns El resultado de Terminus: `status`, `info`, `error` y `details` por indicador
+   *   (`database` y `redis`).
    */
   @Get()
   @HealthCheck()
   check(): Promise<HealthCheckResult> {
-    return this.health.check([() => this.redis.isHealthy('redis')])
+    return this.health.check([
+      () => this.database.isHealthy('database'),
+      () => this.redis.isHealthy('redis'),
+    ])
   }
 }

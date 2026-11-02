@@ -14,10 +14,12 @@ export interface TestContainers {
   databaseUrl: string
   /** URL de Redis (`redis://host:puerto`). */
   redisUrl: string
-  /** Detiene los dos contenedores (Redis, solo si sigue andando). */
+  /** Detiene los dos contenedores (cada uno, solo si sigue andando). */
   stop(): Promise<void>
   /** Detiene solo Redis, para probar la app con Redis caído (health `degraded`). */
   stopRedis(): Promise<void>
+  /** Detiene solo Postgres, para probar la app con la base caída (health 503). */
+  stopPostgres(): Promise<void>
 }
 
 /**
@@ -61,14 +63,20 @@ export async function startContainers(): Promise<TestContainers> {
     new RedisContainer(REDIS_IMAGE).start(),
   ])
   let redisRunning = true
+  let postgresRunning = true
 
   const stopRedis = async (): Promise<void> => {
     if (!redisRunning) return
     redisRunning = false
     await redis.stop()
   }
+  const stopPostgres = async (): Promise<void> => {
+    if (!postgresRunning) return
+    postgresRunning = false
+    await postgres.stop()
+  }
   const stop = async (): Promise<void> => {
-    await Promise.all([postgres.stop(), stopRedis()])
+    await Promise.all([stopPostgres(), stopRedis()])
   }
 
   const databaseUrl = postgres.getConnectionUri()
@@ -79,5 +87,5 @@ export async function startContainers(): Promise<TestContainers> {
     throw error
   }
 
-  return { databaseUrl, redisUrl: redis.getConnectionUrl(), stop, stopRedis }
+  return { databaseUrl, redisUrl: redis.getConnectionUrl(), stop, stopRedis, stopPostgres }
 }

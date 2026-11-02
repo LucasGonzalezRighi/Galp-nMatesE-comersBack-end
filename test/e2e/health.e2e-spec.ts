@@ -33,11 +33,14 @@ describe('health', () => {
     return app.getHttpServer()
   }
 
-  it('con Redis arriba responde 200 con status ok y redis up', async () => {
+  it('con Postgres y Redis arriba responde 200 con status ok, database up y redis up', async () => {
     const res = await request(server()).get('/api/v1/health')
 
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({ status: 'ok', info: { redis: { status: 'up' } } })
+    expect(res.body).toMatchObject({
+      status: 'ok',
+      info: { database: { status: 'up' }, redis: { status: 'up' } },
+    })
   })
 
   it('limita a 120 pedidos por minuto por IP y cuenta en Redis', async () => {
@@ -61,6 +64,23 @@ describe('health', () => {
     const res = await request(server()).get('/api/v1/health')
 
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({ status: 'degraded', info: { redis: { status: 'degraded' } } })
+    expect(res.body).toMatchObject({
+      status: 'degraded',
+      info: { database: { status: 'up' }, redis: { status: 'degraded' } },
+    })
+  })
+
+  // Va último: deja Postgres detenido (y Redis ya caído por el test anterior).
+  it('con Postgres caído responde 503 con status error y database down (aunque Redis siga caído)', async () => {
+    await containers?.stopPostgres()
+
+    const res = await request(server()).get('/api/v1/health')
+
+    expect(res.status).toBe(503)
+    expect(res.body).toMatchObject({
+      status: 'error',
+      error: { database: { status: 'down' } },
+    })
+    expect(JSON.stringify(res.body)).not.toContain('localhost')
   })
 })
