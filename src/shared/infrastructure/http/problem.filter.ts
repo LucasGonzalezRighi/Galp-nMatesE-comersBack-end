@@ -9,20 +9,15 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common'
 
+import { type ChangeNotice, type FieldError, isChangeKind } from '../../domain/change-notice'
 import { DomainError } from '../../domain/domain-error'
+
+// `FieldError` y `ChangeNotice` viven en `shared/domain` (el dominio los lanza en un
+// `DomainError`); se re-exportan acá para quien los importaba del filtro.
+export type { ChangeNotice, FieldError }
 
 /** `Content-Type` de todas las respuestas de error (RFC 9457). */
 export const PROBLEM_CONTENT_TYPE = 'application/problem+json'
-
-/** Error de validación de un campo (`FieldError` del contrato). */
-export interface FieldError {
-  /** Ruta del campo con puntos, por ejemplo `customer.email`. */
-  field: string
-  /** Código estable en `snake_case`, por ejemplo `too_small`. */
-  code: string
-  /** Mensaje en español para mostrarle a la persona. */
-  message: string
-}
 
 /** Cuerpo `application/problem+json` (`Problem` del contrato). */
 export interface Problem {
@@ -38,6 +33,8 @@ export interface Problem {
   instance?: string
   /** Errores por campo; solo en los 422. */
   errors?: FieldError[]
+  /** Qué cambió en el pedido; solo en los 409. */
+  changes?: ChangeNotice[]
 }
 
 /**
@@ -54,6 +51,8 @@ export interface ProblemBody {
   detail?: string
   /** Errores por campo (solo se mandan en los 422). */
   errors?: FieldError[]
+  /** Avisos de cambio (solo se mandan en los 409). */
+  changes?: ChangeNotice[]
   /** Segundos para reintentar: van en el header `Retry-After`, no en el cuerpo. */
   retryAfterSeconds?: number
 }
@@ -64,6 +63,7 @@ interface ParsedBody {
   title?: string | undefined
   detail?: string | undefined
   errors?: FieldError[] | undefined
+  changes?: ChangeNotice[] | undefined
 }
 
 /** Valores por defecto de un código HTTP. */
@@ -166,6 +166,28 @@ export function problemDefaults(status: number): StatusDefaults {
   return STATUS_DEFAULTS.get(status) ?? (status >= 500 ? SERVER_ERROR : CLIENT_ERROR)
 }
 
+/**
+ * Suma `errors` (solo en un 422) y `changes` (solo en un 409) al `Problem`, copiados.
+ *
+ * @param problem - Problema ya armado.
+ * @param details - Lo que trajo la excepción.
+ */
+function withDetails(
+  problem: Problem,
+  details: {
+    errors?: readonly FieldError[] | undefined
+    changes?: readonly ChangeNotice[] | undefined
+  },
+): Problem {
+  if (problem.status === 422 && details.errors !== undefined) {
+    problem.errors = details.errors.map((error) => ({ ...error }))
+  }
+  if (problem.status === 409 && details.changes !== undefined) {
+    problem.changes = details.changes.map((change) => ({ ...change }))
+  }
+  return problem
+}
+
 /** Lo que el filtro lee del pedido. */
 interface ProblemRequest {
   method: string
@@ -192,6 +214,20 @@ function isFieldErrors(value: unknown): value is FieldError[] {
         isRecord(item) &&
         typeof item.field === 'string' &&
         typeof item.code === 'string' &&
+        typeof item.message === 'string',
+    )
+  )
+}
+
+function isChangeNotices(value: unknown): value is ChangeNotice[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.kind === 'string' &&
+        isChangeKind(item.kind) &&
+        (item.productId === null || typeof item.productId === 'string') &&
         typeof item.message === 'string',
     )
   )
@@ -233,13 +269,13 @@ function healthReport(exception: unknown): Record<string, unknown> | undefined {
 
 /**
  * Filtro global: toda excepción sale como `application/problem+json` con la forma `Problem` del
- * contrato (`type` en `snake_case`, `title`, `status`, `detail`, `instance` y, solo en los 422,
- * `errors`).
+ * contrato (`type` en `snake_case`, `title`, `status`, `detail`, `instance`, `errors` solo en los
+ * 422 y `changes` solo en los 409).
  *
- * - `DomainError` → su `code`, `status` y `detail`.
+ * - `DomainError` → su `code`, `status`, `detail` y, si los trae, sus `errors` o `changes`.
  * - `HttpException` de Nest (incluidos el 429 del throttler y el 404 de una ruta que no existe)
  *   → el `type` y el `title` del código HTTP, y su mensaje en `detail` cuando es propio. Si el
- *   cuerpo trae `type` (ver {@link ProblemBody}), se respeta.
+ *   cuerpo trae `type` (ver {@link ProblemBody}), se respeta, con sus `errors` y `changes`.
  * - Cualquier otro error → 500 con un `detail` genérico (sin filtrar datos internos) y log
  *   `error` con el stack.
  *
@@ -288,13 +324,16 @@ export class ProblemFilter implements ExceptionFilter {
     const instance = req.originalUrl.split('?')[0] ?? req.originalUrl
     if (exception instanceof DomainError) {
       const defaults = problemDefaults(exception.status)
-      return {
-        type: exception.code,
-        title: exception.title ?? defaults.title,
-        status: exception.status,
-        detail: exception.detail,
-        instance,
-      }
+      return withDetails(
+        {
+          type: exception.code,
+          title: exception.title ?? defaults.title,
+          status: exception.status,
+          detail: exception.detail,
+          instance,
+        },
+        exception,
+      )
     }
     if (exception instanceof HttpException) {
       const status = exception.getStatus()
@@ -322,6 +361,7 @@ export class ProblemFilter implements ExceptionFilter {
         title: optionalString(response.title),
         detail: optionalString(response.detail),
         errors: isFieldErrors(response.errors) ? response.errors : undefined,
+        changes: isChangeNotices(response.changes) ? response.changes : undefined,
       }
     } else if (isRecord(response) && ('error' in response || !('statusCode' in response))) {
       // `new NotFoundException('…')` trae `error`; `new NotFoundException()` solo el texto en
@@ -333,15 +373,16 @@ export class ProblemFilter implements ExceptionFilter {
     if (status === 404 && detail === `Cannot ${req.method} ${req.originalUrl}`) {
       detail = `No existe la ruta ${req.method} ${instance}.`
     }
-    const problem: Problem = {
-      type: body.type ?? defaults.type,
-      title: body.title ?? defaults.title,
-      status,
-      detail,
-      instance,
-    }
-    if (status === 422 && body.errors !== undefined) problem.errors = body.errors
-    return problem
+    return withDetails(
+      {
+        type: body.type ?? defaults.type,
+        title: body.title ?? defaults.title,
+        status,
+        detail,
+        instance,
+      },
+      body,
+    )
   }
 
   private logError(exception: unknown, req: ProblemRequest, instance: string): void {

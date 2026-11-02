@@ -8,11 +8,14 @@ import {
   MAILER_PORT,
   type MailerPort,
 } from '../../src/modules/identity/application/ports/mailer.port'
+import { type Clock, CLOCK } from '../../src/shared/domain/clock'
 
 /** Adaptadores que un E2E puede reemplazar al armar la app. */
 export interface AppOverrides {
   /** Mailer en lugar del de log (por ejemplo, un `RecordingMailer` para leer el link). */
   mailer?: MailerPort
+  /** Reloj en lugar del `SystemClock` (por ejemplo, un `FixedClock` para vencer reservas). */
+  clock?: Clock
 }
 
 /**
@@ -26,6 +29,9 @@ export async function createApp(overrides: AppOverrides = {}): Promise<INestAppl
   const builder = Test.createTestingModule({ imports: [AppModule] })
   if (overrides.mailer !== undefined) {
     builder.overrideProvider(MAILER_PORT).useValue(overrides.mailer)
+  }
+  if (overrides.clock !== undefined) {
+    builder.overrideProvider(CLOCK).useValue(overrides.clock)
   }
   const moduleRef = await builder.compile()
   const app = moduleRef.createNestApplication<INestApplication<Server>>()

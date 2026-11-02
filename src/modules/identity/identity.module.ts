@@ -58,7 +58,8 @@ import { MeController } from './interface/me.controller'
  * `SharedModule`.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Las rutas son las de
- * `/auth`, `/me` y `/admin/auth` del contrato. Exporta {@link GetMeQuery} (la usa `orders` en B4).
+ * `/auth`, `/me` y `/admin/auth` del contrato. Exporta {@link GetMeQuery} y `CUSTOMER_REPOSITORY`
+ * (los usa `orders` en B4 para el dueño del pedido).
  */
 @Module({
   controllers: [AuthController, MeController, AdminAuthController],
@@ -219,6 +220,6 @@ import { MeController } from './interface/me.controller'
       inject: [USER_REPOSITORY, PASSWORD_HASHER],
     },
   ],
-  exports: [GetMeQuery],
+  exports: [GetMeQuery, CUSTOMER_REPOSITORY],
 })
 export class IdentityModule {}

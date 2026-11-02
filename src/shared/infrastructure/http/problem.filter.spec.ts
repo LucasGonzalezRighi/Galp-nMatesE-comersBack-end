@@ -1,5 +1,6 @@
 import {
   type ArgumentsHost,
+  ConflictException,
   HttpException,
   NotFoundException,
   ServiceUnavailableException,
@@ -210,6 +211,86 @@ describe('ProblemFilter', () => {
 
     expect(res.body).toMatchObject({ type: 'slug_taken', title: 'El slug ya está en uso' })
     expect(res.body).not.toHaveProperty('errors')
+  })
+
+  it('manda los changes de un DomainError 409 (stock_changed del contrato)', () => {
+    const changes = [
+      { kind: 'stock' as const, productId: 'p1', message: 'Quedan 2 unidades de Mate Imperial.' },
+    ]
+    const { res } = catchWith(
+      new DomainError(
+        'stock_changed',
+        409,
+        'El pedido cambió desde que armaste el resumen. Revisalo antes de pagar.',
+        'El stock cambió',
+        { changes },
+      ),
+      'POST',
+      '/api/v1/orders',
+    )
+
+    expect(res.statusCode).toBe(409)
+    expect(res.body).toEqual({
+      type: 'stock_changed',
+      title: 'El stock cambió',
+      status: 409,
+      detail: 'El pedido cambió desde que armaste el resumen. Revisalo antes de pagar.',
+      instance: '/api/v1/orders',
+      changes,
+    })
+  })
+
+  it('respeta los changes del cuerpo de una ConflictException', () => {
+    const changes = [
+      { kind: 'price', productId: null, message: 'El total cambió de $46.499 a $49.499.' },
+    ]
+    const { res } = catchWith(
+      new ConflictException({ type: 'total_changed', title: 'El total cambió', changes }),
+    )
+
+    expect(res.statusCode).toBe(409)
+    expect(res.body).toMatchObject({ type: 'total_changed', title: 'El total cambió', changes })
+  })
+
+  it('no incluye changes inválidos ni fuera de un 409', () => {
+    const invalid = catchWith(
+      new ConflictException({ type: 'stock_changed', changes: [{ kind: 'stock' }] }),
+    )
+    const outside = catchWith(
+      new HttpException(
+        { type: 'validation_error', changes: [{ kind: 'stock', productId: 'p1', message: 'x' }] },
+        422,
+      ),
+    )
+
+    expect(invalid.res.body).not.toHaveProperty('changes')
+    expect(outside.res.body).not.toHaveProperty('changes')
+  })
+
+  it('manda los errors de un DomainError 422', () => {
+    const errors = [
+      {
+        field: 'shipping.method',
+        code: 'unavailable',
+        message: 'Ese método de envío no está disponible.',
+      },
+    ]
+    const { res } = catchWith(
+      new DomainError(
+        'validation_error',
+        422,
+        'Ese método de envío ya no está disponible. Volvé al paso de envío y elegí otro.',
+        undefined,
+        { errors },
+      ),
+    )
+
+    expect(res.statusCode).toBe(422)
+    expect(res.body).toMatchObject({
+      type: 'validation_error',
+      title: 'Los datos no son válidos',
+      errors,
+    })
   })
 
   it('deja pasar el informe 503 de Terminus (/health) con su formato y sin loguear', () => {

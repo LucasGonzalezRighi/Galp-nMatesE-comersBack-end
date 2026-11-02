@@ -17,6 +17,26 @@ export const CATALOG_CACHE_TTL_SECONDS = 60
 /** Prefijo de las claves de productos en la caché. */
 export const PRODUCT_CACHE_PREFIX = 'catalog:products'
 
+/**
+ * Clave de la ficha de un producto en la caché.
+ *
+ * @param slug - Slug del producto.
+ * @returns `catalog:products:slug:<slug>` (la borra quien cambia su stock, como `orders`).
+ */
+export function productSlugCacheKey(slug: string): string {
+  return `${PRODUCT_CACHE_PREFIX}:slug:${slug}`
+}
+
+/**
+ * Clave de los productos publicados de un grupo (piezas del armador de kits) en la caché.
+ *
+ * @param group - Grupo del producto.
+ * @returns `catalog:products:group:<group>` (la borra quien cambia el stock de uno de ellos).
+ */
+export function productGroupCacheKey(group: ProductGroup): string {
+  return `${PRODUCT_CACHE_PREFIX}:group:${group}`
+}
+
 /** Página cacheada: los productos van como datos planos y se vuelven a crear al leer. */
 interface CachedProductList {
   items: ProductProps[]
@@ -44,6 +64,10 @@ function listKey(filter: ProductFilter): string {
 /**
  * Decora el repositorio de productos con la caché (60 s, claves `catalog:products:*`). La caché
  * falla abierta: con Redis caído cada lectura va a Postgres.
+ *
+ * Los listados filtrados por `ids` no se cachean: la tienda los usa para conciliar las cantidades
+ * del carrito con el stock, que cambia con cada reserva (y sus claves no se pueden borrar sin
+ * enumerarlas).
  */
 @Injectable()
 export class CachedProductRepository implements ProductRepository {
@@ -58,6 +82,7 @@ export class CachedProductRepository implements ProductRepository {
 
   /** {@inheritDoc ProductRepository.list} */
   async list(filter: ProductFilter): Promise<ProductList> {
+    if (filter.ids !== undefined) return this.inner.list(filter)
     const cached = await readThrough<CachedProductList>(
       this.cache,
       listKey(filter),
@@ -74,7 +99,7 @@ export class CachedProductRepository implements ProductRepository {
   async findBySlug(slug: string): Promise<Product | null> {
     const props = await readThrough<ProductProps | null>(
       this.cache,
-      `${PRODUCT_CACHE_PREFIX}:slug:${slug}`,
+      productSlugCacheKey(slug),
       CATALOG_CACHE_TTL_SECONDS,
       async () => (await this.inner.findBySlug(slug))?.toProps() ?? null,
     )
@@ -85,7 +110,7 @@ export class CachedProductRepository implements ProductRepository {
   async listPublishedByGroup(group: ProductGroup): Promise<Product[]> {
     const items = await readThrough<ProductProps[]>(
       this.cache,
-      `${PRODUCT_CACHE_PREFIX}:group:${group}`,
+      productGroupCacheKey(group),
       CATALOG_CACHE_TTL_SECONDS,
       async () =>
         (await this.inner.listPublishedByGroup(group)).map((product) => product.toProps()),

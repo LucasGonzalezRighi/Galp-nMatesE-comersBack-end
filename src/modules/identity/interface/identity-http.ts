@@ -1,4 +1,6 @@
-import type { SessionRecord } from '../../../shared/application/ports/session.port'
+// `customerIdOf` y `adminUserIdOf` se mudaron a `src/shared/infrastructure/auth/session-ids.ts`
+// (también los usa `orders`); se re-exportan para no tocar los controladores de identidad.
+export { adminUserIdOf, customerIdOf } from '../../../shared/infrastructure/auth/session-ids'
 
 /**
  * Límite por IP de las escrituras de autenticación (registro, inicio de sesión, recuperación y
@@ -21,32 +23,4 @@ export interface CookieResponse {
 export interface CsrfTokenView {
   /** Token que va en `X-CSRF-Token`. */
   csrfToken: string
-}
-
-/**
- * Cliente de una sesión de cliente (la que dejó `CustomerSessionGuard` o `CustomerCsrfGuard`).
- *
- * @param session - Sesión del pedido.
- * @returns El id del cliente.
- * @throws {Error} En español, si la sesión no tiene cliente (error de programación: sale como 500).
- */
-export function customerIdOf(session: SessionRecord): string {
-  if (session.kind !== 'customer' || session.customerId === null) {
-    throw new Error('La ruta necesita una sesión de cliente con su cliente asociado')
-  }
-  return session.customerId
-}
-
-/**
- * Usuario de una sesión de admin (la que dejó `AdminSessionGuard` o `AdminCsrfGuard`).
- *
- * @param session - Sesión del pedido.
- * @returns El id del usuario.
- * @throws {Error} En español, si la sesión no es de admin (error de programación: sale como 500).
- */
-export function adminUserIdOf(session: SessionRecord): string {
-  if (session.kind !== 'admin' || session.userId === null) {
-    throw new Error('La ruta necesita una sesión de admin con su usuario')
-  }
-  return session.userId
 }

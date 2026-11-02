@@ -25,17 +25,18 @@ describe('buildPinoHttpOptions', () => {
     expect(buildPinoHttpOptions({ ...BASE, NODE_ENV: 'test' }).level).toBe('silent')
   })
 
-  it('enmascara cookies, Authorization, Referer y el token CSRF', () => {
+  it('enmascara cookies, Authorization, Referer, el token CSRF y el token del pedido', () => {
     expect(buildPinoHttpOptions(BASE).redact).toEqual([
       'req.headers.cookie',
       'req.headers.authorization',
       'req.headers.referer',
       'req.headers["x-csrf-token"]',
+      'req.headers["x-order-token"]',
       'res.headers["set-cookie"]',
     ])
   })
 
-  it('no deja en el log el token de recuperación que llega en el Referer ni el token CSRF', () => {
+  it('no deja en el log el token de recuperación del Referer, el token CSRF ni el del pedido', () => {
     const lines: string[] = []
     const logger = pino(
       { level: 'info', redact: buildPinoHttpOptions(BASE).redact ?? [] },
@@ -48,6 +49,7 @@ describe('buildPinoHttpOptions', () => {
           headers: {
             referer: 'http://localhost:3000/cuenta/restablecer?token=rt_secreto',
             'x-csrf-token': 'csrf-secreto',
+            'x-order-token': 'ot_secreto',
             cookie: '__Host-galpon_session=sesion-secreta',
           },
         },
@@ -59,6 +61,7 @@ describe('buildPinoHttpOptions', () => {
     expect(output).toContain('request completed')
     expect(output).not.toContain('rt_secreto')
     expect(output).not.toContain('csrf-secreto')
+    expect(output).not.toContain('ot_secreto')
     expect(output).not.toContain('sesion-secreta')
   })
 })

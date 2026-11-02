@@ -1,3 +1,5 @@
+import { type ChangeNotice, type FieldError, isChangeKind } from './change-notice'
+
 /** Formato de `code`: identificador estable en `snake_case` (el `type` del `Problem`). */
 const CODE_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/
 
@@ -8,6 +10,47 @@ export interface DomainErrorOptions {
    * header `Retry-After` (por ejemplo, en un 429 por intentos fallidos).
    */
   retryAfterSeconds?: number
+  /**
+   * Qué cambió en el pedido (`changes` del `Problem`): el `ProblemFilter` los manda en los 409
+   * (por ejemplo `stock_changed`).
+   */
+  changes?: readonly ChangeNotice[]
+  /** Errores por campo (`errors` del `Problem`): el `ProblemFilter` los manda en los 422. */
+  errors?: readonly FieldError[]
+}
+
+/** Texto no vacío (sin contar los espacios). */
+function filled(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+/**
+ * Copia los avisos de cambio después de validarlos.
+ *
+ * @throws {TypeError} En español, si un aviso no tiene un tipo del contrato o un mensaje.
+ */
+function copyChanges(changes: readonly ChangeNotice[]): readonly ChangeNotice[] {
+  for (const change of changes) {
+    const productOk = change.productId === null || filled(change.productId)
+    if (!isChangeKind(change.kind) || !productOk || !filled(change.message)) {
+      throw new TypeError('Cada aviso de cambio necesita un tipo del contrato y un mensaje')
+    }
+  }
+  return changes.map((change) => ({ ...change }))
+}
+
+/**
+ * Copia los errores por campo después de validarlos.
+ *
+ * @throws {TypeError} En español, si a un error le falta `field`, `code` o `message`.
+ */
+function copyErrors(errors: readonly FieldError[]): readonly FieldError[] {
+  for (const error of errors) {
+    if (!filled(error.field) || !filled(error.code) || !filled(error.message)) {
+      throw new TypeError('Cada error de campo necesita field, code y message')
+    }
+  }
+  return errors.map((error) => ({ ...error }))
 }
 
 /**
@@ -16,6 +59,11 @@ export interface DomainErrorOptions {
  *
  * @example
  * throw new DomainError('stock_changed', 409, 'Un producto del carrito ya no tiene stock.')
+ *
+ * @example
+ * throw new DomainError('stock_changed', 409, detail, 'El stock cambió', {
+ *   changes: [{ kind: 'stock', productId, message: 'Mate Imperial se agotó.' }],
+ * })
  */
 export class DomainError extends Error {
   /** Identificador estable del error, en `snake_case` (por ejemplo `stock_changed`). */
@@ -28,14 +76,19 @@ export class DomainError extends Error {
   readonly title: string | undefined
   /** Segundos para reintentar (header `Retry-After`); `undefined` si no aplica. */
   readonly retryAfterSeconds: number | undefined
+  /** Avisos de cambio (`changes` de un 409); `undefined` si no aplica. */
+  readonly changes: readonly ChangeNotice[] | undefined
+  /** Errores por campo (`errors` de un 422); `undefined` si no aplica. */
+  readonly errors: readonly FieldError[] | undefined
 
   /**
    * @param code - Identificador en `snake_case`.
    * @param status - Código HTTP de error, entero entre 400 y 599.
    * @param detail - Explicación en español, no vacía.
    * @param title - Resumen corto opcional, en español.
-   * @param options - Datos opcionales, como `retryAfterSeconds`.
-   * @throws {TypeError} En español, si `code` no es `snake_case` o `detail` está vacío.
+   * @param options - Datos opcionales: `retryAfterSeconds`, `changes` y `errors` (se copian).
+   * @throws {TypeError} En español, si `code` no es `snake_case`, `detail` está vacío o un aviso
+   *   de cambio o un error de campo está incompleto.
    * @throws {RangeError} En español, si `status` no es un código HTTP de error o
    *   `retryAfterSeconds` no es un entero positivo.
    */
@@ -68,6 +121,8 @@ export class DomainError extends Error {
         `retryAfterSeconds tiene que ser un entero positivo (llegó ${String(retryAfterSeconds)})`,
       )
     }
+    const changes = options.changes === undefined ? undefined : copyChanges(options.changes)
+    const errors = options.errors === undefined ? undefined : copyErrors(options.errors)
     super(detail)
     this.name = 'DomainError'
     this.code = code
@@ -75,5 +130,7 @@ export class DomainError extends Error {
     this.detail = detail
     this.title = title
     this.retryAfterSeconds = retryAfterSeconds
+    this.changes = changes
+    this.errors = errors
   }
 }

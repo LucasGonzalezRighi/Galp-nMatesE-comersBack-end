@@ -8,13 +8,15 @@ import { ENV, type Env } from '../../../config/env'
 /**
  * Rutas que pino reemplaza por `[Redacted]`: cookies de sesión y tokens nunca llegan a los logs.
  * `Referer` se tapa entero porque, desde `/cuenta/restablecer?token=…`, la tienda reenvía al back
- * la URL con el token de recuperación; `X-CSRF-Token` es el secreto ligado a la sesión.
+ * la URL con el token de recuperación; `X-CSRF-Token` es el secreto ligado a la sesión y
+ * `X-Order-Token` abre un pedido sin sesión.
  */
 const REDACTED_PATHS = [
   'req.headers.cookie',
   'req.headers.authorization',
   'req.headers.referer',
   'req.headers["x-csrf-token"]',
+  'req.headers["x-order-token"]',
   'res.headers["set-cookie"]',
 ]
 

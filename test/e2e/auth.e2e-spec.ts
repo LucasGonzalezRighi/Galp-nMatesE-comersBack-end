@@ -8,6 +8,16 @@ import { SEED_ADMIN } from '../../prisma/seed-data/admin'
 import { PrismaService } from '../../src/shared/infrastructure/prisma/prisma.service'
 import { createApp } from '../support/app'
 import { startContainers, type TestContainers } from '../support/containers'
+import {
+  call as httpCall,
+  type CallOptions,
+  firstError,
+  type HttpMethod,
+  type Jar,
+  newJar,
+  refreshCsrf as httpRefreshCsrf,
+  setCookies,
+} from '../support/http'
 import { RecordingMailer } from '../support/identity'
 
 /** Contraseña de la cuenta de prueba y la que elige al recuperarla. */
@@ -32,42 +42,6 @@ const HOME = {
 /** `Set-Cookie` exacto de una sesión de cliente nueva (id de 64 hex, 30 días). */
 const CUSTOMER_COOKIE =
   /^__Host-galpon_session=[0-9a-f]{64}; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000$/
-
-/** Métodos que usa el flujo. */
-type Method = 'get' | 'post' | 'patch' | 'delete'
-
-/**
- * Lo que un navegador guarda entre pedidos: la cookie de sesión (`nombre=valor`) y el último token
- * CSRF que le dio el back.
- */
-interface Jar {
-  cookie: string | null
-  csrf: string | null
-}
-
-/** Opciones de un pedido del flujo. */
-interface CallOptions {
-  /** Cuerpo JSON. */
-  body?: object
-  /** `false` para no mandar `X-CSRF-Token` aunque el jar tenga uno. */
-  csrf?: boolean
-}
-
-function newJar(): Jar {
-  return { cookie: null, csrf: null }
-}
-
-/** `Set-Cookie` de la respuesta como lista. */
-function setCookies(response: request.Response): string[] {
-  const header: unknown = response.headers['set-cookie']
-  return Array.isArray(header) ? (header as string[]) : []
-}
-
-/** Primer error por campo de una respuesta 422 (`errors[0]` del `Problem`). */
-function firstError(response: request.Response): unknown {
-  const { errors } = response.body as { errors?: unknown[] }
-  return errors?.[0]
-}
 
 describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)', () => {
   let containers: TestContainers | undefined
@@ -104,33 +78,19 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
     return app.getHttpServer()
   }
 
-  /**
-   * Hace un pedido como el navegador del jar: manda su cookie y su CSRF, y guarda la cookie que
-   * llegue en `Set-Cookie` (con `Max-Age=0`, la borra).
-   */
-  async function call(
+  /** `call` de `test/support/http.ts` contra esta app. */
+  function call(
     jar: Jar,
-    method: Method,
+    method: HttpMethod,
     path: string,
-    options: CallOptions = {},
+    options?: CallOptions,
   ): Promise<request.Response> {
-    let pending = request(server())[method](`/api/v1${path}`)
-    if (jar.cookie !== null) pending = pending.set('Cookie', jar.cookie)
-    if (options.csrf !== false && jar.csrf !== null) pending = pending.set('X-CSRF-Token', jar.csrf)
-    const response = options.body === undefined ? await pending : await pending.send(options.body)
-    for (const header of setCookies(response)) {
-      const [pair = ''] = header.split(';')
-      jar.cookie = header.endsWith('Max-Age=0') ? null : pair
-    }
-    return response
+    return httpCall(server(), jar, method, path, options)
   }
 
-  /** Pide el CSRF de la tienda (como hace el front al cargar y después de cada login/logout). */
-  async function refreshCsrf(jar: Jar): Promise<request.Response> {
-    const response = await call(jar, 'get', '/auth/csrf')
-    expect(response.status).toBe(200)
-    jar.csrf = (response.body as { csrfToken: string }).csrfToken
-    return response
+  /** `refreshCsrf` de `test/support/http.ts` contra esta app. */
+  function refreshCsrf(jar: Jar): Promise<request.Response> {
+    return httpRefreshCsrf(server(), jar)
   }
 
   describe('cliente: CSRF, registro, cuenta, libreta y cierre de sesión', () => {

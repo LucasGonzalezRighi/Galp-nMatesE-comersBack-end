@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CachePort } from '../../../shared/application/ports/cache.port'
 import { Product } from '../domain/product.entity'
 import type { ProductFilter, ProductRepository } from '../application/ports/product.repository.port'
-import { CATALOG_CACHE_TTL_SECONDS, CachedProductRepository } from './cached-product.repository'
+import {
+  CATALOG_CACHE_TTL_SECONDS,
+  CachedProductRepository,
+  productGroupCacheKey,
+  productSlugCacheKey,
+} from './cached-product.repository'
 
 const PRODUCT = Product.create({
   id: 'p1',
@@ -21,19 +26,20 @@ const PRODUCT = Product.create({
   rating: { average: 4.5, count: 2 },
 })
 
-/** Caché en memoria que anota cada `set`. */
+/** Caché en memoria que anota cada `get` y cada `set`. */
 function memoryCache() {
   const store = new Map<string, unknown>()
+  const get = vi.fn((key: string): unknown => store.get(key) ?? null)
   const set = vi.fn<CachePort['set']>((key, value) => {
     store.set(key, JSON.parse(JSON.stringify(value)))
     return Promise.resolve()
   })
   const cache: CachePort = {
-    get: <T>(key: string) => Promise.resolve((store.get(key) as T | undefined) ?? null),
+    get: <T>(key: string) => Promise.resolve(get(key) as T | null),
     set,
     del: () => Promise.resolve(),
   }
-  return { cache, set }
+  return { cache, get, set }
 }
 
 /** Caché caída: nunca encuentra nada y no guarda nada (como `RedisCacheAdapter` sin Redis). */
@@ -76,6 +82,28 @@ describe('CachedProductRepository', () => {
     expect(ttl).toBe(CATALOG_CACHE_TTL_SECONDS)
     expect(CATALOG_CACHE_TTL_SECONDS).toBe(60)
     expect(set.mock.calls[1]?.[0]).not.toBe(key)
+  })
+
+  it('no cachea los listados por ids (la tienda concilia el stock con ellos)', async () => {
+    const inner = innerRepository()
+    const { cache, get, set } = memoryCache()
+    const repository = new CachedProductRepository(inner, cache)
+    const byIds: ProductFilter = { ...FILTER, group: undefined, ids: [PRODUCT.id] }
+
+    await repository.list(byIds)
+    const again = await repository.list(byIds)
+
+    expect(again.items.map(({ id }) => id)).toEqual(['p1'])
+    expect(inner.list).toHaveBeenCalledTimes(2)
+    expect(get).not.toHaveBeenCalled()
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it('expone las claves de la ficha y del grupo para invalidarlas', () => {
+    expect(productSlugCacheKey('mate-imperial-premium')).toBe(
+      'catalog:products:slug:mate-imperial-premium',
+    )
+    expect(productGroupCacheKey('bombilla')).toBe('catalog:products:group:bombilla')
   })
 
   it('cachea la ficha por slug y no guarda los que no existen', async () => {
