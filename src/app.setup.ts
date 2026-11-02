@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common'
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface'
+import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { Logger } from 'nestjs-pino'
 
@@ -24,7 +25,8 @@ export function buildCorsOptions(env: Pick<Env, 'ADMIN_ORIGIN'>): CorsOptions {
 
 /**
  * Aplica la configuración que comparten `main.ts` y los E2E (`test/support/app.ts`), para no
- * duplicarla: logger pino para los logs de Nest, prefijo `/api/v1`, cabeceras de seguridad con
+ * duplicarla: logger pino para los logs de Nest, prefijo `/api/v1`, cookies parseadas en
+ * `req.cookies` (`cookie-parser`, para los guards de sesión), cabeceras de seguridad con
  * `helmet`, CORS solo para el admin (`buildCorsOptions`), errores `application/problem+json`
  * (`ProblemFilter`), validación global de DTOs (422 con `errors[]`) y hooks de apagado ordenado
  * (cierran conexiones con `SIGTERM`/`SIGINT`).
@@ -34,6 +36,7 @@ export function buildCorsOptions(env: Pick<Env, 'ADMIN_ORIGIN'>): CorsOptions {
 export function setupApp(app: INestApplication): void {
   app.useLogger(app.get(Logger))
   app.setGlobalPrefix(API_PREFIX)
+  app.use(cookieParser())
   app.use(helmet())
   app.enableCors(buildCorsOptions(app.get<Env>(ENV)))
   app.useGlobalFilters(new ProblemFilter())

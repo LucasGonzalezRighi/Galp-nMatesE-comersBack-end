@@ -54,6 +54,8 @@ export interface ProblemBody {
   detail?: string
   /** Errores por campo (solo se mandan en los 422). */
   errors?: FieldError[]
+  /** Segundos para reintentar: van en el header `Retry-After`, no en el cuerpo. */
+  retryAfterSeconds?: number
 }
 
 /** Lo que el filtro rescata del cuerpo de una `HttpException`. */
@@ -200,6 +202,23 @@ function optionalString(value: unknown): string | undefined {
 }
 
 /**
+ * Segundos de `Retry-After` que trae la excepción: `DomainError.retryAfterSeconds` o
+ * `retryAfterSeconds` en el cuerpo de una `HttpException` (ver {@link ProblemBody}). Solo
+ * enteros positivos.
+ */
+function retryAfterOf(exception: unknown): number | undefined {
+  let seconds: unknown
+  if (exception instanceof DomainError) seconds = exception.retryAfterSeconds
+  else if (exception instanceof HttpException) {
+    const response = exception.getResponse()
+    if (isRecord(response)) seconds = response.retryAfterSeconds
+  }
+  return typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0
+    ? seconds
+    : undefined
+}
+
+/**
  * El 503 de `@nestjs/terminus` (`/health` con Postgres caído) trae su propio informe
  * (`{ status: 'error', info, error, details }`): sale tal cual, porque `/health` no está en el
  * contrato y las sondas leen ese formato. No se loguea: la sonda lo pide a cada rato.
@@ -223,6 +242,9 @@ function healthReport(exception: unknown): Record<string, unknown> | undefined {
  *   cuerpo trae `type` (ver {@link ProblemBody}), se respeta.
  * - Cualquier otro error → 500 con un `detail` genérico (sin filtrar datos internos) y log
  *   `error` con el stack.
+ *
+ * Si la excepción trae `retryAfterSeconds` (`DomainError` o {@link ProblemBody}), se manda el
+ * header `Retry-After` con esos segundos.
  *
  * Única excepción: el informe 503 de Terminus en `/health`, que sale con su formato.
  */
@@ -257,6 +279,8 @@ export class ProblemFilter implements ExceptionFilter {
     if (res.headersSent === true) return
     res.status(problem.status)
     res.setHeader('Content-Type', PROBLEM_CONTENT_TYPE)
+    const retryAfter = retryAfterOf(exception)
+    if (retryAfter !== undefined) res.setHeader('Retry-After', String(retryAfter))
     res.json(problem)
   }
 

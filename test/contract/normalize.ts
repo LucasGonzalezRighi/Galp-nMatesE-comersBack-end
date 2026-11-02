@@ -21,18 +21,41 @@ export interface NormalizedParameter {
   schema: unknown
 }
 
+/** Cuerpo de una operación reducido a lo que se compara. */
+export interface NormalizedRequestBody {
+  /** `required` explícito, o `false` si no está (el default de OpenAPI). */
+  required: boolean
+  /** Esquema normalizado por tipo de contenido (`application/json`, …). */
+  content: Record<string, unknown>
+}
+
+/** Esquema de seguridad reducido a lo que se compara: `type`, `in` y `name`. */
+export interface NormalizedSecurityScheme {
+  type?: string
+  in?: string
+  name?: string
+}
+
 /** Operación reducida a lo que se compara contra el contrato. */
 export interface NormalizedOperation {
   /** Parámetros de la ruta y de la operación, con `$ref` resueltos, ordenados por `in` y `name`. */
   parameters: NormalizedParameter[]
+  /**
+   * Requisitos de seguridad: cada entrada es la lista ordenada de los esquemas exigidos juntos, y
+   * las entradas (alternativas) van ordenadas. Sin `security` en la operación vale el del
+   * documento y, si tampoco hay, `[]` (operación pública).
+   */
+  security: string[][]
+  /** Cuerpo de la operación, o `null` si no tiene. */
+  requestBody: NormalizedRequestBody | null
   /** Códigos de respuesta ordenados (`'200'`, `'404'`, …). */
   responses: string[]
   /** Esquemas de las respuestas 2xx, por código y tipo de contenido. */
   success: Record<string, Record<string, unknown>>
   /**
-   * Esquemas de `components.schemas` alcanzables desde los parámetros y las respuestas 2xx, por
-   * nombre (`null` si el `$ref` apunta a uno que no existe). En Swagger el nombre es el de la
-   * clase del DTO (o el de `@ApiSchema`), así que tiene que coincidir con el del contrato.
+   * Esquemas de `components.schemas` alcanzables desde los parámetros, el cuerpo y las respuestas
+   * 2xx, por nombre (`null` si el `$ref` apunta a uno que no existe). En Swagger el nombre es el
+   * de la clase del DTO (o el de `@ApiSchema`), así que tiene que coincidir con el del contrato.
    */
   schemas: Record<string, unknown>
 }
@@ -94,12 +117,14 @@ export function loadContract(path: string): ContractDocument {
 
 /**
  * Reduce un documento OpenAPI (el contrato o el que genera Swagger) a lo que importa para
- * compararlos: por cada operación, sus parámetros (`name`, `in`, `required`, `schema`), sus
- * códigos de respuesta y los esquemas de sus respuestas 2xx.
+ * compararlos: por cada operación, sus parámetros (`name`, `in`, `required`, `schema`), su
+ * `security`, su cuerpo (`required` y el esquema por tipo de contenido), sus códigos de respuesta
+ * y los esquemas de sus respuestas 2xx.
  *
  * Ordena las claves, quita `description`, `summary`, `example`, `examples`, `deprecated`,
- * `operationId`, `tags` y `x-*`, resuelve los `$ref` de parámetros y respuestas, reemplaza los de
- * esquemas por su nombre (y suma esos esquemas en `schemas`) y aplana los `allOf` de un elemento.
+ * `operationId`, `tags` y `x-*`, resuelve los `$ref` de parámetros, cuerpos y respuestas,
+ * reemplaza los de esquemas por su nombre (y suma esos esquemas en `schemas`) y aplana los
+ * `allOf` de un elemento.
  *
  * @param doc - Documento OpenAPI 3.x.
  * @returns Las operaciones normalizadas, por clave `MÉTODO /ruta`.
@@ -124,6 +149,8 @@ export function normalizeOpenApi(doc: OpenAPIObject | ContractDocument): Normali
       const refs = new Set<string>()
       result[key] = {
         parameters: normalizeParameters(root, key, pathItem, operation, refs),
+        security: normalizeSecurity(key, operation.security ?? root.security),
+        requestBody: normalizeRequestBody(root, operation, refs),
         ...normalizeResponses(root, operation, refs),
         schemas: collectSchemas(refs, schemas),
       }
@@ -155,12 +182,18 @@ export function diffOperation(
   const extra = actual.responses.filter((code) => !expected.responses.includes(code))
   if (missing.length > 0) lines.push(`${key} › respuestas: faltan ${missing.join(', ')}`)
   if (extra.length > 0) lines.push(`${key} › respuestas: sobran ${extra.join(', ')}`)
+  if (JSON.stringify(expected.security) !== JSON.stringify(actual.security)) {
+    lines.push(
+      `${key} › security: contrato ${show(expected.security)} · Swagger ${show(actual.security)}`,
+    )
+  }
   lines.push(
     ...diffValues(
       indexParameters(expected.parameters),
       indexParameters(actual.parameters),
       `${key} › parámetros`,
     ),
+    ...diffValues(expected.requestBody, actual.requestBody, `${key} › cuerpo`),
     ...diffValues(expected.success, actual.success, `${key} › respuesta`),
     ...diffValues(expected.schemas, actual.schemas, `${key} › esquema`),
   )
@@ -231,20 +264,80 @@ function normalizeResponses(
   const success: Record<string, Record<string, unknown>> = {}
   for (const code of codes.filter((candidate) => candidate.startsWith('2'))) {
     const response = resolveRef(root, responses[code])
-    const content = isRecord(response) && isRecord(response.content) ? response.content : {}
-    success[code] = Object.fromEntries(
-      Object.keys(content)
-        .sort()
-        .map((mediaType) => {
-          const media = content[mediaType]
-          return [
-            mediaType,
-            normalizeSchema(isRecord(media) ? media.schema : undefined, refs) ?? null,
-          ]
-        }),
-    )
+    success[code] = normalizeContent(isRecord(response) ? response.content : undefined, refs)
   }
   return { responses: codes, success }
+}
+
+/** Esquema normalizado por tipo de contenido (`content` de una respuesta o de un cuerpo). */
+function normalizeContent(value: unknown, refs: Set<string>): Record<string, unknown> {
+  const content = isRecord(value) ? value : {}
+  return Object.fromEntries(
+    Object.keys(content)
+      .sort()
+      .map((mediaType) => {
+        const media = content[mediaType]
+        return [
+          mediaType,
+          normalizeSchema(isRecord(media) ? media.schema : undefined, refs) ?? null,
+        ]
+      }),
+  )
+}
+
+function normalizeRequestBody(
+  root: Record<string, unknown>,
+  operation: Record<string, unknown>,
+  refs: Set<string>,
+): NormalizedRequestBody | null {
+  const body = resolveRef(root, operation.requestBody)
+  if (!isRecord(body)) return null
+  return { required: body.required === true, content: normalizeContent(body.content, refs) }
+}
+
+/**
+ * `security` de una operación: cada requisito (objeto `{ esquema: scopes }`) pasa a la lista
+ * ordenada de sus esquemas, y los requisitos se ordenan entre sí (son alternativas).
+ */
+function normalizeSecurity(key: string, value: unknown): string[][] {
+  if (value === undefined) return []
+  if (!isArray(value)) throw new Error(`${key} tiene un "security" que no es una lista`)
+  return value
+    .map((requirement) => {
+      if (!isRecord(requirement)) {
+        throw new Error(`${key} tiene un requisito de "security" que no es un objeto`)
+      }
+      return Object.keys(requirement).sort()
+    })
+    .sort((left, right) => left.join(' ').localeCompare(right.join(' ')))
+}
+
+/**
+ * Reduce los `components.securitySchemes` de un documento a `type`, `in` y `name` por nombre de
+ * esquema (sin descripciones), para comparar los del contrato con los que declara Swagger.
+ *
+ * @param doc - Documento OpenAPI 3.x.
+ * @returns Los esquemas normalizados, ordenados por nombre (vacío si no declara ninguno).
+ */
+export function normalizeSecuritySchemes(
+  doc: OpenAPIObject | ContractDocument,
+): Record<string, NormalizedSecurityScheme> {
+  const root: unknown = doc
+  const components = isRecord(root) && isRecord(root.components) ? root.components : {}
+  const schemes = isRecord(components.securitySchemes) ? components.securitySchemes : {}
+  return Object.fromEntries(
+    Object.keys(schemes)
+      .sort()
+      .map((name) => {
+        const scheme = resolveRef(isRecord(root) ? root : {}, schemes[name])
+        const normalized: NormalizedSecurityScheme = {}
+        for (const field of ['in', 'name', 'type'] as const) {
+          const fieldValue = isRecord(scheme) ? scheme[field] : undefined
+          if (typeof fieldValue === 'string') normalized[field] = fieldValue
+        }
+        return [name, normalized]
+      }),
+  )
 }
 
 function normalizeSchema(schema: unknown, refs: Set<string>): unknown {

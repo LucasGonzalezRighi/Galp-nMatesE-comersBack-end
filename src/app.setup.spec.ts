@@ -1,4 +1,4 @@
-import { Controller, Get, type INestApplication } from '@nestjs/common'
+import { Controller, Get, type INestApplication, Req } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import type { Server } from 'node:http'
 import request from 'supertest'
@@ -14,6 +14,12 @@ class PingController {
   @Get()
   ping(): { ok: boolean } {
     return { ok: true }
+  }
+
+  /** Devuelve lo que dejó `cookie-parser` en `req.cookies`. */
+  @Get('cookies')
+  cookies(@Req() req: { cookies?: unknown }): { cookies: unknown } {
+    return { cookies: req.cookies }
   }
 }
 
@@ -71,6 +77,15 @@ describe('setupApp (CORS, sin base ni Redis)', () => {
     expect(response.status).toBe(204)
     expect(response.headers['access-control-allow-origin']).toBe(ADMIN_ORIGIN)
     expect(response.headers['access-control-allow-credentials']).toBe('true')
+  })
+
+  it('parsea las cookies del pedido (cookie-parser) para los guards de sesión', async () => {
+    const response = await request(server())
+      .get('/api/v1/ping/cookies')
+      .set('Cookie', '__Host-galpon_session=abc123; otra=1')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ cookies: { '__Host-galpon_session': 'abc123', otra: '1' } })
   })
 
   it('no agrega cabeceras CORS para otro origen (la tienda en 3000)', async () => {

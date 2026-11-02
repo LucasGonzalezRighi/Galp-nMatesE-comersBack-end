@@ -15,6 +15,8 @@ import {
   loadContract,
   normalizeOpenApi,
   type NormalizedContract,
+  normalizeSecuritySchemes,
+  type NormalizedSecurityScheme,
 } from './normalize'
 
 /**
@@ -195,6 +197,8 @@ describe('contrato OpenAPI', () => {
   let app: INestApplication<Server> | undefined
   let contract: NormalizedContract = {}
   let generated: NormalizedContract = {}
+  let contractSchemes: Record<string, NormalizedSecurityScheme> = {}
+  let generatedSchemes: Record<string, NormalizedSecurityScheme> = {}
 
   beforeAll(async () => {
     // Sin Docker: la app se arma sin `init()` (Prisma no consulta) y con URLs que no responden.
@@ -206,8 +210,12 @@ describe('contrato OpenAPI', () => {
       abortOnError: false,
     })
     setupApp(app)
-    contract = normalizeOpenApi(loadContract(CONTRACT_PATH))
-    generated = normalizeOpenApi(buildOpenApiDocument(app))
+    const contractDocument = loadContract(CONTRACT_PATH)
+    const generatedDocument = buildOpenApiDocument(app)
+    contract = normalizeOpenApi(contractDocument)
+    generated = normalizeOpenApi(generatedDocument)
+    contractSchemes = normalizeSecuritySchemes(contractDocument)
+    generatedSchemes = normalizeSecuritySchemes(generatedDocument)
   })
 
   afterAll(async () => {
@@ -227,6 +235,11 @@ describe('contrato OpenAPI', () => {
     )
 
     expect(lines, `Diferencias con el contrato:\n${lines.join('\n')}`).toEqual([])
+  })
+
+  it('los esquemas de seguridad de Swagger coinciden con los del contrato (type, in, name)', () => {
+    expect(Object.keys(contractSchemes).length).toBeGreaterThan(0)
+    expect(generatedSchemes).toEqual(contractSchemes)
   })
 
   it('Swagger solo genera operaciones implementadas (o las extra a propósito)', () => {

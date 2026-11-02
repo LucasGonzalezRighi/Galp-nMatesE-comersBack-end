@@ -78,7 +78,10 @@ export function ApiSchemaProperty(schema: OpenApiSchema): PropertyDecorator {
 
 /** Título de cada respuesta de error que declaran los controladores, como en el contrato. */
 const PROBLEM_DESCRIPTIONS: Readonly<Record<number, string>> = {
+  401: 'Sesión requerida',
+  403: 'Acceso denegado o CSRF inválido',
   404: 'El recurso no existe o no está publicado.',
+  409: 'Conflicto',
   422: 'Los datos enviados no son válidos. `errors` detalla cada campo.',
   429: 'Demasiadas solicitudes. `Retry-After` dice en cuántos segundos reintentar.',
   500: 'Error inesperado del servidor.',
@@ -88,7 +91,8 @@ const PROBLEM_DESCRIPTIONS: Readonly<Record<number, string>> = {
  * Declara en Swagger las respuestas de error (`application/problem+json` con el esquema
  * `Problem`) de una operación.
  *
- * @param statuses - Códigos HTTP de error que la operación documenta (404, 422, 429, 500).
+ * @param statuses - Códigos HTTP de error que la operación documenta (401, 403, 404, 409, 422,
+ *   429, 500).
  * @returns El decorador combinado.
  * @throws {RangeError} En español, si algún código no es de error o no tiene descripción.
  */

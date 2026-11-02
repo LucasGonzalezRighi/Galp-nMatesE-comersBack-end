@@ -168,6 +168,38 @@ describe('ProblemFilter', () => {
     })
   })
 
+  it('manda Retry-After cuando el DomainError trae retryAfterSeconds', () => {
+    const { res } = catchWith(
+      new DomainError('rate_limited', 429, 'Demasiados intentos.', undefined, {
+        retryAfterSeconds: 30,
+      }),
+    )
+
+    expect(res.statusCode).toBe(429)
+    expect(res.headers['retry-after']).toBe('30')
+    expect(res.body).toMatchObject({ type: 'rate_limited', title: 'Demasiadas solicitudes' })
+    expect(res.body).not.toHaveProperty('retryAfterSeconds')
+  })
+
+  it('manda Retry-After cuando el cuerpo de la HttpException trae retryAfterSeconds', () => {
+    const { res } = catchWith(
+      new HttpException({ type: 'rate_limited', retryAfterSeconds: 12 }, 429),
+    )
+
+    expect(res.headers['retry-after']).toBe('12')
+    expect(res.body).not.toHaveProperty('retryAfterSeconds')
+  })
+
+  it('no manda Retry-After si no hay retryAfterSeconds o no es un entero positivo', () => {
+    const plain = catchWith(new DomainError('stock_changed', 409, 'Sin stock.'))
+    const invalid = catchWith(
+      new HttpException({ type: 'rate_limited', retryAfterSeconds: -1 }, 429),
+    )
+
+    expect(plain.res.headers).not.toHaveProperty('retry-after')
+    expect(invalid.res.headers).not.toHaveProperty('retry-after')
+  })
+
   it('no incluye errors fuera de un 422', () => {
     const { res } = catchWith(
       new HttpException(
