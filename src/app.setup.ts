@@ -26,7 +26,8 @@ export function buildCorsOptions(env: Pick<Env, 'ADMIN_ORIGIN'>): CorsOptions {
  * Aplica la configuración que comparten `main.ts` y los E2E (`test/support/app.ts`), para no
  * duplicarla: logger pino para los logs de Nest, prefijo `/api/v1`, cabeceras de seguridad con
  * `helmet`, CORS solo para el admin (`buildCorsOptions`), errores `application/problem+json`
- * (`ProblemFilter`), validación global de DTOs (422 con `errors[]`) y hooks de apagado ordenado (cierran conexiones con `SIGTERM`/`SIGINT`).
+ * (`ProblemFilter`), validación global de DTOs (422 con `errors[]`) y hooks de apagado ordenado
+ * (cierran conexiones con `SIGTERM`/`SIGINT`).
  *
  * @param app - La app de Nest recién creada, antes de `init()` o `listen()`.
  */

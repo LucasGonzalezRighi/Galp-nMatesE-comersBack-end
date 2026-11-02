@@ -107,35 +107,40 @@ vulnerabilidades moderadas transitivas, sin revisar.
 
 - En verde: `npm run typecheck`, `npm run lint` (fronteras), `npm run format:check`, `npm test`
   (23 archivos, 142 tests) y `npm run contract:check` (13 operaciones idénticas, 64 pendientes).
-- **`npm run test:e2e` no corre desde la Task 5:** Docker Desktop 4.47 no levanta el motor
-  (al iniciar el "Inference manager" no puede borrar un socket viejo, `dockerInference`: "The file
-  cannot be accessed by the system"). Pasa solo el contrato; los 7 archivos con
-  Testcontainers fallan en `beforeAll` (`Could not find a working container runtime strategy`).
-  Sin ejecutar contra Postgres real: `public-reads`, `catalog.repository` (`es-x-icu`,
-  `ANY(uuid[])`, `OFFSET bigint`), el `health` con Postgres caído, el seed con `verified_purchase`
-  y la prueba de la tienda contra el back. **Arreglo (Lucas):** con Docker Desktop cerrado, borrar
-  `%LOCALAPPDATA%\Docker\run\dockerInference` (y `userAnalyticsOtlpHttp.sock` si también molesta)
-  o reiniciar Windows, abrir Docker Desktop y correr `npm run test:e2e` y la prueba del README.
+- `npm run test:e2e` en verde (8 archivos, 58 tests y 1 omitido) contra `postgres:17-alpine` y
+  `redis:8-alpine` con Testcontainers: `health`, `prisma`, `seed`, `idempotency`, `outbox`,
+  `catalog.repository` (`es-x-icu`, `ANY(uuid[])`, `OFFSET bigint`), `public-reads` y el contrato.
+  Durante las Tasks 5 a 10 no había corrido: Docker Desktop 4.47 no levantaba el motor porque al
+  iniciar el "Inference manager" no podía borrar un socket viejo (`dockerInference`, un punto de
+  reanálisis de 0 bytes que ni `del` ni `fsutil` tocan). **Arreglo que funcionó:** con Docker
+  Desktop cerrado, renombrar la carpeta entera `%LOCALAPPDATA%\Docker\run` (por ejemplo a
+  `run.stale`) y abrir Docker Desktop: el motor levanta en segundos. Si vuelve a pasar, repetir.
+- **Prueba de la tienda contra el back (Task 9, paso 4) hecha:** `npm run db:up`, migraciones y
+  seed, el back compilado en el 3001 (`/api/v1/health` `ok`, `/api/v1/products?pageSize=50` → 27);
+  la tienda compilada en modo `live` (65 páginas; cada ficha pidió su detalle, relacionados y
+  reseñas con 200, sin 429) y servida en el 4300: `/` con "Mate Imperial Premium", `/tienda` con
+  los 27 productos, `/producto/mate-imperial-premium`, `/kit`, `/nosotros`, `/contacto` y el
+  rewrite `/api/v1/products` desde la tienda, todo 200.
 
 ### Commits
 
-| Commit    | Qué                                                                                   |
-| --------- | ------------------------------------------------------------------------------------- |
-| `873868a` | Esqueleto de NestJS 12 con calidad, vitest y health (Task 1)                          |
-| `dbc040b` | `strict` completo y tsconfig/eslint listos para Prisma (fix Task 1)                   |
-| `c70e68b` | Configuración validada con zod y logger pino (Task 2)                                 |
-| `742b9dc` | Prisma 7, Postgres y Redis en Docker, esquema de catálogo y contenido (Task 3)        |
-| `141863b` | Redis, caché que falla abierta, rate limiting y health con Terminus (Task 4)          |
-| `2203de4` | Indicador de Postgres en `/health` y arranque que falla sin base (fix Tasks 2-4)      |
-| `ae32167` | Seed idempotente con los datos del diseño (Task 7)                                    |
-| `ba68f40` | Swagger en `/api/docs` y test de contrato (Task 6)                                    |
-| `18a59d3` | Núcleo compartido: pesos, `problem+json`, idempotencia y outbox (Task 5)              |
-| `9d3d7e8` | `verified_purchase` en reseñas y redondeo del descuento como el front (fix Tasks 5-7) |
-| `3f9d033` | Módulos de catálogo, contenido, reseñas y ajustes con lecturas cacheadas (Task 8)     |
-| `917449d` | Sin 500 en `GET /products` con `page` enorme o `NUL` en la búsqueda (fix Task 8)      |
-| `d81d708` | Lecturas públicas del contrato (Task 9)                                               |
-| `ecfc554` | Lecturas públicas fuera del límite por IP (fix Task 9)                                |
-| Task 10   | Fronteras con test negativo, CORS del admin, CI, esta bitácora, ADRs y README         |
+| Commit    | Qué                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------ |
+| `873868a` | Esqueleto de NestJS 12 con calidad, vitest y health (Task 1)                                     |
+| `dbc040b` | `strict` completo y tsconfig/eslint listos para Prisma (fix Task 1)                              |
+| `c70e68b` | Configuración validada con zod y logger pino (Task 2)                                            |
+| `742b9dc` | Prisma 7, Postgres y Redis en Docker, esquema de catálogo y contenido (Task 3)                   |
+| `141863b` | Redis, caché que falla abierta, rate limiting y health con Terminus (Task 4)                     |
+| `2203de4` | Indicador de Postgres en `/health` y arranque que falla sin base (fix Tasks 2-4)                 |
+| `ae32167` | Seed idempotente con los datos del diseño (Task 7)                                               |
+| `ba68f40` | Swagger en `/api/docs` y test de contrato (Task 6)                                               |
+| `18a59d3` | Núcleo compartido: pesos, `problem+json`, idempotencia y outbox (Task 5)                         |
+| `9d3d7e8` | `verified_purchase` en reseñas y redondeo del descuento como el front (fix Tasks 5-7)            |
+| `3f9d033` | Módulos de catálogo, contenido, reseñas y ajustes con lecturas cacheadas (Task 8)                |
+| `917449d` | Sin 500 en `GET /products` con `page` enorme o `NUL` en la búsqueda (fix Task 8)                 |
+| `d81d708` | Lecturas públicas del contrato (Task 9)                                                          |
+| `ecfc554` | Lecturas públicas fuera del límite por IP (fix Task 9)                                           |
+| Task 10   | `213d7b9` CORS del admin; después, fronteras con test negativo, CI, esta bitácora, ADRs y README |
 
 ### Lo que queda para B3 en adelante
 
@@ -156,7 +161,9 @@ soporte (reseñas con compra verificada, contacto, arrepentimiento, emails) y B8
 - Comparar también `requestBody`, `security` y cabeceras en el test de contrato cuando lleguen las
   escrituras.
 - Producción (B8): `trust proxy` para que el rate limiting vea la IP real,
-  `connectionTimeoutMillis` en el pool de `pg`, Swagger protegido por sesión de admin, `npm audit`.
+  `connectionTimeoutMillis` en el pool de `pg`, Swagger protegido por sesión de admin, `npm audit`,
+  y `ADMIN_ORIGIN` obligatoria (sin el default `http://localhost:5173`) con `NODE_ENV=production`:
+  olvidarla habilitaría CORS con credenciales para localhost.
 - Menores anotados en las revisiones: mensajes en inglés del framework en algunos `detail`
   (body-parser, `Forbidden resource`), cierre del relay del outbox con Redis caído desde el
   arranque (sin timeout), caché del catálogo con una forma vieja tras un deploy (atrapar y caer a

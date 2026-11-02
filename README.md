@@ -20,12 +20,12 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 
 ## Puertos y orígenes
 
-| Qué                    | Dónde                   | Notas                                                 |
-| ---------------------- | ----------------------- | ----------------------------------------------------- |
-| Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN`. Llega al back desde su servidor.      |
-| Admin (Vite)           | `http://localhost:5173` | `ADMIN_ORIGIN`. El único origen con CORS.             |
-| Este back              | `http://localhost:3001` | `PORT`. Prefijo `/api/v1`; Swagger UI en `/api/docs`. |
-| Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`).                   |
+| Qué                    | Dónde                   | Notas                                                                         |
+| ---------------------- | ----------------------- | ----------------------------------------------------------------------------- |
+| Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN` (reservada: la usan B6 y B7). Llega al back desde su servidor. |
+| Admin (Vite)           | `http://localhost:5173` | `ADMIN_ORIGIN`. El único origen con CORS.                                     |
+| Este back              | `http://localhost:3001` | `PORT`. Prefijo `/api/v1`; Swagger UI en `/api/docs`.                         |
+| Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`).                                           |
 
 **CORS:** solo `ADMIN_ORIGIN` (en desarrollo `http://localhost:5173`) recibe permiso, con
 credenciales (las cookies de sesión del admin). La tienda no lo necesita: su servidor llama al back
@@ -87,8 +87,9 @@ sin `/` inicial o entre comillas, para que no la convierta en una ruta de Window
 
 Las 13 lecturas públicas del contrato (`/categories`, `/products…`, `/reviews/featured`,
 `/content/*`, `/settings/public`) están implementadas, sin límite de pedidos por IP (la tienda las
-pide desde un solo servidor). **Todavía no se probaron contra Postgres** (los E2E ni esta prueba):
-Docker Desktop no arrancaba en la máquina de desarrollo (ver [`docs/BITACORA.md`](docs/BITACORA.md)).
+pide desde un solo servidor). Probadas contra Postgres y Redis reales: los E2E con Testcontainers y
+esta misma prueba (la tienda compilada en modo `live` muestra los 27 productos del seed; ver
+"Estado de la verificación" en [`docs/BITACORA.md`](docs/BITACORA.md)).
 
 1. Acá, con Docker Desktop abierto: `npm run db:up`, `npm run db:migrate`, `npm run db:seed` y
    `npm run dev`.
