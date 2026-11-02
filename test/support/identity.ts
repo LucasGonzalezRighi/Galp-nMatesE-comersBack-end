@@ -104,10 +104,17 @@ export class InMemoryUserRepository implements UserRepository {
   }
 }
 
-/** {@link CustomerRepository} en memoria; el email es único sin importar mayúsculas. */
+/**
+ * {@link CustomerRepository} en memoria; el email es único sin importar mayúsculas. Comparte los
+ * usuarios con el {@link InMemoryUserRepository} que recibe, para que `createWithUser` y
+ * `attachUser` sean atómicos como la transacción real: validan todo antes de escribir.
+ */
 export class InMemoryCustomerRepository implements CustomerRepository {
   /** Clientes por id (los tests pueden mirarlos o sembrarlos). */
   readonly customers = new Map<string, Customer>()
+
+  /** @param userRepository - Usuarios que comparte (donde se crea el usuario de la cuenta). */
+  constructor(private readonly userRepository: InMemoryUserRepository) {}
 
   /** {@inheritDoc CustomerRepository.findByUserId} */
   findByUserId(userId: string): Promise<Customer | null> {
@@ -128,13 +135,31 @@ export class InMemoryCustomerRepository implements CustomerRepository {
     return Promise.resolve({ ...input })
   }
 
+  /** {@inheritDoc CustomerRepository.createWithUser} */
+  async createWithUser(user: NewUser, customer: Omit<NewCustomer, 'userId'>): Promise<Customer> {
+    const emailTaken =
+      (await this.userRepository.findByEmail(user.email)) !== null ||
+      [...this.customers.values()].some((candidate) => sameEmail(candidate.email, customer.email))
+    if (emailTaken) throw new EmailAlreadyRegisteredError()
+    await this.userRepository.create(user)
+    const created: Customer = { ...customer, userId: user.id }
+    this.customers.set(created.id, created)
+    return { ...created }
+  }
+
   /** {@inheritDoc CustomerRepository.attachUser} */
-  attachUser(
+  async attachUser(
     customerId: string,
-    userId: string,
+    user: NewUser,
     names: { firstName: string; lastName: string },
   ): Promise<Customer> {
-    return this.change(customerId, { userId, ...names })
+    const guest = this.customers.get(customerId)
+    if (guest === undefined) throw new Error(`No existe el cliente ${customerId}`)
+    if (guest.userId !== null || (await this.userRepository.findByEmail(user.email)) !== null) {
+      throw new EmailAlreadyRegisteredError()
+    }
+    await this.userRepository.create(user)
+    return this.change(customerId, { userId: user.id, ...names })
   }
 
   /** {@inheritDoc CustomerRepository.update} */

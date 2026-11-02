@@ -1,4 +1,5 @@
 import type { Customer } from '../../domain/customer.entity'
+import type { NewUser } from './user.repository.port'
 
 /** Datos de un cliente nuevo; el id lo genera la app (UUID v7). */
 export interface NewCustomer {
@@ -51,16 +52,32 @@ export interface CustomerRepository {
   create(input: NewCustomer): Promise<Customer>
 
   /**
-   * Convierte un invitado en cliente con cuenta: le asigna el usuario y actualiza el nombre.
+   * Crea, en una sola operación atómica, el usuario de una cuenta nueva y su cliente: o quedan los
+   * dos o no queda ninguno (nunca un usuario sin cliente).
+   *
+   * @param user - Datos del usuario.
+   * @param customer - Datos del cliente; su `userId` es el id de `user`.
+   * @returns El cliente creado, ya con su `userId`.
+   * @throws {EmailAlreadyRegisteredError} Si el email ya está tomado por un usuario o por otro
+   *   cliente (por ejemplo, un invitado que apareció entre la consulta y el alta). Se traduce
+   *   desde la unicidad de la base, no desde una consulta previa.
+   */
+  createWithUser(user: NewUser, customer: Omit<NewCustomer, 'userId'>): Promise<Customer>
+
+  /**
+   * Convierte un invitado en cliente con cuenta, en una sola operación atómica: crea el usuario,
+   * se lo asigna al cliente y actualiza el nombre. Si algo falla, no queda ningún usuario.
    *
    * @param customerId - Id del cliente invitado.
-   * @param userId - Id del usuario recién creado.
+   * @param user - Datos del usuario nuevo.
    * @param names - Nombre y apellido con los que se registró.
    * @returns El cliente actualizado (mismo id).
+   * @throws {EmailAlreadyRegisteredError} Si el email ya tiene un usuario o si el cliente dejó de
+   *   ser un invitado (otro registro lo ganó).
    */
   attachUser(
     customerId: string,
-    userId: string,
+    user: NewUser,
     names: { firstName: string; lastName: string },
   ): Promise<Customer>
 

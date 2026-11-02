@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { err, ok } from '../../../shared/domain/result'
 import { FixedSecrets, InMemorySessionStore } from '../../../../test/support/session'
@@ -44,7 +44,7 @@ function setup() {
   const secrets = new FixedSecrets()
   const sessions = new InMemorySessionStore(clock, secrets)
   const users = new InMemoryUserRepository()
-  const customers = new InMemoryCustomerRepository()
+  const customers = new InMemoryCustomerRepository(users)
   const addresses = new InMemoryAddressRepository()
   const resets = new InMemoryPasswordResetRepository()
   const hasher = new FakeHasher()
@@ -167,6 +167,59 @@ describe('RegisterCustomerCommand', () => {
       ),
     ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
     expect(deps.users.users.size).toBe(1)
+  })
+
+  it('no deja un usuario sin cliente si un invitado con ese email aparece entre la consulta y el alta', async () => {
+    deps.customers.customers.set('cus-guest', {
+      id: 'cus-guest',
+      userId: null,
+      email: 'ana@mail.com',
+      firstName: 'Anita',
+      lastName: 'P',
+      phone: null,
+    })
+    // La consulta del registro todavía no lo ve: el invitado "aparece" justo después.
+    vi.spyOn(deps.customers, 'findByEmail').mockResolvedValueOnce(null)
+
+    await expect(
+      register.execute(
+        { email: 'ana@mail.com', firstName: 'Ana', lastName: 'Pérez', password: PASSWORD },
+        null,
+      ),
+    ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
+
+    expect(deps.users.users.size).toBe(0)
+    expect(deps.customers.customers.get('cus-guest')?.userId).toBeNull()
+  })
+
+  it('no deja un usuario suelto si el invitado ya fue adjuntado a otra cuenta', async () => {
+    deps.customers.customers.set('cus-guest', {
+      id: 'cus-guest',
+      userId: 'usr-other',
+      email: 'ana@mail.com',
+      firstName: 'Anita',
+      lastName: 'P',
+      phone: null,
+    })
+    // La consulta del registro lo vio todavía como invitado; otro registro lo ganó después.
+    vi.spyOn(deps.customers, 'findByEmail').mockResolvedValueOnce({
+      id: 'cus-guest',
+      userId: null,
+      email: 'ana@mail.com',
+      firstName: 'Anita',
+      lastName: 'P',
+      phone: null,
+    })
+
+    await expect(
+      register.execute(
+        { email: 'ana@mail.com', firstName: 'Ana', lastName: 'Pérez', password: PASSWORD },
+        null,
+      ),
+    ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
+
+    expect(deps.users.users.size).toBe(0)
+    expect(deps.customers.customers.get('cus-guest')?.userId).toBe('usr-other')
   })
 })
 

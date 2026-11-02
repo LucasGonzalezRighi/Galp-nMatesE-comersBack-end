@@ -31,7 +31,9 @@ export interface UserRepository {
   findById(id: string): Promise<User | null>
 
   /**
-   * Crea un usuario, sin verificar el email y sin último inicio de sesión.
+   * Crea un usuario suelto (sin cliente), sin verificar el email y sin último inicio de sesión. Es
+   * para el seed y otros usos: el registro de clientes NO lo usa, porque necesita que usuario y
+   * cliente se creen juntos (`CustomerRepository.createWithUser`).
    *
    * @param input - Datos del usuario.
    * @returns El usuario creado.
