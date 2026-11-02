@@ -5,10 +5,16 @@ import type { Options } from 'pino-http'
 import { ConfigModule } from '../../../config/config.module'
 import { ENV, type Env } from '../../../config/env'
 
-/** Rutas que pino reemplaza por `[Redacted]`: cookies de sesión y tokens nunca llegan a los logs. */
+/**
+ * Rutas que pino reemplaza por `[Redacted]`: cookies de sesión y tokens nunca llegan a los logs.
+ * `Referer` se tapa entero porque, desde `/cuenta/restablecer?token=…`, la tienda reenvía al back
+ * la URL con el token de recuperación; `X-CSRF-Token` es el secreto ligado a la sesión.
+ */
 const REDACTED_PATHS = [
   'req.headers.cookie',
   'req.headers.authorization',
+  'req.headers.referer',
+  'req.headers["x-csrf-token"]',
   'res.headers["set-cookie"]',
 ]
 
@@ -24,8 +30,8 @@ function isInstalled(packageName: string): boolean {
 
 /**
  * Arma las opciones de `pino-http` para el entorno: nivel `LOG_LEVEL` (en `test`, `silent`),
- * cookies y `Authorization` enmascarados, y salida legible con `pino-pretty` solo en desarrollo y
- * si está instalado (si no, JSON, como en producción).
+ * cookies, `Authorization`, `Referer` y `X-CSRF-Token` enmascarados, y salida legible con
+ * `pino-pretty` solo en desarrollo y si está instalado (si no, JSON, como en producción).
  *
  * @param env - La configuración validada.
  * @returns Las opciones para `LoggerModule` de `nestjs-pino`.
