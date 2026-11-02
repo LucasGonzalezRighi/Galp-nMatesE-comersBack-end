@@ -13,9 +13,10 @@ try {
  * `migrate dev`, `migrate deploy` y `migrate reset` (`DATABASE_URL`).
  *
  * `prisma generate` no se conecta, por eso la URL puede faltar al instalar (`postinstall`).
+ * `prisma db seed` corre `prisma/seed.ts` con `tsx` (lo mismo que `npm run db:seed`).
  */
 export default defineConfig({
   schema: 'prisma/schema.prisma',
-  migrations: { path: 'prisma/migrations' },
+  migrations: { path: 'prisma/migrations', seed: 'tsx prisma/seed.ts' },
   datasource: { url: process.env.DATABASE_URL ?? '' },
 })

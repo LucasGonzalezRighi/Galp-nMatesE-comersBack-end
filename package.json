@@ -23,6 +23,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:reset": "prisma migrate reset --force",
+    "db:seed": "tsx prisma/seed.ts",
     "prepare": "lefthook install",
     "postinstall": "prisma generate"
   },
