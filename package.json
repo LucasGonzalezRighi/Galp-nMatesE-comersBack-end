@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@nest-lab/throttler-storage-redis": "1.2.0",
+    "@nestjs/bullmq": "12.0.0",
     "@nestjs/common": "12.3.2",
     "@nestjs/config": "12.0.1",
     "@nestjs/core": "12.3.2",
@@ -39,6 +40,9 @@
     "@nestjs/throttler": "6.7.1",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "bullmq": "6.5.3",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
     "helmet": "8.3.0",
     "ioredis": "6.0.0",
     "nestjs-pino": "5.3.1",
@@ -48,6 +52,7 @@
     "prisma": "7.10.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "uuid": "14.0.3",
     "zod": "4.6.7"
   },
   "devDependencies": {

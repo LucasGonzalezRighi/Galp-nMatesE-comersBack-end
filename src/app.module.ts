@@ -6,9 +6,18 @@ import { LoggerModule } from './shared/infrastructure/logger/logger.module'
 import { PrismaModule } from './shared/infrastructure/prisma/prisma.module'
 import { RedisModule } from './shared/infrastructure/redis/redis.module'
 import { RateLimitModule } from './shared/infrastructure/throttler/throttler.module'
+import { SharedModule } from './shared/shared.module'
 
 /** Módulo raíz de la API: junta los módulos de negocio y la infraestructura compartida. */
 @Module({
-  imports: [ConfigModule, LoggerModule, PrismaModule, RedisModule, RateLimitModule, HealthModule],
+  imports: [
+    ConfigModule,
+    LoggerModule,
+    PrismaModule,
+    RedisModule,
+    RateLimitModule,
+    SharedModule,
+    HealthModule,
+  ],
 })
 export class AppModule {}
