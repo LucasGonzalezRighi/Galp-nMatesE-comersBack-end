@@ -4,6 +4,7 @@ import { ConfigModule } from './config/config.module'
 import { CatalogModule } from './modules/catalog/catalog.module'
 import { ContentModule } from './modules/content/content.module'
 import { HealthModule } from './modules/health/health.module'
+import { IdentityModule } from './modules/identity/identity.module'
 import { ReviewsModule } from './modules/reviews/reviews.module'
 import { SettingsModule } from './modules/settings/settings.module'
 import { LoggerModule } from './shared/infrastructure/logger/logger.module'
@@ -26,6 +27,7 @@ import { SharedModule } from './shared/shared.module'
     ContentModule,
     CatalogModule,
     ReviewsModule,
+    IdentityModule,
   ],
 })
 export class AppModule {}
