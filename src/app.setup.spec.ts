@@ -30,6 +30,7 @@ describe('buildCorsOptions', () => {
     expect(buildCorsOptions({ ADMIN_ORIGIN })).toEqual({
       origin: [ADMIN_ORIGIN],
       credentials: true,
+      exposedHeaders: ['Retry-After'],
     })
   })
 
@@ -77,6 +78,13 @@ describe('setupApp (CORS, sin base ni Redis)', () => {
     expect(response.status).toBe(204)
     expect(response.headers['access-control-allow-origin']).toBe(ADMIN_ORIGIN)
     expect(response.headers['access-control-allow-credentials']).toBe('true')
+  })
+
+  it('expone Retry-After al admin, para que lea la espera de un 429', async () => {
+    const response = await request(server()).get('/api/v1/ping').set('Origin', ADMIN_ORIGIN)
+
+    expect(response.status).toBe(200)
+    expect(response.headers['access-control-expose-headers']).toBe('Retry-After')
   })
 
   it('parsea las cookies del pedido (cookie-parser) para los guards de sesión', async () => {

@@ -32,12 +32,16 @@ import {
   type AdminSessionView,
   GetAdminSessionQuery,
 } from '../application/queries/get-admin-session.query'
-import type { CsrfTokenView } from './auth.controller'
 import { AdminLoginDto } from './dto/admin-login.dto'
 import { AdminPasswordChangeDto } from './dto/admin-password-change.dto'
 import { IDENTITY_MESSAGES } from './dto/identity-fields'
 import { AdminLoginResultDto, AdminSessionDto, CsrfTokenDto } from './dto/identity.response.dto'
-import { adminUserIdOf, AUTH_WRITE_THROTTLE, type CookieResponse } from './identity-http'
+import {
+  adminUserIdOf,
+  AUTH_WRITE_THROTTLE,
+  type CookieResponse,
+  type CsrfTokenView,
+} from './identity-http'
 
 /** Sesión del dashboard recién iniciada (`AdminLoginResult` del contrato). */
 export interface AdminLoginResultView extends AdminSessionView {

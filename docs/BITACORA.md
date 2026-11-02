@@ -317,8 +317,9 @@ Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
     `STORE_ORIGIN=http://localhost:4300`), con Postgres y Redis de compose, migrado y sembrado.
   - Tienda compilada en modo `live` y servida con `next start` en el 4300, con el entorno en la
     misma línea (sin `.env.local`).
-  - Playwright headless (Chromium), todo en verde en la primera corrida. Capturas en
-    `.superpowers/sdd/2026-11-02-b3-identidad/captures/`:
+  - Playwright headless (Chromium), todo en verde en la primera corrida. Capturas locales en
+    `.superpowers/sdd/2026-11-02-b3-identidad/captures/` (git ignora esa carpeta: un clon no las
+    tiene):
     - `/cuenta/registro` (Nombre, Apellido, Email, Contraseña) → `/cuenta` con "Hola, Ana", y la
       cookie `__Host-galpon_session` `Secure` y `HttpOnly` (`store-1-registro-cuenta.png`).
     - `/cuenta/direcciones`: "Casa, Av. Rivadavia 4321, CP 1406, Buenos Aires, CABA" como
@@ -377,7 +378,8 @@ Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
 | `22a906c` | Rutas de cuenta, sesión y admin, con E2E de autenticación (Task 5)                           |
 | `c65c359` | Casos compartidos de validación del front contra los DTOs (fix Task 5)                       |
 | `6b34120` | Logs sin `Referer` ni `X-CSRF-Token` (Task 6)                                                |
-| Task 6    | Esta bitácora, el ADR 0003, el README de cuenta y admin y `.env.example`                     |
+| `36e3982` | Esta bitácora, el ADR 0003, el README de cuenta y admin y `.env.example` (Task 6)            |
+| Cierre    | CORS expone `Retry-After`, `CsrfTokenView` compartido, eslint ignora `.superpowers/`, docs   |
 
 ### Lo que queda para B4 en adelante
 
@@ -393,6 +395,12 @@ Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
 - `PrismaCustomerRepository.create` no traduce `P2002`: B4 decide qué hacer con un invitado
   repetido.
 
+**Para B6 (admin):**
+
+- Las rutas `/admin/*` que el panel ya pide y hoy dan 404: `dashboard/summary` (también el
+  contador de la barra lateral), `orders`, `products`, `categories`, `content/*`, `reviews`,
+  `messages` y `settings`. Hasta entonces, 8 pantallas muestran "No pudimos cargar…".
+
 **Para B7 (comunidad, soporte y emails):**
 
 - El proveedor de mail real detrás de `MailerPort`. Tiene que encolar o tragar sus errores, para
@@ -404,7 +412,6 @@ Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
 - `NODE_ENV=production` obligatorio: si falta, el `LogMailer` registra los links.
 - El admin semilla no puede quedar con la contraseña pública: que `seedAdmin` se niegue en
   producción o tome la contraseña de una variable.
-- `exposedHeaders: ['Retry-After']` en CORS, si el admin llega a mostrar la espera del 429.
 
 **Menores anotados en las revisiones:**
 
@@ -418,12 +425,15 @@ Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
   - La contraseña actual mal del admin no cuenta para el bloqueo.
 - **Libreta:**
   - `replace` lanza P2025 (500) si la dirección se borra en el medio.
+  - `PATCH /me/addresses/{id}` con cuerpo inválido e id inexistente da 422 antes que 404 (el mock
+    del front daba 404 primero; el contrato lo permite).
   - El reintento de la predeterminada es uno solo: con 3 o más altas simultáneas puede dar 500.
 - **Código:**
   - `prisma/seed.ts` duplica los parámetros de argon2 (debería importar `ARGON2_OPTIONS`).
   - `sessionCookie` acepta un id vacío.
-  - `admin-auth.controller.ts` importa `CsrfTokenView` de otro controlador.
 - **Tests:**
   - Falta un test que pegue contra el `@Throttle` de 20/min.
   - El test "el módulo exporta GetMeQuery" no prueba la exportación.
   - El E2E de auth ya hace 16 logins desde una IP: hay que cuidar el límite si se suman casos.
+  - Los caminos de `StaleSessionError` (sesión de cliente sin cliente, admin deshabilitado o
+    inexistente) no tienen test.

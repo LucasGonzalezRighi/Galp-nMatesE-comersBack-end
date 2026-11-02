@@ -102,8 +102,9 @@ esta misma prueba (la tienda compilada en modo `live` muestra los 27 productos d
    el back con `STORE_ORIGIN=http://localhost:4300 npm run dev`: así el link del log apunta ahí.
 
 2. Desde `../frontend`, compilar y servir la tienda en otro puerto, con el entorno exportado en
-   esa terminal. El 3000 queda para el `next dev` de siempre. No uses un `apps/store/.env.local`:
-   el `next dev` también lo leería y quedaría en modo `live`.
+   esa terminal. El 3000 queda para el `next dev` de siempre, pero lanzalo desde otra terminal:
+   los `export` quedan vivos en esta y un `next dev` lanzado acá también iría en modo `live`. No
+   uses un `apps/store/.env.local`: el `next dev` también lo leería y quedaría en modo `live`.
 
    ```bash
    export API_MODE=live NEXT_PUBLIC_API_MODE=live API_BASE_URL=http://localhost:3001 \
@@ -130,8 +131,8 @@ Qué falla todavía en modo `live`, y en qué pieza llega:
 
 Desde B3 el back maneja las cuentas de la tienda y el ingreso al admin. Usa sesiones en Redis,
 cookies `__Host-` y un token CSRF por sesión
-([ADR 0003](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md)). Las 18 operaciones de
-`/auth/*`, `/me*` y `/admin/auth/*` están implementadas.
+([ADR 0003](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md)). De las 19 operaciones de
+`/auth/*`, `/me*` y `/admin/auth/*` están implementadas 18; falta `GET /me/orders/{number}` (B4).
 
 - **Cookies:** `__Host-galpon_session` (tienda: 30 días; la anónima que solo da el CSRF, 24 h) y
   `__Host-galpon_admin` (admin: 8 h). Duran un plazo fijo, que no se renueva con el uso.
@@ -176,6 +177,8 @@ cookies `__Host-` y un token CSRF por sesión
   ```
 
   - El back va con `ADMIN_ORIGIN=http://localhost:5273`.
+  - Los `export` quedan vivos en esa terminal: el `vite dev` del 5173 va desde otra, o también
+    iría en modo `live`.
   - `VITE_API_BASE_URL` también tiene que estar al correr `vite preview`. La CSP del preview arma su
     `connect-src` al arrancar, y sin la variable el navegador bloquea las llamadas: el login muestra
     "No pudimos conectar, probá de nuevo".

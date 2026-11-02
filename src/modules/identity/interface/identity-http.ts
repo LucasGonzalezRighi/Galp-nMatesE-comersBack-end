@@ -17,6 +17,12 @@ export interface CookieResponse {
   setHeader(name: string, value: string): unknown
 }
 
+/** Token CSRF como lo devuelve la API (`CsrfToken` del contrato). */
+export interface CsrfTokenView {
+  /** Token que va en `X-CSRF-Token`. */
+  csrfToken: string
+}
+
 /**
  * Cliente de una sesión de cliente (la que dejó `CustomerSessionGuard` o `CustomerCsrfGuard`).
  *

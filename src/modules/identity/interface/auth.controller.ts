@@ -53,13 +53,7 @@ import { CsrfTokenDto, CustomerDto } from './dto/identity.response.dto'
 import { LoginDto } from './dto/login.dto'
 import { RegisterDto } from './dto/register.dto'
 import { ResetPasswordDto } from './dto/reset-password.dto'
-import { AUTH_WRITE_THROTTLE, type CookieResponse } from './identity-http'
-
-/** Token CSRF como lo devuelve la API (`CsrfToken` del contrato). */
-export interface CsrfTokenView {
-  /** Token que va en `X-CSRF-Token`. */
-  csrfToken: string
-}
+import { AUTH_WRITE_THROTTLE, type CookieResponse, type CsrfTokenView } from './identity-http'
 
 /** Error del campo `token` cuando el enlace de recuperación no sirve (como el mock del front). */
 const INVALID_RESET_TOKEN = {

@@ -15,12 +15,17 @@ export const API_PREFIX = 'api/v1'
  * Opciones de CORS: solo el admin (`ADMIN_ORIGIN`; en desarrollo `http://localhost:5173`) puede
  * llamar a la API desde el navegador, con credenciales (las cookies de sesión). La tienda no
  * necesita CORS: lee desde su propio servidor. Un pedido de otro origen no recibe cabeceras CORS.
+ * `Retry-After` va expuesta, para que el admin pueda leer la espera de un 429 desde su origen.
  *
  * @param env - La configuración validada; solo se usa `ADMIN_ORIGIN`.
  * @returns Las opciones para `app.enableCors`, con el origen normalizado (sin ruta ni barra final).
  */
 export function buildCorsOptions(env: Pick<Env, 'ADMIN_ORIGIN'>): CorsOptions {
-  return { origin: [new URL(env.ADMIN_ORIGIN).origin], credentials: true }
+  return {
+    origin: [new URL(env.ADMIN_ORIGIN).origin],
+    credentials: true,
+    exposedHeaders: ['Retry-After'],
+  }
 }
 
 /**
