@@ -18,7 +18,8 @@ export const RATE_LIMIT_MESSAGE = 'Demasiados pedidos seguidos: esperá un minut
  * ({@link PUBLIC_RATE_LIMIT}, por IP), contadores en Redis compartidos entre instancias y, si
  * Redis se cae, en memoria ({@link FailOpenThrottlerStorage}). Las rutas sensibles (login,
  * formularios, pedidos) ajustan su límite con `@Throttle` y las que no deben limitarse usan
- * `@SkipThrottle`.
+ * `@SkipThrottle`: las lecturas públicas del catálogo (spec §3.2 solo pide limitar login,
+ * formularios y pedidos) lo usan porque la tienda las pide desde un solo servidor.
  */
 @Module({
   imports: [

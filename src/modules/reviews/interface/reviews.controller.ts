@@ -1,5 +1,6 @@
 import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common'
 import { ApiExtraModels, ApiOkResponse, ApiOperation, ApiTags, PickType } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import { ApiProblemResponses, schemaRef } from '../../../shared/infrastructure/http/openapi'
 import { PageQueryDto } from '../../../shared/infrastructure/http/page.dto'
@@ -18,9 +19,14 @@ export class ReviewsPageQueryDto extends PickType(PageQueryDto, ['page'] as cons
 /**
  * Lecturas públicas de reseñas: las de un producto y las destacadas del inicio. Enviar una
  * reseña (`POST /products/{slug}/reviews`) llega en B7.
+ *
+ * Sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y `next build`) y
+ * el spec §3.2 solo limita login, formularios públicos y creación de pedidos. El `POST` de B7 es
+ * un formulario público: tiene que reponer el límite en su método con `@SkipThrottle({ default: false })`.
  */
 @ApiTags('reviews')
 @ApiExtraModels(ReviewDto)
+@SkipThrottle()
 @Controller()
 export class ReviewsController {
   /**

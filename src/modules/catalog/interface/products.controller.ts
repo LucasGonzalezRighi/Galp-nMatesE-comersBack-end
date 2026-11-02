@@ -6,6 +6,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   ApiProblemResponses,
@@ -28,9 +29,15 @@ import {
 import { ListProductsQueryDto } from './dto/list-products.query.dto'
 import { PRODUCT_NOT_FOUND, ProductSlugParamDto } from './dto/product-slug.param.dto'
 
-/** Catálogo publicado: listado, ficha y relacionados (`/products`). */
+/**
+ * Catálogo publicado: listado, ficha y relacionados (`/products`).
+ *
+ * Sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y `next build`) y
+ * el spec §3.2 solo limita login, formularios públicos y creación de pedidos.
+ */
 @ApiTags('catalog')
 @ApiExtraModels(ProductSummaryDto, ProductTabsDto, ProductOptionsDto, ImageDto)
+@SkipThrottle()
 @Controller('products')
 export class ProductsController {
   /**

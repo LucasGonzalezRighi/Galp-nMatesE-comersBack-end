@@ -26,8 +26,10 @@ El puerto es `3001` (variable `PORT`). Todas las rutas llevan el prefijo `/api/v
 ## Probar la tienda contra este back
 
 Las 13 lecturas públicas del contrato (`/categories`, `/products…`, `/reviews/featured`,
-`/content/*`, `/settings/public`) ya responden contra Postgres. Para ver la tienda del front con
-estos datos:
+`/content/*`, `/settings/public`) están implementadas y sus tests con queries en memoria pasan; los
+E2E contra Postgres y esta prueba con la tienda todavía no se corrieron (Docker Desktop no
+arrancaba: ver el reporte de la Task 9). Las lecturas no tienen límite de pedidos por IP (la tienda
+las pide desde un solo servidor). Para ver la tienda del front con estos datos:
 
 1. Acá, con Docker Desktop abierto:
 
