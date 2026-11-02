@@ -1,6 +1,6 @@
 import { PrismaPg } from '@prisma/adapter-pg'
 import { argon2id, hash, verify } from 'argon2'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { seed } from '../../prisma/seed'
 import { SEED_ADMIN } from '../../prisma/seed-data/admin'
@@ -211,5 +211,39 @@ describe('seed', () => {
 
     expect(await adminHash()).toBe(changed)
     expect(await db().user.count()).toBe(1)
+  })
+
+  it('una nueva corrida no baja el stock por debajo de lo reservado y lo avisa', async () => {
+    const productId = async (slug: string): Promise<string> =>
+      (await db().product.findUniqueOrThrow({ where: { slug }, select: { id: true } })).id
+    const premium = await productId('mate-imperial-premium')
+    const torpedo = await productId('mate-torpedo-premium')
+    // Los dos traen `onHand` 12 en el diseño.
+    await db().inventory.update({ where: { productId: premium }, data: { onHand: 5, reserved: 5 } })
+    await db().inventory.update({
+      where: { productId: torpedo },
+      data: { onHand: 20, reserved: 20 },
+    })
+
+    const chunks: string[] = []
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString())
+      return true
+    })
+    try {
+      await expect(seed(db())).resolves.toMatchObject({ products: 27 })
+    } finally {
+      write.mockRestore()
+    }
+    const printed = chunks.join('')
+
+    expect(await db().inventory.findUniqueOrThrow({ where: { productId: premium } })).toMatchObject(
+      { onHand: 12, reserved: 5 },
+    )
+    expect(await db().inventory.findUniqueOrThrow({ where: { productId: torpedo } })).toMatchObject(
+      { onHand: 20, reserved: 20 },
+    )
+    expect(printed).toContain('mate-torpedo-premium')
+    expect(printed).not.toContain('mate-imperial-premium')
   })
 })

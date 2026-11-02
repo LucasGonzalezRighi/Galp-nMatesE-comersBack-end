@@ -2,7 +2,8 @@
 // del front por `scripts/import-fixtures.mjs`). Se corre con `npm run db:seed` o
 // `npx prisma db seed`; es idempotente: cada fila se escribe con `upsert` por su clave natural y
 // una segunda corrida deja la base igual (pisa con los valores del diseño las filas que siembra).
-// La excepción es el admin semilla: se crea solo si no existe y nunca se pisa su contraseña.
+// Las excepciones: el admin semilla se crea solo si no existe y nunca se pisa su contraseña, y el
+// stock (`on_hand`) nunca baja por debajo de lo reservado por pedidos vivos (lo avisa y lo deja).
 import { createHash } from 'node:crypto'
 
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -112,7 +113,10 @@ async function seedCategories(tx: Tx): Promise<Map<string, string>> {
  * Siembra un producto por `slug`, con sus fotos por `(productId, position)` y su stock.
  *
  * El `sequence` (el código "N°07") solo se fija al crearlo: es la identidad visible del producto.
- * Las fotos que sobren de una corrida anterior (posiciones mayores) se borran.
+ * Las fotos que sobren de una corrida anterior (posiciones mayores) se borran. El stock se crea con
+ * el `onHand` del diseño y en una nueva corrida se actualiza solo si no queda por debajo de lo
+ * reservado (`reserved <= onHand`, en el mismo `UPDATE`); si no, la fila queda como estaba (no se
+ * toca `reserved`) y se avisa por la salida estándar, como el resumen del seed.
  *
  * @throws {Error} Si la línea del producto no está en el seed.
  */
@@ -158,11 +162,19 @@ async function seedProduct(
     where: { productId, position: { gt: product.images.length } },
   })
 
-  await tx.inventory.upsert({
-    where: { productId },
-    create: { productId, onHand: product.onHand },
-    update: { onHand: product.onHand },
+  const { onHand } = product
+  await tx.inventory.upsert({ where: { productId }, create: { productId, onHand }, update: {} })
+  const { count } = await tx.inventory.updateMany({
+    where: { productId, reserved: { lte: onHand } },
+    data: { onHand },
   })
+  if (count === 0) {
+    const current = await tx.inventory.findUniqueOrThrow({ where: { productId } })
+    process.stdout.write(
+      `Aviso: el stock de ${product.slug} queda en ${String(current.onHand)} y no en ` +
+        `${String(onHand)}, porque tiene ${String(current.reserved)} unidades reservadas.\n`,
+    )
+  }
 }
 
 /**
@@ -257,9 +269,9 @@ async function seedAdmin(tx: Tx): Promise<number> {
  *
  * Es idempotente (todo es `upsert` por `slug`, `(productId, position)`, `key`, `id = 1`,
  * `method` o el id determinístico de la reseña; el admin se crea solo si falta y nunca se pisa su
- * contraseña) y corre en una sola transacción: o queda todo o nada. Al final mueve la secuencia de
- * `products.sequence` al máximo, porque el seed inserta los correlativos a mano y el próximo alta
- * no tiene que chocar. Las reseñas y los contenidos que crea quedan sin cliente ni editor
+ * contraseña; el stock nunca baja de lo reservado) y corre en una sola transacción: o queda todo
+ * o nada. Al final mueve la secuencia de `products.sequence` al máximo, porque el seed inserta los
+ * correlativos a mano y el próximo alta no tiene que chocar. Las reseñas y los contenidos que crea quedan sin cliente ni editor
  * (`customer_id` y `updated_by` en null).
  *
  * @param prisma - Cliente de Prisma conectado a una base ya migrada.
