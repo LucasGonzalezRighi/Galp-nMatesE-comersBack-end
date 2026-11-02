@@ -7,3 +7,5 @@ coverage/
 *.log
 .DS_Store
 .superpowers/
+# Cliente de Prisma generado (`prisma generate`, lo corre `postinstall`)
+src/generated/

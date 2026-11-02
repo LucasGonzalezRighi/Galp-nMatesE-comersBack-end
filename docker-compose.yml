@@ -1,0 +1,36 @@
+# Postgres y Redis para desarrollo (`npm run db:up` / `npm run db:down`).
+# Las mismas imágenes que usan los E2E con Testcontainers, así se descargan una sola vez.
+name: galpon-backend
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: galpon
+      POSTGRES_PASSWORD: galpon
+      POSTGRES_DB: galpon
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U galpon -d galpon']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
