@@ -175,3 +175,255 @@ soporte (reseñas con compra verificada, contacto, arrepentimiento, emails) y B8
   test.
 - `ReviewsController` importa el DTO de slug y el texto de 404 de `catalog/interface`: moverlos a
   `src/shared/infrastructure/http` para no acoplar módulos.
+
+## B3 · Identidad (2026-11-02)
+
+Plan: [`docs/superpowers/plans/2026-11-02-b3-identidad.md`](superpowers/plans/2026-11-02-b3-identidad.md)
+(6 tareas en 5 olas). Decisiones de arquitectura en
+[ADR 0003 · sesiones en Redis y CSRF por sesión](adr/0003-sesiones-en-redis-y-csrf-por-sesion.md).
+
+### Qué quedó
+
+- **Esquema** (Task 1):
+  - Tablas `users`, `customers`, `addresses` y `password_reset_tokens`, con emails `citext`
+    únicos.
+  - Índice único parcial `addresses_default_per_customer_idx`: una sola dirección predeterminada
+    por cliente.
+  - Enum `province` con los 24 textos del contrato.
+  - FKs opcionales `reviews.customer_id` y `content_blocks.updated_by`.
+  - Migración `20261102194620_b3_identidad`.
+  - El seed suma el admin semilla.
+- **Sesiones, cookies y guards compartidos** (Task 2, `src/shared`):
+  - `SessionPort` con `RedisSessionStore`, que falla cerrado (503).
+  - `SecretsPort`.
+  - Cookies `__Host-` exactas (`sessionCookie`, `clearedSessionCookie`).
+  - Guards de sesión y de CSRF para el cliente y el admin.
+  - `Retry-After` en `ProblemFilter`.
+  - `cookie-parser`.
+  - El test de contrato compara también `security` y `requestBody`.
+- **Módulo `identity`** (Tasks 3 a 5):
+  - Dominio con entidades, normalización como el front y errores con los textos del contrato.
+  - 14 casos de uso más `GetAdminSessionQuery`, sin Nest y cableados con `useFactory`.
+  - Adaptadores: 4 repositorios Prisma, argon2id, `LogMailer` y el bloqueo por email en Redis.
+  - Tres controladores con las **18 operaciones** de `/auth/*`, `/me*` y `/admin/auth/*`.
+  - DTOs que validan con los mensajes del front.
+  - `@Throttle` 20/min en las escrituras de autenticación.
+- **Contrato** (fix de la Task 5): `validation-cases.contract.spec.ts` corre los casos compartidos
+  de `../frontend/docs/api/validation-cases.json` contra los DTOs (120 casos).
+- **Logs** (Task 6, `6b34120`): pino tapa también `Referer` y `X-CSRF-Token`. La prueba en vivo
+  mostró que el token de recuperación llegaba al log en el `Referer` (detalle en "Verificación").
+- **Docs** (Task 6): este apartado, la sección "Cuenta y admin" del README, el ADR 0003 y el
+  comentario de `STORE_ORIGIN` en `.env.example`.
+
+### Decisiones
+
+Rulings de la planificación (ledger del flujo, B-3 a B-8):
+
+- **B-3 · Alcance:**
+  - Las operaciones de identidad del contrato: `/auth/csrf`, `register`, `login`, `logout`,
+    `password/forgot` y `password/reset`; `/me` (`GET` y `PATCH`); `GET /me/orders` (página vacía
+    hasta B4); `/me/addresses` (`GET`, `POST`, `PATCH` y `DELETE`); y `/admin/auth/login`,
+    `logout`, `me`, `csrf` y `password`.
+  - El ruling decía "16", pero su propia lista suma **18**, y son las 18 que quedaron.
+  - Sin verificación de email, porque no está en el contrato.
+  - `GET /me/orders/{number}` espera a B4.
+  - `document_type` y `document_number` existen como columnas, pero ninguna ruta las completa.
+- **B-4 · Sesiones:**
+  - En Redis: `session:{id}` con un JSON, y el set `user-sessions:{userId}`.
+  - Ids y tokens de 32 bytes aleatorios en hex.
+  - Duración fija: anónima 24 h, cliente 30 días, admin 8 h.
+  - Varias sesiones por usuario. El `reset` las cierra todas.
+  - Sin Redis, 503 (falla cerrada). La caché y el throttler siguen fallando abiertos.
+- **B-5 · Cookies y CSRF:**
+  - Nombres exactos del contrato, siempre con `Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age`.
+  - Un token CSRF por sesión, que rota con la sesión al registrarse o iniciar sesión.
+  - 403 `csrf_invalid` para el cliente y para el admin (el mock respondía `forbidden` al cliente).
+  - `GET /auth/csrf` sin sesión abre una anónima.
+- **B-6 · Contraseñas y recuperación:**
+  - argon2id con 19 MiB, t=2 y p=1.
+  - Token `rt_` + 64 hex: se guarda solo su SHA-256, vence a los 60 minutos y se usa una sola vez.
+  - Link `${STORE_ORIGIN}/cuenta/restablecer?token=…`.
+  - El mail va detrás de `MailerPort`, con un adaptador de log hasta B7.
+  - `forgot` responde siempre 202.
+- **B-7 · Abuso:**
+  - `@Throttle` 20/min por IP en el registro, los dos logins, `forgot` y `reset`.
+  - Bloqueo por email tras 10 fallos en 15 minutos: 429 con `Retry-After`. Falla abierto sin
+    Redis.
+  - Admin semilla con las credenciales del demo del front, y un nuevo seed nunca lo pisa.
+- **B-8 · Olas:**
+  - W1: Task 1 en paralelo con la Task 2.
+  - W2: Task 3. W3: Task 4. W4: Task 5. W5: Task 6.
+
+Decisiones tomadas en el camino:
+
+- **`LoginAttemptsPort.blockedFor`** (Task 3): sin esto, un email bloqueado seguía aceptando la
+  contraseña correcta.
+- **Registro atómico** (fix de la Task 3):
+  - `CustomerRepository.createWithUser` y `attachUser` crean el usuario y el cliente en una sola
+    transacción.
+  - Antes, un fallo en el medio dejaba un usuario sin cliente, que no podía ni registrarse ni
+    entrar.
+- **Libreta como el mock:**
+  - La primera dirección no queda predeterminada a la fuerza.
+  - Borrar la predeterminada no promueve otra.
+  - `PATCH` reemplaza la dirección entera.
+  - Un id que no es UUID v7 da 404, sin consultar la base.
+- **Robustez de la libreta:** dos altas predeterminadas a la vez se resuelven con `updateMany`
+  previo y un reintento ante `P2002`. Un borrado doble usa `deleteMany`, sin 500.
+- **`GetAdminSessionQuery`** (Task 5): la sesión solo guarda el `userId`, así que hacía falta para
+  devolver el email en `GET /admin/auth/me`.
+- **DTOs:**
+  - Validan sobre el valor crudo del JSON: `"false"` no pasa a `true` (deuda de B2 cerrada).
+  - Validan en el orden de zod, así que el primer error es el mismo que el del front.
+  - `label` y `apartment` aceptan además que falten, como el mock.
+  - Contraseña actual mal: `invalid_password`. Confirmación distinta: `custom`.
+- **`security` y `requestBody` en el contrato** (Task 2): cierra la deuda de B2. Las cabeceras
+  todavía no se comparan.
+- **Logs sin secretos** (Task 6): `Referer` y `X-CSRF-Token` se suman a `Cookie`, `Set-Cookie` y
+  `Authorization`.
+
+### Versiones reales instaladas
+
+| Paquete                                             | Versión                 |
+| --------------------------------------------------- | ----------------------- |
+| `argon2` / `cookie-parser` / `@types/cookie-parser` | 0.45.1 / 1.4.7 / 1.4.10 |
+
+Son las del plan. Están en la tabla de B1/B2 y en `scripts/dependency-versions.json`.
+
+- `argon2`: es la mayor 0.45.x y trae binarios precompilados.
+- `@types/cookie-parser`: es la última 1.4.x.
+
+Para las pruebas en vivo se usó lo que ya tenía instalado el front: Next.js 16.4.2, Vite 8.3.4 y
+Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
+
+### Verificación
+
+- **Suite completa en verde:**
+  - `npm run typecheck`, `npm run lint` (versiones y fronteras) y `npm run format:check`.
+  - `npm test`: 36 archivos, 276 tests.
+  - `npm run test:e2e`: 13 archivos, 233 tests y 1 omitido. Testcontainers con
+    `postgres:17-alpine` y `redis:8-alpine`.
+  - `npm run contract:check`: 3 archivos, 140 tests y 1 omitido. **31 operaciones implementadas y
+    46 pendientes de 77**, sin diferencias.
+- **Review Focus del plan, cubierto con tests:**
+  1. Cookie exacta y borrado con `Max-Age=0`.
+  2. Email con mayúsculas o espacios, y 409 con `citext`.
+  3. Rotación: el token anónimo da 403 después del login.
+  4. Token de recuperación de un solo uso, que vence y cierra las sesiones.
+  5. Una sola predeterminada bajo concurrencia: 8 libretas con dos altas en paralelo cada una,
+     con chequeo de mutación.
+- **Prueba en vivo de la tienda (Task 6, paso 1):**
+  - Back compilado en el 3001 (`ADMIN_ORIGIN=http://localhost:5273`,
+    `STORE_ORIGIN=http://localhost:4300`), con Postgres y Redis de compose, migrado y sembrado.
+  - Tienda compilada en modo `live` y servida con `next start` en el 4300, con el entorno en la
+    misma línea (sin `.env.local`).
+  - Playwright headless (Chromium), todo en verde en la primera corrida. Capturas en
+    `.superpowers/sdd/2026-11-02-b3-identidad/captures/`:
+    - `/cuenta/registro` (Nombre, Apellido, Email, Contraseña) → `/cuenta` con "Hola, Ana", y la
+      cookie `__Host-galpon_session` `Secure` y `HttpOnly` (`store-1-registro-cuenta.png`).
+    - `/cuenta/direcciones`: "Casa, Av. Rivadavia 4321, CP 1406, Buenos Aires, CABA" como
+      predeterminada → se ve "Predeterminada" (`store-2-direccion-predeterminada.png`).
+    - "Cerrar sesión" → `/`, sin cookie (`store-3-logout-inicio.png`).
+    - `/cuenta/ingresar` → `/cuenta` con la dirección guardada (`store-4-login-cuenta.png`).
+    - `/cuenta/recuperar` → "Revisá tu correo", y el link
+      `http://localhost:4300/cuenta/restablecer?token=rt_…` aparece en el log del back
+      (`store-5-recuperar-revisa-tu-correo.png`).
+    - Además: ese link abre `/cuenta/restablecer`, la contraseña nueva se guarda ("Listo, cambiaste
+      tu contraseña", `store-6-restablecer-listo.png`), la vieja da "Email o contraseña
+      incorrectos." y la nueva entra.
+    - Sondeo de lo pendiente: `/cuenta/pedidos` muestra "Todavía no hiciste pedidos"
+      (`store-7-pedidos-vacio.png`). El checkout precarga el email y el nombre de la sesión, pero
+      `POST /cart/quote` da 404 (B4) y muestra "No pudimos actualizar el resumen"
+      (`store-8-checkout-en-vivo.png`).
+- **Hallazgo de la prueba en vivo:**
+  - Desde `/cuenta/restablecer?token=…`, cada pedido de la página llegaba al back con esa URL como
+    `Referer`, y pino la registraba, con el token. Lo mismo pasaba con `X-CSRF-Token`.
+  - Se arregló en `6b34120`: las dos cabeceras van como `[Redacted]`, con un test que corre pino.
+  - Repetida la prueba con el back nuevo, la única línea con `rt_` es la del `LogMailer` (que en
+    producción no lleva el link). Ningún `X-CSRF-Token` en claro, y 34 `Referer` tapados.
+- **Prueba en vivo del admin (Task 6, paso 2):**
+  - Admin compilado con `VITE_API_MODE=live VITE_API_BASE_URL=http://localhost:3001` y servido con
+    `vite preview --port 5273 --strictPort`.
+  - **Aviso:** `VITE_API_BASE_URL` también tiene que estar al correr `vite preview`. La CSP del
+    preview arma `connect-src` al arrancar, y sin la variable el navegador bloqueaba
+    `/admin/auth/*`: el login mostraba "No pudimos conectar, probá de nuevo". Con la variable,
+    todo en verde:
+    - `/login` con el admin semilla → "Resumen", con la cookie `__Host-galpon_admin`
+      `Secure`/`HttpOnly`/`Lax` (`admin-1-login-resumen.png`).
+    - Recargar mantiene la sesión (`admin-2-recarga-sigue-en-resumen.png`).
+    - "Cerrar sesión" → `/login`, sin cookie (`admin-4-logout-login.png`).
+    - Contraseña mala → "Email o contraseña incorrectos" (`admin-5-clave-mala.png`).
+- **Pantallas del admin que fallan en vivo hasta B6:**
+  - Resumen, Pedidos, Productos, Líneas, Contenido, Reseñas, Mensajes y Ajustes muestran "No
+    pudimos cargar…". Sus rutas `/admin/*` dan 404: `dashboard/summary`, `orders`, `products`,
+    `categories`, `content/*`, `reviews`, `messages` y `settings`
+    (`admin-3-productos-en-vivo.png`).
+  - "Productos → nuevo" y "Mi cuenta" cargan.
+  - El contador de la barra lateral pide `dashboard/summary` en todas las pantallas (404).
+- **Docker:** Docker Desktop se cerró solo al terminar las pruebas en vivo (la tercera vez en el
+  día). Se repitió el arreglo de B1/B2: renombrar `%LOCALAPPDATA%\Docker\run` y abrir Docker
+  Desktop. Al cierre no quedan procesos en el 3001, el 4300 ni el 5273, ni contenedores de compose.
+
+### Commits
+
+| Commit    | Qué                                                                                          |
+| --------- | -------------------------------------------------------------------------------------------- |
+| `7640a3b` | Plan de B3                                                                                   |
+| `23cacd0` | Sesiones en Redis, cookies `__Host-`, guards y CSRF; el contrato compara `security` (Task 2) |
+| `b8eabee` | Usuarios, clientes, direcciones y tokens de recuperación; admin semilla (Task 1)             |
+| `3def241` | Dominio y casos de uso de identidad (Task 3)                                                 |
+| `b057864` | Registro atómico de usuario y cliente (fix Task 3)                                           |
+| `1f29807` | Adaptadores Prisma, argon2, mailer de log y bloqueo de intentos (Task 4)                     |
+| `22a906c` | Rutas de cuenta, sesión y admin, con E2E de autenticación (Task 5)                           |
+| `c65c359` | Casos compartidos de validación del front contra los DTOs (fix Task 5)                       |
+| `6b34120` | Logs sin `Referer` ni `X-CSRF-Token` (Task 6)                                                |
+| Task 6    | Esta bitácora, el ADR 0003, el README de cuenta y admin y `.env.example`                     |
+
+### Lo que queda para B4 en adelante
+
+**Para B4 (pedidos y stock):**
+
+- `GET /me/orders` con datos reales, y `GET /me/orders/{number}`.
+- Mover `OrderStatus`, `PaymentStatus`, `OrderNumber`, `TotalArs` y `OrderSummary*` de
+  `identity/interface/dto` al módulo `orders` (reutilizar `ORDER_STATUSES`).
+- `AddressInput` va a `src/shared/infrastructure/http`, para no importar la capa `interface` de
+  identidad.
+- Revisar la adopción de un invitado al registrarse con su email: hoy la cuenta se queda con sus
+  pedidos y su teléfono sin verificar el email (ADR 0003).
+- `PrismaCustomerRepository.create` no traduce `P2002`: B4 decide qué hacer con un invitado
+  repetido.
+
+**Para B7 (comunidad, soporte y emails):**
+
+- El proveedor de mail real detrás de `MailerPort`. Tiene que encolar o tragar sus errores, para
+  que `forgot` siga dando siempre 202 y tarde lo mismo exista o no la cuenta.
+
+**Para B8 (producción):**
+
+- `trust proxy` para el límite por IP.
+- `NODE_ENV=production` obligatorio: si falta, el `LogMailer` registra los links.
+- El admin semilla no puede quedar con la contraseña pública: que `seedAdmin` se niegue en
+  producción o tome la contraseña de una variable.
+- `exposedHeaders: ['Retry-After']` en CORS, si el admin llega a mostrar la espera del 429.
+
+**Menores anotados en las revisiones:**
+
+- **Sesiones en Redis:**
+  - `destroyAllForUser` tiene una ventana entre `SMEMBERS` y `DEL`.
+  - El set `user-sessions:*` no se poda. Un script Lua resuelve las dos cosas.
+- **Recuperación y bloqueo:**
+  - Si Redis cae justo después de cambiar la contraseña, el `reset` deja vivas las sesiones viejas
+    y el token ya usado.
+  - El `reset` no limpia el bloqueo por email.
+  - La contraseña actual mal del admin no cuenta para el bloqueo.
+- **Libreta:**
+  - `replace` lanza P2025 (500) si la dirección se borra en el medio.
+  - El reintento de la predeterminada es uno solo: con 3 o más altas simultáneas puede dar 500.
+- **Código:**
+  - `prisma/seed.ts` duplica los parámetros de argon2 (debería importar `ARGON2_OPTIONS`).
+  - `sessionCookie` acepta un id vacío.
+  - `admin-auth.controller.ts` importa `CsrfTokenView` de otro controlador.
+- **Tests:**
+  - Falta un test que pegue contra el `@Throttle` de 20/min.
+  - El test "el módulo exporta GetMeQuery" no prueba la exportación.
+  - El E2E de auth ya hace 16 logins desde una IP: hay que cuidar el límite si se suman casos.

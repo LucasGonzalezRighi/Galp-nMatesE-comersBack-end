@@ -6,8 +6,9 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 
 - **Diseño:** [`docs/superpowers/specs/2026-10-20-galpon-backend-design.md`](docs/superpowers/specs/2026-10-20-galpon-backend-design.md).
 - **Bitácora** (qué se hizo en cada pieza, decisiones y versiones): [`docs/BITACORA.md`](docs/BITACORA.md).
-- **Decisiones de arquitectura:** [ADR 0001 · monolito hexagonal](docs/adr/0001-nest-hexagonal-monolito.md)
-  y [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md).
+- **Decisiones de arquitectura:** [ADR 0001 · monolito hexagonal](docs/adr/0001-nest-hexagonal-monolito.md),
+  [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md) y
+  [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -20,12 +21,12 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 
 ## Puertos y orígenes
 
-| Qué                    | Dónde                   | Notas                                                                         |
-| ---------------------- | ----------------------- | ----------------------------------------------------------------------------- |
-| Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN` (reservada: la usan B6 y B7). Llega al back desde su servidor. |
-| Admin (Vite)           | `http://localhost:5173` | `ADMIN_ORIGIN`. El único origen con CORS.                                     |
-| Este back              | `http://localhost:3001` | `PORT`. Prefijo `/api/v1`; Swagger UI en `/api/docs`.                         |
-| Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`).                                           |
+| Qué                    | Dónde                   | Notas                                                                          |
+| ---------------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN`: arma el link de recuperación. Llega al back desde su servidor. |
+| Admin (Vite)           | `http://localhost:5173` | `ADMIN_ORIGIN`. El único origen con CORS.                                      |
+| Este back              | `http://localhost:3001` | `PORT`. Prefijo `/api/v1`; Swagger UI en `/api/docs`.                          |
+| Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`).                                            |
 
 **CORS:** solo `ADMIN_ORIGIN` (en desarrollo `http://localhost:5173`) recibe permiso, con
 credenciales (las cookies de sesión del admin). La tienda no lo necesita: su servidor llama al back
@@ -67,8 +68,9 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 - **Cliente de Prisma** en `src/generated/prisma` (no se versiona): lo genera `postinstall`, o
   `npm run db:generate` después de cambiar `prisma/schema.prisma`.
 - **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos, 15 reseñas
-  (5 destacadas), 7 contenidos, ajustes y 3 envíos, los mismos datos de las fixtures del front. Es
-  idempotente (`upsert` por `slug`/`key`): correrlo dos veces deja lo mismo.
+  (5 destacadas), 7 contenidos, ajustes y 3 envíos, los mismos datos de las fixtures del front, y
+  el admin semilla (ver "Cuenta y admin"). Es idempotente (`upsert` por `slug`/`key`; el admin
+  solo se crea si falta): correrlo dos veces deja lo mismo.
 - Los datos salen de `prisma/seed-data/`, que se regenera desde las fixtures del front con
   `node scripts/import-fixtures.mjs` (ver [`prisma/seed-data/README.md`](prisma/seed-data/README.md)).
 
@@ -77,8 +79,12 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 `npm run contract:check` arma la app (sin Docker), genera el Swagger y lo compara, normalizado,
 con `../frontend/docs/api/openapi.yaml` (o `CONTRACT_PATH`). Falla si una operación implementada
 difiere del contrato o si Swagger expone una ruta que no está en `IMPLEMENTED_PATHS`
-(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 13
-implementadas y 64 pendientes de 77).
+(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 31
+implementadas y 46 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
+`requestBody`. Además corre los casos compartidos de validación del front
+(`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad
+(`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan los mismos errores en
+los dos lados.
 
 Para ver las diferencias de una ruta: `node scripts/openapi-diff.mjs products/{slug}` (en Git Bash,
 sin `/` inicial o entre comillas, para que no la convierta en una ruta de Windows).
@@ -92,32 +98,91 @@ esta misma prueba (la tienda compilada en modo `live` muestra los 27 productos d
 "Estado de la verificación" en [`docs/BITACORA.md`](docs/BITACORA.md)).
 
 1. Acá, con Docker Desktop abierto: `npm run db:up`, `npm run db:migrate`, `npm run db:seed` y
-   `npm run dev`.
+   `npm run dev`. Si vas a probar la recuperación de contraseña desde la tienda compilada, arrancá
+   el back con `STORE_ORIGIN=http://localhost:4300 npm run dev`: así el link del log apunta ahí.
 
-2. En el front (`../frontend`), un `apps/store/.env.local` (ignorado por git) con:
-
-   ```dotenv
-   API_MODE=live
-   NEXT_PUBLIC_API_MODE=live
-   API_BASE_URL=http://localhost:3001
-   NEXT_PUBLIC_SITE_URL=http://localhost:4300
-   REVALIDATE_SECRET=<32 caracteres o más>
-   NEXT_PUBLIC_MP_PUBLIC_KEY=TEST-00000000-0000-0000-0000-000000000000
-   ```
-
-3. Desde `../frontend`, compilar y servir la tienda en otro puerto (el 3000 queda para el
-   `next dev` de siempre; si la usás en el 3000, poné ahí `NEXT_PUBLIC_SITE_URL`):
+2. Desde `../frontend`, compilar y servir la tienda en otro puerto, con el entorno exportado en
+   esa terminal. El 3000 queda para el `next dev` de siempre. No uses un `apps/store/.env.local`:
+   el `next dev` también lo leería y quedaría en modo `live`.
 
    ```bash
+   export API_MODE=live NEXT_PUBLIC_API_MODE=live API_BASE_URL=http://localhost:3001 \
+     NEXT_PUBLIC_SITE_URL=http://localhost:4300 REVALIDATE_SECRET=<32 caracteres o más> \
+     NEXT_PUBLIC_MP_PUBLIC_KEY=TEST-00000000-0000-0000-0000-000000000000
    npm run build -w @galpon/store
-   npx next start apps/store --port 4300
+   cd apps/store && node ../../node_modules/next/dist/bin/next start --port 4300
    ```
 
-   `http://localhost:4300/` y `/tienda` tienen que mostrar los 27 productos del seed. Al terminar,
-   cerrá `next start` y `npm run dev`, y `npm run db:down` si no vas a seguir.
+   `http://localhost:4300/` y `/tienda` tienen que mostrar los 27 productos del seed, y la cuenta
+   (registro, ingreso, direcciones, recuperación) funciona contra el back. Al terminar, cerrá
+   `next start` y `npm run dev`, y `npm run db:down` si no vas a seguir.
 
-Las escrituras (carrito, pedidos, pagos, cuenta, admin) llegan desde B3: hasta entonces, esas
-pantallas de la tienda fallan en modo `live`. `POST /products/{slug}/reviews` llega en B7.
+Qué falla todavía en modo `live`, y en qué pieza llega:
+
+- **Carrito y checkout (B4):** `POST /cart/quote` da 404. El checkout muestra "No pudimos actualizar
+  el resumen" y no se puede comprar.
+- **Pedidos (B4):** `/cuenta/pedidos` muestra la lista vacía ("Todavía no hiciste pedidos"), porque
+  `GET /me/orders` devuelve una página vacía. El detalle de un pedido da 404.
+- **Pagos (B5).**
+- **Contacto, arrepentimiento y reseñas nuevas (B7).**
+
+## Cuenta y admin
+
+Desde B3 el back maneja las cuentas de la tienda y el ingreso al admin. Usa sesiones en Redis,
+cookies `__Host-` y un token CSRF por sesión
+([ADR 0003](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md)). Las 18 operaciones de
+`/auth/*`, `/me*` y `/admin/auth/*` están implementadas.
+
+- **Cookies:** `__Host-galpon_session` (tienda: 30 días; la anónima que solo da el CSRF, 24 h) y
+  `__Host-galpon_admin` (admin: 8 h). Duran un plazo fijo, que no se renueva con el uso.
+  - Van siempre con `Path=/; HttpOnly; Secure; SameSite=Lax`, también en `http://localhost`.
+  - **Probá con Chrome o Firefox:** aceptan cookies `Secure` en `localhost`. Safari no, y ahí la
+    sesión no se guarda.
+  - El token CSRF va en `X-CSRF-Token`. Si falta o no es el de la sesión, la respuesta es 403
+    `csrf_invalid`, y el front pide uno nuevo.
+- **Admin semilla:** `admin@galponmates.com.ar` / `galpon-demo-2026`, las credenciales del demo del
+  front.
+  - `npm run db:seed` lo crea solo si no existe y nunca lo pisa.
+  - Para cambiar la contraseña: en el admin, "Mi cuenta" → "Cambiar contraseña"
+    (`POST /admin/auth/password`).
+  - Un nuevo seed no la restablece. Si la olvidás, `npm run db:reset && npm run db:seed` (borra la
+    base de desarrollo).
+  - En producción no puede quedar la contraseña pública (B8).
+- **Recuperación de contraseña:** `POST /auth/password/forgot` responde siempre 202. Hasta B7 no
+  hay proveedor de mail: fuera de producción, el back escribe el link en el log, en una línea con
+  `"context":"LogMailer"` y el texto "Mail de recuperación de contraseña (solo log, sin proveedor)":
+
+  ```text
+  "link":"http://localhost:3000/cuenta/restablecer?token=rt_…"
+  ```
+
+  - El link sale de `STORE_ORIGIN`.
+  - Vale 60 minutos y una sola vez.
+  - Al usarlo se cierran todas las sesiones del usuario.
+  - En producción el link no se loguea.
+
+- **Límites:**
+  - 20 pedidos por minuto por IP en registro, ingreso (cliente y admin), `forgot` y `reset`.
+  - Tras 10 ingresos fallidos con el mismo email en 15 minutos, 429 con `Retry-After`. Durante esa
+    espera tampoco entra la contraseña correcta.
+  - Sin Redis, las rutas con sesión responden 503: ninguna deja pasar sin verificar.
+- **Admin contra este back:** el back tiene que permitir el origen del admin en `ADMIN_ORIGIN`
+  (`http://localhost:5173` con `vite dev`). Para el admin compilado, desde `../frontend`:
+
+  ```bash
+  export VITE_API_MODE=live VITE_API_BASE_URL=http://localhost:3001
+  npm run build -w @galpon/admin
+  cd apps/admin && npx vite preview --port 5273 --strictPort
+  ```
+
+  - El back va con `ADMIN_ORIGIN=http://localhost:5273`.
+  - `VITE_API_BASE_URL` también tiene que estar al correr `vite preview`. La CSP del preview arma su
+    `connect-src` al arrancar, y sin la variable el navegador bloquea las llamadas: el login muestra
+    "No pudimos conectar, probá de nuevo".
+  - Ingreso, recarga con la sesión y cierre de sesión funcionan, y "Mi cuenta" carga (el cambio de
+    contraseña lo cubre el E2E).
+  - Todas las pantallas con datos (Resumen, Pedidos, Productos, Líneas, Contenido, Reseñas,
+    Mensajes y Ajustes) muestran "No pudimos cargar…": sus rutas `/admin/*` dan 404 hasta B6.
 
 ## Scripts
 
@@ -146,9 +211,11 @@ pantallas de la tienda fallan en modo `live`. `POST /products/{slug}/reviews` ll
   con queries en memoria, filtro de errores, idempotencia, caché, throttler, CORS y el test
   negativo de fronteras (escribe un `domain` que importa `@prisma/client` en
   `src/modules/_lint_probe/`, nombre reservado, corre ESLint y lo borra).
-- **E2E** (`npm run test:e2e`): Postgres y Redis reales con Testcontainers (health, Prisma, seed,
-  idempotencia, outbox, repositorio del catálogo y las 13 lecturas públicas), más el contrato.
-  Corren de a un archivo.
+- **E2E** (`npm run test:e2e`): Postgres y Redis reales con Testcontainers. Cubren health, Prisma,
+  seed, idempotencia, outbox, el repositorio del catálogo y las 13 lecturas públicas. Desde B3
+  suman sesiones en Redis, los adaptadores de identidad y la autenticación completa por HTTP
+  (cookies, CSRF, rotación, bloqueo, recuperación y admin). Incluyen también el contrato y los
+  casos compartidos de validación. Corren de a un archivo.
 - **Verificación completa**, la misma que corre la CI:
 
   ```bash
