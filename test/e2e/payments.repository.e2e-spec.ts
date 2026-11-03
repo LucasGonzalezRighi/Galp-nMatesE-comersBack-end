@@ -11,6 +11,7 @@ import {
   productSlugCacheKey,
 } from '../../src/modules/catalog/infrastructure/cached-product.repository'
 import { CreateOrderCommand } from '../../src/modules/orders/application/commands/create-order.command'
+import { ExpireOrdersCommand } from '../../src/modules/orders/application/commands/expire-orders.command'
 import {
   ORDER_PAYMENTS_PORT,
   type OrderPaymentsPort,
@@ -42,6 +43,7 @@ import {
   WEBHOOK_QUEUE_PORT,
   type WebhookQueuePort,
 } from '../../src/modules/payments/application/ports/webhook-queue.port'
+import { releasedIdempotencyKey } from '../../src/modules/payments/application/release-attempt'
 import type { ProviderPayment } from '../../src/modules/payments/domain/provider-payment'
 import { PAYMENT_WEBHOOKS_QUEUE } from '../../src/modules/payments/infrastructure/payment-webhooks.queue'
 import { PaymentsSweep } from '../../src/modules/payments/infrastructure/payments-sweep'
@@ -364,6 +366,27 @@ describe('adaptadores de pagos (Postgres + Redis + BullMQ)', () => {
         lastError: null,
       })
     })
+
+    it('findByIdempotencyKey encuentra la clave exacta y no la original de una clave soltada', async () => {
+      const order = await placeOrder()
+      const input = attemptFor(order)
+      const { attempt } = await payments().startAttempt(input)
+
+      expect(await payments().findByIdempotencyKey(input.idempotencyKey)).toMatchObject({
+        id: attempt.id,
+        orderId: order.id,
+      })
+
+      const released = releasedIdempotencyKey(attempt)
+      await payments().update(attempt.id, {
+        status: 'cancelled',
+        isActive: false,
+        idempotencyKey: released,
+      })
+      expect(await payments().findByIdempotencyKey(input.idempotencyKey)).toBeNull()
+      expect(await payments().findByIdempotencyKey(released)).toMatchObject({ id: attempt.id })
+      expect(await payments().findByIdempotencyKey(randomUUID())).toBeNull()
+    })
   })
 
   describe('PrismaWebhookEventRepository', () => {
@@ -604,6 +627,54 @@ describe('adaptadores de pagos (Postgres + Redis + BullMQ)', () => {
         })
       }, QUEUE_WAIT)
       expect(gateway().callsTo('expirePreference')).toContainEqual([preferenceId])
+    })
+
+    it('un aprobado parcial y un rechazado: el pedido vence por el job y el consumidor del outbox devuelve el aprobado (late_approval) una sola vez', async () => {
+      const order = await placeOrder(undefined, 'mp_redirect')
+      const { attempt } = await payments().startAttempt(
+        attemptFor(order, { method: 'mp_redirect' }),
+      )
+      const partialArs = Math.floor(order.totalArs / 3)
+      const checkoutPro = { paymentTypeId: 'account_money', paymentMethodId: 'account_money' }
+      const partial = approvedPayment(order, { ...checkoutPro, amountArs: partialArs })
+      await apply().execute(partial, { attemptId: null, source: 'webhook' })
+      expect(await paymentStatusOf(order)).toBe('pending')
+      const rejected = approvedPayment(order, {
+        ...checkoutPro,
+        status: 'rejected',
+        statusDetail: 'cc_rejected_other_reason',
+        amountArs: order.totalArs - partialArs,
+        approvedAt: null,
+      })
+      await apply().execute(rejected, { attemptId: null, source: 'webhook' })
+      expect(await paymentStatusOf(order)).toBe('rejected')
+      await prisma().order.update({
+        where: { id: order.id },
+        data: { reservedUntil: new Date(Date.now() - MINUTE) },
+      })
+      expect(await get(ExpireOrdersCommand).expireOne(order.id)).not.toBeNull()
+      const refundCalls = () =>
+        gateway()
+          .callsTo('refundPayment')
+          .filter(([providerPaymentId]) => providerPaymentId === partial.providerPaymentId)
+
+      expect(await get(OutboxRelay).runOnce()).toBeGreaterThan(0)
+
+      await vi.waitFor(async () => {
+        expect(
+          await prisma().refund.findMany({
+            where: { paymentId: attempt.id },
+            select: { reason: true, status: true, amountArs: true },
+          }),
+        ).toEqual([{ reason: 'late_approval', status: 'approved', amountArs: partialArs }])
+      }, QUEUE_WAIT)
+      await get(OnOrderExpiredCommand).execute(order.id)
+
+      expect(await prisma().refund.count({ where: { payment: { orderId: order.id } } })).toBe(1)
+      expect(refundCalls()).toHaveLength(1)
+      expect(await prisma().order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({
+        status: 'expired',
+      })
     })
 
     it('el barrido de pagos retoma una notificación sin procesar de hace más de 5 minutos', async () => {

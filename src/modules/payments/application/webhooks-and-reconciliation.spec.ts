@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createPaymentsHarness,
   ORDER_TOKEN,
+  type PaymentsHarness,
   signWebhook,
   simToken,
 } from '../../../../test/support/payments'
@@ -11,6 +12,8 @@ import {
   InvalidSignatureError,
   PaymentAttemptNotFoundError,
 } from '../domain/payments-errors'
+import type { ProviderPayment } from '../domain/provider-payment'
+import type { OrderAccess } from './order-access'
 import type { IncomingWebhook } from './commands/receive-webhook.command'
 
 const MINUTE = 60_000
@@ -452,6 +455,133 @@ describe('OnOrderExpiredCommand', () => {
     const { h, order } = setup()
     await h.onExpired.execute(order.id)
     expect(h.gateway.calls).toEqual([])
+  })
+
+  describe('un aprobado parcial de un Checkout Pro dividido (total 68397)', () => {
+    /** Un pago de Checkout Pro del pedido, como lo informa Mercado Pago. */
+    function checkoutProPayment(
+      number: string,
+      approvedAt: Date,
+      changes: Partial<ProviderPayment>,
+    ): ProviderPayment {
+      return {
+        providerPaymentId: '4000000001',
+        status: 'approved',
+        statusDetail: 'accredited',
+        amountArs: 30000,
+        refundedArs: 0,
+        installments: 1,
+        paymentTypeId: 'account_money',
+        paymentMethodId: 'account_money',
+        cardLastFour: null,
+        issuerId: null,
+        externalReference: number,
+        challengeUrl: null,
+        approvedAt,
+        ...changes,
+      }
+    }
+
+    /** Preferencia y un aprobado de 30000: el pedido sigue `pending_payment` con `pending`. */
+    async function partiallyApproved() {
+      const { h, order, access } = setup()
+      await h.preference.execute(access, KEY_1)
+      const approved = checkoutProPayment(order.number, h.clock.now(), {})
+      await h.apply.execute(approved, { attemptId: null, source: 'webhook' })
+      expect(h.orders.get(order.id)).toMatchObject({
+        status: 'pending_payment',
+        paymentStatus: 'pending',
+      })
+      return { h, order, access, approved }
+    }
+
+    async function secondPayment(h: PaymentsHarness, number: string, status: string) {
+      const second = checkoutProPayment(number, h.clock.now(), {
+        providerPaymentId: '4000000002',
+        status,
+        statusDetail: status === 'rejected' ? 'cc_rejected_other_reason' : 'by_collector',
+        amountArs: 38397,
+        approvedAt: null,
+      })
+      await h.apply.execute(second, { attemptId: null, source: 'webhook' })
+    }
+
+    it.each([
+      [
+        'el segundo pago sale rejected',
+        (h: PaymentsHarness, number: string) => secondPayment(h, number, 'rejected'),
+      ],
+      [
+        'el segundo pago sale cancelled',
+        (h: PaymentsHarness, number: string) => secondPayment(h, number, 'cancelled'),
+      ],
+      [
+        'el cliente arranca otro intento',
+        async (h: PaymentsHarness, number: string) => {
+          const access: OrderAccess = { number, token: ORDER_TOKEN }
+          await h.preference.execute(access, KEY_2)
+        },
+      ],
+    ])(
+      '%s: a los 31 min vence y se devuelve el aprobado (late_approval) una sola vez',
+      async (_case, leaveExpirable) => {
+        const { h, order } = await partiallyApproved()
+        await leaveExpirable(h, order.number)
+        h.clock.advance(31 * MINUTE)
+        expect(await h.orders.expireOne(order.id)).not.toBeNull()
+
+        await h.onExpired.execute(order.id)
+        await h.onExpired.execute(order.id)
+
+        const approved = h.payments
+          .of(order.id)
+          .find((attempt) => attempt.providerPaymentId === '4000000001')
+        expect([...h.payments.refunds.values()]).toEqual([
+          expect.objectContaining({
+            paymentId: approved?.id,
+            reason: 'late_approval',
+            amountArs: 30000,
+            status: 'approved',
+          }),
+        ])
+        expect(h.gateway.callsTo('refundPayment')).toEqual([['4000000001', expect.any(String)]])
+        expect(h.payments.of(order.id).filter((attempt) => attempt.isActive)).toEqual([])
+        expect(h.orders.get(order.id).status).toBe('expired')
+      },
+    )
+
+    it('un aprobado ya devuelto en parte (partially_refunded) devuelve solo el saldo', async () => {
+      const { h, order, approved } = await partiallyApproved()
+      await h.apply.execute(
+        { ...approved, refundedArs: 10000 },
+        { attemptId: null, source: 'webhook' },
+      )
+      await secondPayment(h, order.number, 'rejected')
+      h.clock.advance(31 * MINUTE)
+      expect(await h.orders.expireOne(order.id)).not.toBeNull()
+
+      await h.onExpired.execute(order.id)
+
+      expect([...h.payments.refunds.values()]).toEqual([
+        expect.objectContaining({ reason: 'late_approval', amountArs: 20000, status: 'approved' }),
+      ])
+      expect(h.gateway.callsTo('refundPayment')).toEqual([['4000000001', expect.any(String)]])
+    })
+
+    it('si la devolución falla queda failed y se avisa (la alerta de B6)', async () => {
+      const { h, order } = await partiallyApproved()
+      await secondPayment(h, order.number, 'rejected')
+      h.clock.advance(31 * MINUTE)
+      expect(await h.orders.expireOne(order.id)).not.toBeNull()
+      h.gateway.failures.refundPayment = new Error('MP caído')
+
+      await h.onExpired.execute(order.id)
+
+      expect([...h.payments.refunds.values()]).toEqual([
+        expect.objectContaining({ reason: 'late_approval', status: 'failed' }),
+      ])
+      expect(h.logger.warnings.join(' ')).toContain('Devolvelo desde Mercado Pago')
+    })
   })
 })
 

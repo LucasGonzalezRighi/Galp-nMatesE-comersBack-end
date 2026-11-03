@@ -45,13 +45,20 @@ export interface SimulatedGatewayCall {
  *
  * Guarda en memoria cada pago por id (`getPayment` devuelve lo último aplicado: lo que cobró o lo
  * que el simulador resolvió con {@link SimulatedGateway.remember}); `cancelPayment` cancela un
- * pago pendiente y `refundPayment`/`expirePreference` solo responden OK. Cada llamada queda en
+ * pago pendiente y `refundPayment`/`expirePreference` solo responden OK. Como Mercado Pago con el
+ * mismo `X-Idempotency-Key`, un cobro o una preferencia con una clave ya usada devuelven el mismo
+ * pago (como está ahora) o la misma preferencia, sin cobrar ni crear otra: así el reintento de un
+ * cobro que se guardó a medias no cobra dos veces. Cada llamada queda en
  * {@link SimulatedGateway.calls} para los tests.
  */
 export class SimulatedGateway implements PaymentGatewayPort {
   /** Llamadas, de la más vieja a la más nueva (como mucho {@link SIMULATED_CALLS_LIMIT}). */
   readonly calls: SimulatedGatewayCall[] = []
   private readonly payments = new Map<string, ProviderPayment>()
+  /** Id del pago que cobró cada clave idempotente. */
+  private readonly chargedKeys = new Map<string, string>()
+  /** Preferencia creada con cada clave idempotente. */
+  private readonly preferences = new Map<string, PreferenceResult>()
 
   /**
    * @param settings - Máximo de cuotas sin interés (`settings.installmentsMax`).
@@ -95,11 +102,15 @@ export class SimulatedGateway implements PaymentGatewayPort {
   /** {@inheritDoc PaymentGatewayPort.createPreference} */
   createPreference(input: PreferenceInput): Promise<PreferenceResult> {
     this.track('createPreference', [input])
+    const existing = this.preferences.get(input.idempotencyKey)
+    if (existing !== undefined) return Promise.resolve({ ...existing })
     const preferenceId = `sim-pref-${newId()}`
-    return Promise.resolve({
+    const preference: PreferenceResult = {
       preferenceId,
       initPoint: `${this.origin}${SIMULATOR_PATH}/checkout?preference=${preferenceId}`,
-    })
+    }
+    this.preferences.set(input.idempotencyKey, preference)
+    return Promise.resolve({ ...preference })
   }
 
   /** {@inheritDoc PaymentGatewayPort.expirePreference} */
@@ -117,6 +128,8 @@ export class SimulatedGateway implements PaymentGatewayPort {
   /** {@inheritDoc PaymentGatewayPort.createCardPayment} */
   async createCardPayment(input: CardChargeInput): Promise<ProviderPayment> {
     this.track('createCardPayment', [input])
+    const charged = this.payments.get(this.chargedKeys.get(input.idempotencyKey) ?? '')
+    if (charged !== undefined) return { ...charged }
     const token = await this.parseCharge(input)
     const outcome = simulatedOutcome(token.holder)
     const providerPaymentId = this.newPaymentId()
@@ -139,6 +152,7 @@ export class SimulatedGateway implements PaymentGatewayPort {
       approvedAt: outcome.status === 'approved' ? this.clock.now() : null,
     }
     this.payments.set(providerPaymentId, payment)
+    this.chargedKeys.set(input.idempotencyKey, providerPaymentId)
     return { ...payment }
   }
 

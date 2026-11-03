@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  IdempotencyKeyReusedError,
   InstallmentsNotAvailableError,
   IntentNotActiveError,
   InvalidCardTokenError,
@@ -66,6 +67,16 @@ describe('errores de pagos', () => {
           message: 'Esa cantidad de cuotas no está disponible para esta tarjeta.',
         },
       ],
+    })
+  })
+
+  it('422 idempotency_key_reused, con el texto del interceptor de idempotencia', () => {
+    expect(new IdempotencyKeyReusedError()).toMatchObject({
+      name: 'IdempotencyKeyReusedError',
+      code: 'idempotency_key_reused',
+      status: 422,
+      title: 'La clave ya se usó',
+      detail: 'La Idempotency-Key ya se usó con otros datos. Generá una nueva para este intento.',
     })
   })
 

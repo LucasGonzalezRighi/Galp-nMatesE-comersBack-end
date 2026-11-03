@@ -20,9 +20,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Consumidor de la cola `outbox` (Ruling B-43): despacha por `job.name` (el `type` del evento).
- * `order.expired` cancela el intento activo del pedido vencido y, con mejor esfuerzo, vence la
- * preferencia o cancela el pago en Mercado Pago ({@link OnOrderExpiredCommand}); el resto de los
- * eventos se aceptan sin hacer nada. Cuando B6/B7 necesiten consumir el outbox, este despacho se
+ * `order.expired` cancela el intento activo del pedido vencido, con mejor esfuerzo vence la
+ * preferencia o cancela el pago en Mercado Pago, y devuelve los aprobados que el pedido cobró sin
+ * completarse ({@link OnOrderExpiredCommand}); el resto de los eventos se aceptan sin hacer nada. Cuando B6/B7 necesiten consumir el outbox, este despacho se
  * extrae a `shared` (cada job lo toma un solo worker de la cola).
  */
 @Processor(OUTBOX_QUEUE)
@@ -33,7 +33,7 @@ export class OutboxEventsProcessor extends WorkerHost implements OnModuleDestroy
   private readonly warnFailed = createRateLimitedWarn(this.logger)
 
   /**
-   * @param onOrderExpired - Cancelación del intento de un pedido vencido.
+   * @param onOrderExpired - Cierre de los pagos de un pedido vencido.
    * @param queue - Cola `outbox` (para comprobar que Redis contesta al cerrar).
    */
   constructor(

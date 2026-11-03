@@ -71,6 +71,23 @@ export class InstallmentsNotAvailableError extends DomainError {
   }
 }
 
+/**
+ * 422 `idempotency_key_reused`: la `Idempotency-Key` ya es de un intento de otro pedido o de otra
+ * forma de pago. En la práctica el interceptor de idempotencia lo frena antes (el hash del pedido
+ * cambia); esto cubre lo que llegue igual, con el mismo `type` y el mismo texto.
+ */
+export class IdempotencyKeyReusedError extends DomainError {
+  constructor() {
+    super(
+      'idempotency_key_reused',
+      422,
+      'La Idempotency-Key ya se usó con otros datos. Generá una nueva para este intento.',
+      'La clave ya se usó',
+    )
+    this.name = 'IdempotencyKeyReusedError'
+  }
+}
+
 /** 502 `payment_gateway_error`: Mercado Pago falló o no respondió a tiempo. */
 export class PaymentGatewayError extends DomainError {
   constructor() {

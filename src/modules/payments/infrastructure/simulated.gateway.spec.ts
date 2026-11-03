@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { FIXED_NOW, FixedClock } from '../../../../test/support/clock'
 import { FixedPaymentsSettings, simToken } from '../../../../test/support/payments'
+import { newId } from '../../../shared/domain/id'
 import type { OrderForPayment } from '../../orders/application/ports/order-payments.port'
 import type { CardChargeInput } from '../application/ports/payment-gateway.port'
 import { InstallmentsNotAvailableError, InvalidCardTokenError } from '../domain/payments-errors'
@@ -25,10 +26,11 @@ const ORDER: OrderForPayment = {
   lines: [{ id: 'line-1', name: 'Mate', quantity: 1, totalArs: 68397 }],
 }
 
-function charge(token: string, installments = 1): CardChargeInput {
+/** Cobro de prueba; cada uno con su clave idempotente, salvo que se pase la misma. */
+function charge(token: string, installments = 1, idempotencyKey = newId()): CardChargeInput {
   return {
     order: ORDER,
-    idempotencyKey: 'key',
+    idempotencyKey,
     token,
     paymentMethodId: 'visa',
     issuerId: '310',
@@ -161,6 +163,42 @@ describe('SimulatedGateway (Ruling B-55)', () => {
       status: 'approved',
     })
     await expect(gateway.cancelPayment('1000000000')).resolves.toBeNull()
+  })
+
+  it('la misma clave devuelve el mismo pago como está ahora, sin cobrar otro (X-Idempotency-Key)', async () => {
+    const { gateway } = setup()
+    const first = await gateway.createCardPayment(charge(simToken('CONT'), 1, 'clave-1'))
+    gateway.remember({ ...first, status: 'approved', statusDetail: 'accredited' })
+
+    const again = await gateway.createCardPayment(charge(simToken('CONT'), 1, 'clave-1'))
+    const other = await gateway.createCardPayment(charge(simToken('CONT'), 1, 'clave-2'))
+
+    expect(again).toMatchObject({
+      providerPaymentId: first.providerPaymentId,
+      status: 'approved',
+      statusDetail: 'accredited',
+    })
+    expect(other.providerPaymentId).not.toBe(first.providerPaymentId)
+    expect(gateway.callsTo('createCardPayment')).toHaveLength(3)
+  })
+
+  it('la misma clave devuelve la misma preferencia; otra clave crea otra', async () => {
+    const { gateway } = setup()
+    const input = {
+      order: ORDER,
+      idempotencyKey: 'clave-1',
+      notificationUrl: null,
+      backUrl: 'http://localhost:4300/checkout/resultado?pedido=GLP-10001',
+      expiresAt: ORDER.reservedUntil,
+      statementDescriptor: 'GALPON MATES',
+    }
+
+    const first = await gateway.createPreference(input)
+    const again = await gateway.createPreference(input)
+    const other = await gateway.createPreference({ ...input, idempotencyKey: 'clave-2' })
+
+    expect(again).toEqual(first)
+    expect(other.preferenceId).not.toBe(first.preferenceId)
   })
 
   it('preferencia sim-pref- con el initPoint del checkout simulado', async () => {

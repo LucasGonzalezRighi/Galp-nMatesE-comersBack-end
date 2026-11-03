@@ -404,6 +404,13 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return Promise.resolve(this.copy(this.attempts.get(id)))
   }
 
+  /** {@inheritDoc PaymentRepository.findByIdempotencyKey} */
+  findByIdempotencyKey(key: string): Promise<PaymentAttempt | null> {
+    return Promise.resolve(
+      this.copy([...this.attempts.values()].find((attempt) => attempt.idempotencyKey === key)),
+    )
+  }
+
   /** {@inheritDoc PaymentRepository.findActiveByOrder} */
   findActiveByOrder(orderId: string): Promise<PaymentAttempt | null> {
     return Promise.resolve(this.copy(this.activeOf(orderId) ?? undefined))
@@ -637,18 +644,24 @@ export interface GatewayCall {
 
 /**
  * Pasarela programable: cobra con los tokens `sim_` del simulador (mismos titulares y cuotas),
- * guarda los pagos para `getPayment`, anota cada llamada y puede fallar por método.
+ * guarda los pagos para `getPayment`, anota cada llamada y puede fallar por método. Como Mercado
+ * Pago con el mismo `X-Idempotency-Key`, la misma clave devuelve el mismo pago o la misma
+ * preferencia sin crear otro.
  */
 export class FakeGateway implements PaymentGatewayPort {
   /** Llamadas, en orden. */
   readonly calls: GatewayCall[] = []
   /** Pagos que "tiene" Mercado Pago, por id. */
   readonly payments = new Map<string, ProviderPayment>()
+  /** Preferencias creadas, por clave idempotente. */
+  readonly preferences = new Map<string, PreferenceResult>()
   /** Error a lanzar por método. */
   readonly failures: Partial<Record<keyof PaymentGatewayPort, Error>> = {}
   /** Estado con que responden las devoluciones. */
   refundStatus: RefundResult['status'] = 'approved'
   private sequence = 0
+  /** Id del pago que cobró cada clave idempotente. */
+  private readonly chargedKeys = new Map<string, string>()
 
   /** @param clock - Reloj para `approvedAt`. */
   constructor(private readonly clock: Clock) {}
@@ -673,12 +686,16 @@ export class FakeGateway implements PaymentGatewayPort {
   /** {@inheritDoc PaymentGatewayPort.createPreference} */
   createPreference(input: PreferenceInput): Promise<PreferenceResult> {
     this.track('createPreference', [input])
+    const existing = this.preferences.get(input.idempotencyKey)
+    if (existing !== undefined) return Promise.resolve({ ...existing })
     this.sequence += 1
     const preferenceId = `sim-pref-${String(this.sequence)}`
-    return Promise.resolve({
+    const preference: PreferenceResult = {
       preferenceId,
       initPoint: `${SIMULATOR_ORIGIN}/api/v1/__simulated/mercadopago/checkout?preference=${preferenceId}`,
-    })
+    }
+    this.preferences.set(input.idempotencyKey, preference)
+    return Promise.resolve({ ...preference })
   }
 
   /** {@inheritDoc PaymentGatewayPort.expirePreference} */
@@ -697,6 +714,8 @@ export class FakeGateway implements PaymentGatewayPort {
   /** {@inheritDoc PaymentGatewayPort.createCardPayment} */
   createCardPayment(input: CardChargeInput): Promise<ProviderPayment> {
     this.track('createCardPayment', [input])
+    const charged = this.payments.get(this.chargedKeys.get(input.idempotencyKey) ?? '')
+    if (charged !== undefined) return Promise.resolve({ ...charged })
     const token = this.checkCharge(input)
     if (token instanceof Error) return Promise.reject(token)
     this.sequence += 1
@@ -721,6 +740,7 @@ export class FakeGateway implements PaymentGatewayPort {
       approvedAt: outcome.status === 'approved' ? this.clock.now() : null,
     }
     this.payments.set(providerPaymentId, payment)
+    this.chargedKeys.set(input.idempotencyKey, providerPaymentId)
     return Promise.resolve({ ...payment })
   }
 
@@ -863,7 +883,7 @@ export function createPaymentsHarness() {
       logger,
     ),
     reprocess: new ReprocessWebhookEventsCommand(webhookEvents, process, clock, logger),
-    onExpired: new OnOrderExpiredCommand(payments, gateway, logger),
+    onExpired: new OnOrderExpiredCommand(payments, gateway, apply, logger),
     simulate: new SimulateProviderResultCommand(payments, orders, apply, clock, (payment) => {
       gateway.setPayment(payment)
     }),

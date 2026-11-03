@@ -67,7 +67,8 @@ export class PaymentsController {
 
   /**
    * Crea la preferencia de Checkout Pro (cancela antes el intento activo). Con la misma
-   * `Idempotency-Key` devuelve la misma preferencia.
+   * `Idempotency-Key` devuelve la misma preferencia (también si la primera vez falló después de
+   * crear el intento: la retoma).
    *
    * @param params - Número del pedido, ya validado.
    * @param token - `X-Order-Token`, o `null`.
@@ -75,6 +76,8 @@ export class PaymentsController {
    * @returns El `initPoint` al que redirige la tienda.
    * @throws {OrderNotFoundError} 404 sin token, con token ajeno o sin pedido.
    * @throws {OrderNotPayableError} 409 si el pedido no está `pending_payment`.
+   * @throws {IdempotencyKeyReusedError} 422 si la clave es de un intento de otro pedido o de
+   *   tarjeta.
    * @throws {PaymentGatewayError} 502 si Mercado Pago falla.
    */
   @Post('payments/mercadopago/preference')
@@ -98,7 +101,8 @@ export class PaymentsController {
 
   /**
    * Cobra con el token de la tarjeta y aplica la respuesta inmediata (un `APRO` deja el pedido
-   * pagado). Con la misma `Idempotency-Key` y el mismo cuerpo devuelve el primer resultado.
+   * pagado). Con la misma `Idempotency-Key` y el mismo cuerpo devuelve el primer resultado; si la
+   * primera vez falló después de cobrar, el reintento retoma ese intento sin cobrar dos veces.
    *
    * @param params - Número del pedido, ya validado.
    * @param token - `X-Order-Token`, o `null`.
@@ -109,6 +113,8 @@ export class PaymentsController {
    * @throws {OrderNotPayableError} 409 si el pedido no está `pending_payment`.
    * @throws {InvalidCardTokenError} 422 en `token`.
    * @throws {InstallmentsNotAvailableError} 422 en `installments`.
+   * @throws {IdempotencyKeyReusedError} 422 si la clave es de un intento de otro pedido o de
+   *   Checkout Pro.
    * @throws {PaymentGatewayError} 502 si Mercado Pago falla.
    */
   @Post('payments/mercadopago/card')

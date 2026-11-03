@@ -289,12 +289,13 @@ export class ApplyProviderPaymentCommand {
   }
 
   /**
-   * Devuelve a Mercado Pago el total de un pago aprobado (lo usa la conciliación para un Checkout
-   * Pro dividido que nunca se completó). Idempotente por `(intento, motivo)`: si ya hay una
-   * devolución con ese motivo no hace nada. Un error de la pasarela deja la fila `failed` y se
-   * avisa, no se relanza.
+   * Devuelve a Mercado Pago lo que queda de un pago aprobado: el total, o el saldo si ya se
+   * devolvió una parte (lo usan la conciliación para un Checkout Pro dividido que nunca se
+   * completó y el consumidor de `order.expired`). Idempotente por `(intento, motivo)`: si ya hay
+   * una devolución con ese motivo, o no queda saldo, no hace nada. Un error de la pasarela deja la
+   * fila `failed` y se avisa, no se relanza.
    *
-   * @param attempt - Intento aprobado a devolver.
+   * @param attempt - Intento aprobado (o devuelto en parte) a devolver.
    * @param reason - Motivo de la devolución.
    * @throws {TypeError} En español, si el intento no tiene un pago en la pasarela.
    */
@@ -302,9 +303,11 @@ export class ApplyProviderPaymentCommand {
     if (attempt.providerPaymentId === null) {
       throw new TypeError(`El intento ${attempt.id} no tiene un pago en la pasarela para devolver`)
     }
+    const balanceArs = attempt.amountArs - attempt.refundedArs
+    if (balanceArs <= 0) return
     await this.refund(
       attempt,
-      { providerPaymentId: attempt.providerPaymentId, amountArs: attempt.amountArs },
+      { providerPaymentId: attempt.providerPaymentId, amountArs: balanceArs },
       reason,
     )
   }

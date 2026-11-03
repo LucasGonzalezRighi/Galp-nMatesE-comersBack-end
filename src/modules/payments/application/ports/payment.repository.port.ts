@@ -115,6 +115,14 @@ export interface PaymentRepository {
    */
   findById(id: string): Promise<PaymentAttempt | null>
   /**
+   * Busca por la clave exacta: una clave soltada (`<clave>:released:<id>`, ver
+   * `releasedIdempotencyKey`) no aparece al buscar la original.
+   *
+   * @param key - Clave idempotente del intento (la `Idempotency-Key` de la tienda, tal cual).
+   * @returns El intento que tiene esa clave, o `null`.
+   */
+  findByIdempotencyKey(key: string): Promise<PaymentAttempt | null>
+  /**
    * @param orderId - Id del pedido.
    * @returns El intento activo del pedido, o `null`.
    */

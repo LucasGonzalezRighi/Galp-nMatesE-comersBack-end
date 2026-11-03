@@ -99,6 +99,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return row === null ? null : toPaymentAttempt(row)
   }
 
+  /** {@inheritDoc PaymentRepository.findByIdempotencyKey} */
+  async findByIdempotencyKey(key: string): Promise<PaymentAttempt | null> {
+    const row = await this.prisma.payment.findUnique({ where: { idempotencyKey: key } })
+    return row === null ? null : toPaymentAttempt(row)
+  }
+
   /** {@inheritDoc PaymentRepository.findActiveByOrder} */
   async findActiveByOrder(orderId: string): Promise<PaymentAttempt | null> {
     if (!UUID_PATTERN.test(orderId)) return null

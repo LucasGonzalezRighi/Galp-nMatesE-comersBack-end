@@ -6,11 +6,19 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { seed } from '../../prisma/seed'
 import { ENV, type Env } from '../../src/config/env'
+import {
+  ORDER_PAYMENTS_PORT,
+  type OrderPaymentsPort,
+} from '../../src/modules/orders/application/ports/order-payments.port'
 import type { OrderView } from '../../src/modules/orders/application/read-models'
 import {
   PAYMENT_GATEWAY_PORT,
   type PaymentGatewayPort,
 } from '../../src/modules/payments/application/ports/payment-gateway.port'
+import {
+  PAYMENT_REPOSITORY,
+  type PaymentRepository,
+} from '../../src/modules/payments/application/ports/payment.repository.port'
 import { PaymentGatewayError } from '../../src/modules/payments/domain/payments-errors'
 import type { ProviderPayment } from '../../src/modules/payments/domain/provider-payment'
 import { EnvPaymentsSettings } from '../../src/modules/payments/infrastructure/env-payments-settings.adapter'
@@ -94,6 +102,18 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
   function prisma(): PrismaService {
     if (app === undefined) throw new Error('La app no arrancó')
     return app.get(PrismaService)
+  }
+
+  /** Las escrituras de pagos sobre pedidos de la app (`markPaid`…). */
+  function orderPayments(): OrderPaymentsPort {
+    if (app === undefined) throw new Error('La app no arrancó')
+    return app.get<OrderPaymentsPort>(ORDER_PAYMENTS_PORT)
+  }
+
+  /** Los intentos de pago de la app. */
+  function payments(): PaymentRepository {
+    if (app === undefined) throw new Error('La app no arrancó')
+    return app.get<PaymentRepository>(PAYMENT_REPOSITORY)
   }
 
   /** La pasarela de la app: sin `MP_*` es la simulada. */
@@ -462,6 +482,60 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
       ])
       expect((await readOrder(order)).status).toBe('paid')
     })
+
+    it.each([
+      ['pagar el pedido con el aprobado ya guardado', 'markPaid'],
+      ['guardar el pago en el intento', 'update'],
+    ] as const)(
+      'el cobro sale pero falla %s → 500; el reintento con la misma clave y el mismo cuerpo retoma el intento: 200 approved, un solo cobro y el pedido pagado',
+      async (_case, failing) => {
+        const order = await placeOrder()
+        const key = randomUUID()
+        const body = cardBody('APRO')
+        const failure =
+          failing === 'markPaid'
+            ? vi
+                .spyOn(orderPayments(), 'markPaid')
+                .mockRejectedValueOnce(new Error('Se cayó la base al pagar el pedido'))
+            : vi
+                .spyOn(payments(), 'update')
+                .mockRejectedValueOnce(new Error('Se cayó la base al guardar el pago'))
+        // Envuelve a la pasarela simulada para anotar qué pago devolvió cada cobro.
+        const simulated = gateway()
+        const charge = simulated.createCardPayment.bind(simulated)
+        const charged: string[] = []
+        const charges = vi
+          .spyOn(simulated, 'createCardPayment')
+          .mockImplementation(async (input) => {
+            const payment = await charge(input)
+            charged.push(payment.providerPaymentId)
+            return payment
+          })
+        try {
+          const failed = await pay('card', order.number, order.token, { key, body })
+          const retry = await pay('card', order.number, order.token, { key, body })
+
+          expect(failed.status).toBe(500)
+          expect(retry.status).toBe(200)
+          expect(retry.body).toMatchObject({ paymentStatus: 'approved' })
+        } finally {
+          failure.mockRestore()
+          charges.mockRestore()
+        }
+
+        const attempts = await prisma().payment.findMany({ where: { orderId: order.id } })
+        expect(attempts.map((attempt) => [attempt.status, attempt.idempotencyKey])).toEqual([
+          ['approved', key],
+        ])
+        // Un solo cobro: cada cobro con la clave devolvió el mismo pago, el que quedó en el intento.
+        expect(charged.length).toBeGreaterThanOrEqual(1)
+        expect(new Set(charged)).toEqual(new Set([attempts[0]?.providerPaymentId]))
+        expect(await prisma().refund.count({ where: { payment: { orderId: order.id } } })).toBe(0)
+        const view = await readOrder(order)
+        expect(view.status).toBe('paid')
+        expect(view.paymentStatus).toBe('approved')
+      },
+    )
 
     it('CONT → pending; vencida la reserva, el barrido concilia pero no lo vence', async () => {
       const order = await placeOrder()

@@ -92,7 +92,8 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
  * y los E2E la reemplazan con `createApp({ gateway })`. Las colas usan
  * `enableOfflineQueue: false` y sus workers se cierran forzados si Redis no contesta (el contrato
  * arma la app sin `init()` contra un Redis que no existe). El consumidor de `outbox` despacha
- * `order.expired` (Ruling B-43). El barrido de 60 s vence, concilia y retoma notificaciones.
+ * `order.expired` (Ruling B-43): cancela el intento activo y devuelve lo cobrado de un pedido que
+ * venció sin completarse. El barrido de 60 s vence, concilia y retoma notificaciones.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`, con un `Logger` de Nest como
  * `PaymentsLogger` y el HMAC de `node:crypto` como función. Las rutas: las cuatro de pago del
@@ -297,9 +298,13 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
     },
     {
       provide: OnOrderExpiredCommand,
-      useFactory: (payments: PaymentRepository, gateway: PaymentGatewayPort) =>
-        new OnOrderExpiredCommand(payments, gateway, new Logger(OnOrderExpiredCommand.name)),
-      inject: [PAYMENT_REPOSITORY, PAYMENT_GATEWAY_PORT],
+      useFactory: (
+        payments: PaymentRepository,
+        gateway: PaymentGatewayPort,
+        apply: ApplyProviderPaymentCommand,
+      ) =>
+        new OnOrderExpiredCommand(payments, gateway, apply, new Logger(OnOrderExpiredCommand.name)),
+      inject: [PAYMENT_REPOSITORY, PAYMENT_GATEWAY_PORT, ApplyProviderPaymentCommand],
     },
     {
       provide: SimulateProviderResultCommand,

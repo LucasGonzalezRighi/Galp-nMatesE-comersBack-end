@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createPaymentsHarness,
@@ -11,6 +11,7 @@ import {
 import { OrderNotFoundError } from '../../orders/domain/orders-errors'
 import type { OrderStatus } from '../../orders/domain/order-status'
 import {
+  IdempotencyKeyReusedError,
   InstallmentsNotAvailableError,
   InvalidCardTokenError,
   OrderNotPayableError,
@@ -373,6 +374,140 @@ describe('PayWithCardCommand', () => {
       ['approved', false, KEY_1],
     ])
     expect(h.orders.get(order.id).status).toBe('paid')
+  })
+})
+
+describe('reintento con la misma Idempotency-Key de un cobro que se guardó a medias', () => {
+  /** Lo que se espera de cada cobro de un reintento: la misma clave de la tienda. */
+  const withKey1 = [expect.objectContaining({ idempotencyKey: KEY_1 }) as unknown]
+
+  it('aplicar falla una vez antes de guardar el pago: el reintento con la misma clave retoma el intento, cobra una sola vez y deja el pedido pagado', async () => {
+    const { h, order, access } = setup()
+    const input = cardInput('APRO')
+    vi.spyOn(h.apply, 'execute').mockRejectedValueOnce(new Error('Se cayó la base'))
+
+    await expect(h.card.execute(access, input, KEY_1)).rejects.toThrow('Se cayó la base')
+    const started = only(h.payments.of(order.id))
+    expect(started).toMatchObject({
+      status: 'none',
+      isActive: true,
+      idempotencyKey: KEY_1,
+      providerPaymentId: null,
+    })
+
+    await expect(h.card.execute(access, input, KEY_1)).resolves.toEqual({
+      paymentStatus: 'approved',
+      statusDetail: 'accredited',
+      challenge: null,
+    })
+
+    const attempt = only(h.payments.of(order.id))
+    expect(attempt).toMatchObject({ id: started.id, status: 'approved', idempotencyKey: KEY_1 })
+    // La pasarela devolvió el mismo pago a la misma clave: un solo cobro.
+    expect(h.gateway.callsTo('createCardPayment')).toEqual([withKey1, withKey1])
+    expect([...h.gateway.payments.keys()]).toEqual([attempt.providerPaymentId])
+    expect(h.gateway.callsTo('validateCardCharge')).toHaveLength(1)
+    expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
+    expect(h.orders.paidCount).toBe(1)
+    expect(h.payments.refunds.size).toBe(0)
+  })
+
+  it('pagar el pedido falla una vez con el aprobado ya guardado: el reintento consulta el pago sin cobrar de nuevo y paga el pedido', async () => {
+    const { h, order, access } = setup()
+    const input = cardInput('APRO')
+    vi.spyOn(h.orders, 'markPaid').mockRejectedValueOnce(new Error('Se cayó la base al pagar'))
+
+    await expect(h.card.execute(access, input, KEY_1)).rejects.toThrow('Se cayó la base al pagar')
+    const charged = only(h.payments.of(order.id))
+    expect(charged).toMatchObject({ status: 'approved', idempotencyKey: KEY_1 })
+    expect(charged.providerPaymentId).not.toBeNull()
+    expect(h.orders.get(order.id).status).toBe('pending_payment')
+
+    await expect(h.card.execute(access, input, KEY_1)).resolves.toMatchObject({
+      paymentStatus: 'approved',
+    })
+
+    expect(only(h.payments.of(order.id))).toMatchObject({ id: charged.id, status: 'approved' })
+    expect(h.gateway.callsTo('createCardPayment')).toEqual([withKey1])
+    expect(h.gateway.callsTo('getPayment')).toEqual([[charged.providerPaymentId]])
+    expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
+    expect(h.orders.paidCount).toBe(1)
+    expect(h.payments.events.map((event) => event.type)).toEqual(['payment.approved'])
+    expect(h.payments.refunds.size).toBe(0)
+  })
+
+  it('si la pasarela no encuentra el pago del intento retomado → 502 y el intento queda como estaba', async () => {
+    const { h, order, access } = setup()
+    const input = cardInput('APRO')
+    vi.spyOn(h.orders, 'markPaid').mockRejectedValueOnce(new Error('Se cayó la base al pagar'))
+    await expect(h.card.execute(access, input, KEY_1)).rejects.toThrow('Se cayó la base al pagar')
+    const charged = only(h.payments.of(order.id))
+    h.gateway.payments.clear()
+
+    await expect(h.card.execute(access, input, KEY_1)).rejects.toBeInstanceOf(PaymentGatewayError)
+
+    expect(only(h.payments.of(order.id))).toEqual(charged)
+    expect(h.gateway.callsTo('createCardPayment')).toHaveLength(1)
+    expect(h.logger.warnings.join(' ')).toContain(String(charged.providerPaymentId))
+  })
+
+  it('una clave de un intento de otro pedido o de otra forma de pago → 422 idempotency_key_reused, sin cobrar ni crear nada', async () => {
+    const { h, access } = setup()
+    await h.card.execute(access, cardInput('CONT'), KEY_1)
+    const other = h.orders.add()
+
+    await expect(
+      h.card.execute({ number: other.number, token: ORDER_TOKEN }, cardInput('APRO'), KEY_1),
+    ).rejects.toBeInstanceOf(IdempotencyKeyReusedError)
+    await expect(h.preference.execute(access, KEY_1)).rejects.toMatchObject({
+      code: 'idempotency_key_reused',
+      status: 422,
+    })
+
+    expect(h.payments.of(other.id)).toEqual([])
+    expect(h.gateway.callsTo('createCardPayment')).toHaveLength(1)
+    expect(h.gateway.callsTo('createPreference')).toEqual([])
+  })
+
+  it('la preferencia reintentada con la misma clave devuelve el mismo initPoint sin crear otra', async () => {
+    const { h, order, access } = setup()
+
+    const first = await h.preference.execute(access, KEY_1)
+    const again = await h.preference.execute(access, KEY_1)
+
+    expect(again).toEqual(first)
+    expect(h.gateway.callsTo('createPreference')).toHaveLength(1)
+    expect(only(h.payments.of(order.id))).toMatchObject({
+      status: 'none',
+      isActive: true,
+      initPoint: first.initPoint,
+    })
+  })
+
+  it('si guardar la preferencia falla, el reintento con la misma clave la retoma sobre el mismo intento: una sola preferencia', async () => {
+    const { h, order, access } = setup()
+    vi.spyOn(h.payments, 'update').mockRejectedValueOnce(new Error('Se cayó la base'))
+
+    await expect(h.preference.execute(access, KEY_1)).rejects.toThrow('Se cayó la base')
+    const started = only(h.payments.of(order.id))
+    expect(started).toMatchObject({
+      status: 'none',
+      isActive: true,
+      idempotencyKey: KEY_1,
+      initPoint: null,
+    })
+
+    const view = await h.preference.execute(access, KEY_1)
+
+    expect(view.initPoint).toContain('preference=sim-pref-1')
+    expect(only(h.payments.of(order.id))).toMatchObject({
+      id: started.id,
+      isActive: true,
+      providerPreferenceId: 'sim-pref-1',
+      initPoint: view.initPoint,
+    })
+    expect(h.gateway.callsTo('createPreference')).toEqual([withKey1, withKey1])
+    expect(h.gateway.preferences.size).toBe(1)
   })
 })
 
