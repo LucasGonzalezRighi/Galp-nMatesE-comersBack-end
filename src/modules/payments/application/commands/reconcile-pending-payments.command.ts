@@ -47,13 +47,19 @@ function isInFlight(attempt: PaymentAttempt): attempt is InFlightAttempt {
  * reserva vencida hace 10 minutos o más, consulta el pago y lo aplica; si a las 48 h sigue
  * pendiente, lo cancela en Mercado Pago y aplica `cancelled`. Después intenta vencer el pedido
  * (vence solo si el pago quedó vencible).
+ *
+ * Un Checkout Pro dividido que quedó con aprobados por menos del total no tiene pago en curso que
+ * consultar: a las 48 h se devuelven esos aprobados (motivo `late_approval`: el pedido no se
+ * completó a tiempo), el pedido queda con `payment_status = cancelled` y vence en la misma pasada.
+ * Si la devolución falla, la fila queda `failed` y B6 la muestra como "Devolvelo desde Mercado
+ * Pago".
  */
 export class ReconcilePendingPaymentsCommand {
   /**
    * @param orders - Pedidos esperando el pago.
    * @param payments - Intentos.
    * @param gateway - Pasarela.
-   * @param apply - Máquina de estados.
+   * @param apply - Máquina de estados (aplicar un pago y devolver un aprobado).
    * @param expire - Vencimiento de un pedido (`ExpireOrdersCommand`).
    * @param clock - Reloj.
    * @param logger - Avisos de los pedidos que fallan.
@@ -62,7 +68,7 @@ export class ReconcilePendingPaymentsCommand {
     private readonly orders: OrderPaymentsPort,
     private readonly payments: PaymentRepository,
     private readonly gateway: PaymentGatewayPort,
-    private readonly apply: Pick<ApplyProviderPaymentCommand, 'execute'>,
+    private readonly apply: Pick<ApplyProviderPaymentCommand, 'execute' | 'refundApproved'>,
     private readonly expire: OrderExpirer,
     private readonly clock: Clock,
     private readonly logger: PaymentsLogger = SILENT_PAYMENTS_LOGGER,
@@ -118,6 +124,24 @@ export class ReconcilePendingPaymentsCommand {
         context,
       )
     }
+    if (abandoned) await this.closeUnfinished(order)
+  }
+
+  /**
+   * A las 48 h, un pedido que sigue `pending_payment` con aprobados por menos del total y sin
+   * pagos en curso nunca se va a completar: se devuelven los aprobados y el pedido queda vencible.
+   */
+  private async closeUnfinished(order: OrderForPayment): Promise<void> {
+    const current = await this.orders.findForPaymentById(order.id)
+    if (current?.status !== 'pending_payment') return
+    const attempts = await this.payments.listByOrder(order.id)
+    const approved = attempts.filter((attempt) => attempt.status === 'approved')
+    const approvedArs = approved.reduce((sum, attempt) => sum + attempt.amountArs, 0)
+    if (approved.length === 0 || approvedArs >= current.totalArs || attempts.some(isInFlight)) {
+      return
+    }
+    for (const attempt of approved) await this.apply.refundApproved(attempt, 'late_approval')
+    await this.orders.setPaymentStatus(order.id, 'cancelled')
   }
 
   private asProviderPayment(attempt: InFlightAttempt, order: OrderForPayment): ProviderPayment {

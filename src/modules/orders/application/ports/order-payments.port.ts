@@ -45,6 +45,12 @@ export interface OrderForPayment {
  * Escrituras y lecturas de pedidos que necesita `payments`. Lo define y lo implementa `orders`
  * (`PrismaOrderPaymentsAdapter`) y lo exporta `OrdersModule`, así `payments` no escribe en tablas
  * ajenas ni hay ciclo entre módulos (Ruling B-46).
+ *
+ * Única excepción (Ruling B-45, decidida en la revisión de la ola 2-3): `orders.payment_status`
+ * tiene que cambiar en la misma transacción que el intento, y un puerto de `application` no puede
+ * llevar el `tx` de Prisma. Por eso `PrismaPaymentRepository` escribe esa única columna con su
+ * propio `tx` en `startAttempt` y `update` (excepción explícita y acotada al ADR 0001). Todo lo
+ * demás de los pedidos pasa por este puerto.
  */
 export interface OrderPaymentsPort {
   /**
@@ -74,8 +80,13 @@ export interface OrderPaymentsPort {
    */
   markPaid(orderId: string, paidAt: Date, events: OrderEvents): Promise<Order | null>
   /**
-   * Sincroniza `orders.payment_status` (en la misma transacción que el intento cuando lo llama el
-   * repositorio de pagos).
+   * Escribe `orders.payment_status` en una operación suelta: **no** es atómica con el intento (el
+   * cambio de estado de un intento lo sincroniza `PrismaPaymentRepository` en su misma
+   * transacción, ver el TSDoc del puerto). Los casos de uso la usan solo para estados que se
+   * derivan de varios intentos o del pedido: aprobado parcial → `pending`, `cancelled` al cerrar un
+   * pago dividido que no se completó y el estado del intento que sí pagó en un pedido ya cerrado.
+   * Es idempotente; en los dos primeros casos, si se corta, el aprobado repetido o el barrido de
+   * conciliación la vuelven a aplicar.
    *
    * @param orderId - Id del pedido.
    * @param status - Estado del pago a guardar.

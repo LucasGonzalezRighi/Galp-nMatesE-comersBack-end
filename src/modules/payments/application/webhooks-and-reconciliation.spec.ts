@@ -100,6 +100,49 @@ describe('ReceiveWebhookCommand', () => {
     expect(h.queue.jobs).toHaveLength(1)
   })
 
+  it('un duplicado de un evento sin procesar se reprocesa (la cola y el procesado en línea habían fallado)', async () => {
+    const { h, order, payByCard } = setup()
+    const { stored } = await payByCard('CONT')
+    h.gateway.setPayment({ ...stored, status: 'approved', statusDetail: 'accredited' })
+    h.queue.available = false
+    h.gateway.failures.getPayment = new Error('MP caído')
+    await expect(h.receive.execute(webhook(stored.providerPaymentId))).rejects.toThrow('MP caído')
+    const [row] = [...h.webhookEvents.rows.values()]
+    expect(row?.processedAt).toBeNull()
+    expect(h.orders.get(order.id).status).toBe('pending_payment')
+    delete h.gateway.failures.getPayment
+    h.queue.available = true
+    await expect(h.receive.execute(webhook(stored.providerPaymentId))).resolves.toBe('duplicate')
+    expect(h.webhookEvents.rows.size).toBe(1)
+    expect(h.queue.jobs).toEqual([row?.id])
+  })
+
+  it('un duplicado de un evento sin procesar con la cola caída lo procesa en línea', async () => {
+    const { h, order, payByCard } = setup()
+    const { stored } = await payByCard('CONT')
+    h.gateway.setPayment({ ...stored, status: 'approved', statusDetail: 'accredited' })
+    h.queue.available = false
+    h.gateway.failures.getPayment = new Error('MP caído')
+    await expect(h.receive.execute(webhook(stored.providerPaymentId))).rejects.toThrow('MP caído')
+    delete h.gateway.failures.getPayment
+    await expect(h.receive.execute(webhook(stored.providerPaymentId))).resolves.toBe('duplicate')
+    expect([...h.webhookEvents.rows.values()][0]?.processedAt).toEqual(h.clock.now())
+    expect(h.orders.get(order.id).status).toBe('paid')
+  })
+
+  it('un duplicado de un evento ya procesado no se vuelve a encolar ni a procesar', async () => {
+    const { h, payByCard } = setup()
+    const { stored } = await payByCard('CONT')
+    await h.receive.execute(webhook(stored.providerPaymentId))
+    const [row] = [...h.webhookEvents.rows.values()]
+    await h.process.execute(row?.id ?? '')
+    const lookups = h.gateway.callsTo('getPayment').length
+    h.queue.available = false
+    await expect(h.receive.execute(webhook(stored.providerPaymentId))).resolves.toBe('duplicate')
+    expect(h.gateway.callsTo('getPayment')).toHaveLength(lookups)
+    expect(h.queue.jobs).toEqual([row?.id])
+  })
+
   it('sin id en el cuerpo deduplica por x-request-id', async () => {
     const { h } = setup()
     const input = webhook('1', { body: { type: 'payment', data: { id: '1' } } })
@@ -201,6 +244,59 @@ describe('ProcessWebhookEventCommand', () => {
   })
 })
 
+describe('ReprocessWebhookEventsCommand', () => {
+  async function received(h: ReturnType<typeof setup>['h'], dataId: string, eventId: number) {
+    await h.receive.execute(
+      webhook(dataId, {
+        requestId: `req-${String(eventId)}`,
+        signatureHeader: signWebhook({ dataId, requestId: `req-${String(eventId)}` }),
+        body: { id: eventId, type: 'payment', action: 'payment.updated', data: { id: dataId } },
+      }),
+    )
+  }
+
+  it('procesa en línea las notificaciones sin procesar de más de 5 minutos', async () => {
+    const { h, order, payByCard } = setup()
+    const { stored } = await payByCard('CONT')
+    h.gateway.setPayment({ ...stored, status: 'approved', statusDetail: 'accredited' })
+    await received(h, stored.providerPaymentId, 1)
+    h.clock.advance(4 * MINUTE)
+    await expect(h.reprocess.execute()).resolves.toEqual({ processed: 0, failed: 0 })
+    expect(h.orders.get(order.id).status).toBe('pending_payment')
+    h.clock.advance(2 * MINUTE)
+    await expect(h.reprocess.execute()).resolves.toEqual({ processed: 1, failed: 0 })
+    expect(h.orders.get(order.id).status).toBe('paid')
+    expect([...h.webhookEvents.rows.values()][0]?.processedAt).toEqual(h.clock.now())
+    await expect(h.reprocess.execute()).resolves.toEqual({ processed: 0, failed: 0 })
+  })
+
+  it('no retoma las notificaciones de más de 6 horas', async () => {
+    const { h, payByCard } = setup()
+    const { stored } = await payByCard('CONT')
+    await received(h, stored.providerPaymentId, 1)
+    h.clock.advance(6 * HOUR + MINUTE)
+    await expect(h.reprocess.execute()).resolves.toEqual({ processed: 0, failed: 0 })
+  })
+
+  it('aísla el fallo de una notificación y avisa', async () => {
+    const { h, payByCard } = setup()
+    const { stored } = await payByCard('CONT')
+    await received(h, stored.providerPaymentId, 1)
+    h.gateway.failures.getPayment = new Error('MP caído')
+    h.clock.advance(6 * MINUTE)
+    await expect(h.reprocess.execute()).resolves.toEqual({ processed: 0, failed: 1 })
+    expect(h.logger.warnings.join('\n')).toContain('MP caído')
+    expect([...h.webhookEvents.rows.values()][0]?.processedAt).toBeNull()
+  })
+
+  it('valida el límite', async () => {
+    const { h } = setup()
+    await expect(h.reprocess.execute(0)).rejects.toThrow(
+      'El máximo de notificaciones a reprocesar tiene que ser un entero positivo (llegó 0)',
+    )
+  })
+})
+
 describe('ReconcilePendingPaymentsCommand (Ruling B-42)', () => {
   it('un pending que Mercado Pago ya aprobó queda pagado', async () => {
     const { h, order, payByCard } = setup()
@@ -248,6 +344,82 @@ describe('ReconcilePendingPaymentsCommand (Ruling B-42)', () => {
     h.clock.advance(40 * MINUTE)
     await expect(h.reconcile.execute()).resolves.toEqual({ reconciled: 1, expired: 1, failed: 0 })
     expect(h.orders.get(order.id).status).toBe('expired')
+  })
+
+  describe('aprobado parcial de un Checkout Pro dividido (cierre del pedido)', () => {
+    async function partiallyPaid() {
+      const { h, order, access } = setup()
+      await h.preference.execute(access, KEY_1)
+      const partial = {
+        providerPaymentId: '4000000001',
+        status: 'approved',
+        statusDetail: 'accredited',
+        amountArs: 30000,
+        refundedArs: 0,
+        installments: 1,
+        paymentTypeId: 'account_money',
+        paymentMethodId: 'account_money',
+        cardLastFour: null,
+        issuerId: null,
+        externalReference: order.number,
+        challengeUrl: null,
+        approvedAt: h.clock.now(),
+      }
+      await h.apply.execute(partial, { attemptId: null, source: 'webhook' })
+      return { h, order }
+    }
+
+    it('antes de las 48 h no se devuelve ni se vence', async () => {
+      const { h, order } = await partiallyPaid()
+      h.clock.advance(40 * MINUTE)
+      await expect(h.reconcile.execute()).resolves.toEqual({
+        reconciled: 1,
+        expired: 0,
+        failed: 0,
+      })
+      expect(h.gateway.callsTo('refundPayment')).toEqual([])
+      expect(h.orders.get(order.id)).toMatchObject({
+        status: 'pending_payment',
+        paymentStatus: 'pending',
+      })
+    })
+
+    it('a las 48 h se devuelve lo cobrado (late_approval) y el pedido vence en la misma pasada', async () => {
+      const { h, order } = await partiallyPaid()
+      h.clock.advance(30 * MINUTE + 48 * HOUR + MINUTE)
+      await expect(h.reconcile.execute()).resolves.toEqual({
+        reconciled: 1,
+        expired: 1,
+        failed: 0,
+      })
+      expect([...h.payments.refunds.values()]).toEqual([
+        expect.objectContaining({ reason: 'late_approval', amountArs: 30000, status: 'approved' }),
+      ])
+      expect(h.gateway.callsTo('refundPayment')).toEqual([['4000000001', expect.any(String)]])
+      expect(h.orders.get(order.id).status).toBe('expired')
+      await expect(h.reconcile.execute()).resolves.toEqual({
+        reconciled: 0,
+        expired: 0,
+        failed: 0,
+      })
+      expect(h.gateway.callsTo('refundPayment')).toHaveLength(1)
+    })
+
+    it('si la devolución falla queda failed, se avisa y el pedido vence igual', async () => {
+      const { h, order } = await partiallyPaid()
+      h.gateway.failures.refundPayment = new Error('MP caído')
+      h.clock.advance(30 * MINUTE + 48 * HOUR + MINUTE)
+      await expect(h.reconcile.execute()).resolves.toEqual({
+        reconciled: 1,
+        expired: 1,
+        failed: 0,
+      })
+      expect([...h.payments.refunds.values()]).toEqual([
+        expect.objectContaining({ reason: 'late_approval', status: 'failed' }),
+      ])
+      expect(h.logger.warnings.join('\n')).toContain('Devolvelo desde Mercado Pago')
+      expect(h.orders.get(order.id).status).toBe('expired')
+    })
   })
 
   it('aísla el fallo de un pedido', async () => {

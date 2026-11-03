@@ -24,7 +24,10 @@ export interface IncomingWebhook {
   body: unknown
 }
 
-/** Resultado: `registered` (nuevo), `duplicate` (ya estaba) o `ignored` (IPN o cuerpo sin datos). */
+/**
+ * Resultado: `registered` (nuevo), `duplicate` (ya estaba; si no se había procesado, se vuelve a
+ * encolar o a procesar) o `ignored` (IPN o cuerpo sin datos).
+ */
 export type WebhookOutcome = 'registered' | 'duplicate' | 'ignored'
 
 interface ParsedBody {
@@ -75,6 +78,8 @@ function parseBody(body: unknown): ParsedBody | null {
  * `POST /webhooks/mercadopago` (Rulings B-37 y B-38): el formato IPN se ignora; si no, valida
  * `x-signature` (HMAC-SHA256 sobre el manifiesto, en tiempo constante; sin secreto, 401 siempre),
  * registra la notificación una sola vez y la encola; si la cola no la acepta, la procesa en línea.
+ * Un duplicado de una notificación que quedó sin procesar (la cola y el procesado en línea fallaron
+ * y Mercado Pago reintenta) se vuelve a encolar o a procesar, así no se pierde.
  */
 export class ReceiveWebhookCommand {
   /**
@@ -98,6 +103,8 @@ export class ReceiveWebhookCommand {
    * @param input - Cabeceras, query y cuerpo.
    * @returns `registered`, `duplicate` o `ignored` (todos responden 200).
    * @throws {InvalidSignatureError} 401 si la firma falta, no coincide o no hay secreto.
+   * @throws {Error} Si la notificación (nueva o duplicada sin procesar) no se pudo ni encolar ni
+   *   procesar en línea: responde 500 y Mercado Pago reintenta.
    */
   async execute(input: IncomingWebhook): Promise<WebhookOutcome> {
     if (input.topicQuery !== null && input.signatureHeader === null) return 'ignored'
@@ -125,8 +132,17 @@ export class ReceiveWebhookCommand {
       payload: body.payload,
       receivedAt: this.clock.now(),
     })
-    if (recorded.duplicate) return 'duplicate'
-    if (!(await this.queue.enqueue(recorded.id))) await this.process.execute(recorded.id)
+    if (recorded.duplicate) {
+      const stored = await this.events.findById(recorded.id)
+      if (stored?.processedAt === null) await this.dispatch(recorded.id)
+      return 'duplicate'
+    }
+    await this.dispatch(recorded.id)
     return 'registered'
+  }
+
+  /** Encola el procesado (el `jobId` es el id de la fila, así que no se duplica) o lo hace en línea. */
+  private async dispatch(eventId: string): Promise<void> {
+    if (!(await this.queue.enqueue(eventId))) await this.process.execute(eventId)
   }
 }

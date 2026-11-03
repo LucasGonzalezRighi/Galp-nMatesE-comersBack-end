@@ -86,7 +86,9 @@ export interface Refund extends NewRefund {
 export interface PaymentRepository {
   /**
    * Desactiva (status `cancelled`, `isActive` false) el activo anterior del pedido y crea el nuevo
-   * activo en status `none`; sincroniza `orders.payment_status`, todo en una transacción.
+   * activo en status `none`; sincroniza `orders.payment_status`, todo en una transacción. La
+   * implementación Prisma escribe esa columna de `orders` con el mismo `tx` (excepción explícita
+   * al ADR 0001, Ruling B-45); no pasa por `OrderPaymentsPort.setPaymentStatus`.
    *
    * @param input - Intento nuevo.
    * @returns El intento creado y el anterior ya cancelado (o `null` si no había).
@@ -139,7 +141,9 @@ export interface PaymentRepository {
    * Aplica el parche y, si cambia el status y el intento es el vigente del pedido (estaba activo,
    * o el pedido no tiene otro activo), sincroniza `orders.payment_status` (Ruling B-45: un estado
    * tardío de un intento reemplazado no pisa al activo); los eventos van al outbox, todo en la
-   * misma transacción.
+   * misma transacción. Como en `startAttempt`, la implementación Prisma escribe
+   * `orders.payment_status` con el mismo `tx` (Ruling B-45): una caída entre las dos escrituras
+   * no puede dejar al pedido en `pending` con el intento ya `rejected`/`cancelled` (que no vence).
    *
    * @param id - Id del intento.
    * @param patch - Cambios.

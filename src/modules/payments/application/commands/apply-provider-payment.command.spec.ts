@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createPaymentsHarness,
@@ -105,6 +105,73 @@ describe('ApplyProviderPaymentCommand · Review Focus 2: notificaciones repetida
       }),
     ])
     expect(h.gateway.callsTo('refundPayment')).toHaveLength(1)
+  })
+
+  it('markPaid falla una vez después de guardar el intento: el reintento paga el pedido', async () => {
+    const { h, order, access, payment } = setup()
+    await h.preference.execute(access, KEY_1)
+    vi.spyOn(h.orders, 'markPaid').mockRejectedValueOnce(new Error('conexión caída'))
+    await expect(h.apply.execute(payment(), WEBHOOK)).rejects.toThrow('conexión caída')
+    expect(h.payments.of(order.id)[0]).toMatchObject({ status: 'approved' })
+    expect(h.orders.get(order.id)).toMatchObject({
+      status: 'pending_payment',
+      paymentStatus: 'approved',
+    })
+    await h.apply.execute(payment(), WEBHOOK)
+    await h.apply.execute(payment(), WEBHOOK)
+    expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
+    expect(h.orders.paidCount).toBe(1)
+    expect(h.payments.events.map((event) => event.type)).toEqual(['payment.approved'])
+    expect(h.orders.events.map((event) => event.type)).toEqual(['order.paid'])
+    expect(h.payments.refunds.size).toBe(0)
+  })
+
+  it('un aprobado parcial repetido no cambia nada y no devuelve', async () => {
+    const { h, order, access, payment } = setup()
+    await h.preference.execute(access, KEY_1)
+    const partial = payment({ providerPaymentId: '4000000001', amountArs: 30000 })
+    await h.apply.execute(partial, WEBHOOK)
+    await h.apply.execute(partial, WEBHOOK)
+    expect(h.orders.get(order.id)).toMatchObject({
+      status: 'pending_payment',
+      paymentStatus: 'pending',
+    })
+    expect(h.payments.refunds.size).toBe(0)
+  })
+
+  it('la devolución tardía se corta antes de crearse: el reintento la hace una sola vez', async () => {
+    const { h, order, access, payment } = setup()
+    await h.preference.execute(access, KEY_1)
+    h.clock.advance(30 * MINUTE)
+    await h.orders.expireOne(order.id)
+    await h.onExpired.execute(order.id)
+    vi.spyOn(h.payments, 'createRefund').mockRejectedValueOnce(new Error('timeout'))
+    await expect(h.apply.execute(payment(), WEBHOOK)).rejects.toThrow('timeout')
+    expect(h.payments.of(order.id).at(-1)).toMatchObject({ status: 'approved' })
+    expect(h.payments.refunds.size).toBe(0)
+    await h.apply.execute(payment(), WEBHOOK)
+    await h.apply.execute(payment(), WEBHOOK)
+    expect([...h.payments.refunds.values()]).toEqual([
+      expect.objectContaining({ reason: 'late_approval', status: 'approved' }),
+    ])
+    expect(h.gateway.callsTo('refundPayment')).toHaveLength(1)
+    expect(h.orders.get(order.id).status).toBe('expired')
+  })
+
+  it('repetir el aprobado del que pagó o el del duplicado no devuelve al que sí pagó', async () => {
+    const { h, order, payByCard, payment } = setup()
+    const { stored } = await payByCard('APRO')
+    const duplicate = payment({ providerPaymentId: '3000000009' })
+    await h.apply.execute(duplicate, WEBHOOK)
+    await h.apply.execute(duplicate, WEBHOOK)
+    await h.apply.execute(stored, WEBHOOK)
+    await h.apply.execute(stored, WEBHOOK)
+    expect([...h.payments.refunds.values()]).toEqual([
+      expect.objectContaining({ reason: 'duplicate_payment', amountArs: ORDER_TOTAL }),
+    ])
+    expect(h.gateway.callsTo('refundPayment')).toEqual([['3000000009', expect.any(String)]])
+    expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
+    expect(h.orders.paidCount).toBe(1)
   })
 
   it('el pago que llega por webhook antes que la respuesta de la tarjeta se registra una vez y no se devuelve', async () => {

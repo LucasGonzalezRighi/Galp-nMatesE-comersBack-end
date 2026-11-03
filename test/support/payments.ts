@@ -43,6 +43,7 @@ import { PayWithCardCommand } from '../../src/modules/payments/application/comma
 import { ProcessWebhookEventCommand } from '../../src/modules/payments/application/commands/process-webhook-event.command'
 import { ReceiveWebhookCommand } from '../../src/modules/payments/application/commands/receive-webhook.command'
 import { ReconcilePendingPaymentsCommand } from '../../src/modules/payments/application/commands/reconcile-pending-payments.command'
+import { ReprocessWebhookEventsCommand } from '../../src/modules/payments/application/commands/reprocess-webhook-events.command'
 import { SimulateProviderResultCommand } from '../../src/modules/payments/application/commands/simulate-provider-result.command'
 import { PaymentOrderAccess } from '../../src/modules/payments/application/order-access'
 import { GetInstallmentsQuery } from '../../src/modules/payments/application/queries/get-installments.query'
@@ -358,7 +359,9 @@ function sameProvider(a: PaymentProvider, b: PaymentProvider): boolean {
 /**
  * {@link PaymentRepository} en memoria, con las restricciones de la base (un activo por pedido,
  * `idempotency_key` y `(provider, provider_payment_id)` únicos) y la sincronización de
- * `orders.payment_status` contra el doble de pedidos.
+ * `orders.payment_status` contra el doble de pedidos. En Prisma esa sincronización es una escritura
+ * de `orders` con el mismo `tx` que el intento (Ruling B-45); acá, sin transacción que cortar,
+ * alcanza con llamar a `setPaymentStatus` del doble.
  */
 export class InMemoryPaymentRepository implements PaymentRepository {
   /** Intentos por id. */
@@ -580,6 +583,24 @@ export class InMemoryWebhookEvents implements WebhookEventRepository {
     return Promise.resolve(row === undefined ? null : { ...row })
   }
 
+  /** {@inheritDoc WebhookEventRepository.listUnprocessed} */
+  listUnprocessed(
+    receivedBefore: Date,
+    receivedAfter: Date,
+    limit: number,
+  ): Promise<StoredWebhookEvent[]> {
+    const rows = [...this.rows.values()]
+      .filter(
+        (row) =>
+          row.processedAt === null &&
+          row.receivedAt.getTime() <= receivedBefore.getTime() &&
+          row.receivedAt.getTime() >= receivedAfter.getTime(),
+      )
+      .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
+      .slice(0, limit)
+    return Promise.resolve(rows.map((row) => ({ ...row })))
+  }
+
   /** {@inheritDoc WebhookEventRepository.markProcessed} */
   markProcessed(id: string, at: Date, lastError: string | null): Promise<void> {
     const row = this.rows.get(id)
@@ -588,7 +609,10 @@ export class InMemoryWebhookEvents implements WebhookEventRepository {
   }
 }
 
-/** {@link WebhookQueuePort} que anota los jobs; con `available = false` simula Redis caído. */
+/**
+ * {@link WebhookQueuePort} que anota los jobs (un `jobId` repetido no suma otro, como BullMQ);
+ * con `available = false` simula Redis caído.
+ */
 export class RecordingWebhookQueue implements WebhookQueuePort {
   /** Ids encolados. */
   readonly jobs: string[] = []
@@ -598,7 +622,7 @@ export class RecordingWebhookQueue implements WebhookQueuePort {
   /** {@inheritDoc WebhookQueuePort.enqueue} */
   enqueue(eventId: string): Promise<boolean> {
     if (!this.available) return Promise.resolve(false)
-    this.jobs.push(eventId)
+    if (!this.jobs.includes(eventId)) this.jobs.push(eventId)
     return Promise.resolve(true)
   }
 }
@@ -827,6 +851,7 @@ export function createPaymentsHarness() {
       clock,
       logger,
     ),
+    reprocess: new ReprocessWebhookEventsCommand(webhookEvents, process, clock, logger),
     onExpired: new OnOrderExpiredCommand(payments, gateway, logger),
     simulate: new SimulateProviderResultCommand(payments, orders, apply, clock, (payment) => {
       gateway.setPayment(payment)

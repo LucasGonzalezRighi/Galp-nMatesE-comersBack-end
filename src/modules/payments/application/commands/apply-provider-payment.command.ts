@@ -63,6 +63,13 @@ const LATE_ORDER: readonly OrderStatus[] = ['expired', 'cancelled', 'refunded']
  * estado que llegue de la pasarela (respuesta inmediata de la tarjeta, webhook, simulador o
  * conciliación). Paga el pedido cuando los aprobados cubren el total, devuelve sola un aprobado
  * duplicado o tardío (Ruling B-41) y nunca hace retroceder un pago final.
+ *
+ * Los efectos sobre el pedido son otra transacción que el cambio del intento. Si se cortan después
+ * de guardar el intento `approved`, un aprobado que se repite (reintento del job, conciliación o
+ * webhook repetido) los retoma mientras el pedido siga `pending_payment` o sea tardío: `markPaid`
+ * es condicional y la devolución es idempotente por `findRefundByPayment`. La regla del duplicado
+ * (devolver al segundo aprobado de un pedido ya pagado) solo corre en la primera transición, porque
+ * con dos aprobados una repetición no sabe cuál fue el que pagó y devolvería al equivocado.
  */
 export class ApplyProviderPaymentCommand {
   /**
@@ -106,7 +113,12 @@ export class ApplyProviderPaymentCommand {
       return null
     }
     const next = normalizePaymentStatus(payment)
-    if (isFinalStatus(attempt.status) && !AFTER_FINAL.includes(next)) return attempt
+    if (isFinalStatus(attempt.status) && !AFTER_FINAL.includes(next)) {
+      if (attempt.status === 'approved' && next === 'approved') {
+        await this.resumeApproved(attempt, payment)
+      }
+      return attempt
+    }
     const order = await this.orders.findForPaymentById(attempt.orderId)
     if (order === null)
       throw new Error(`El pedido ${attempt.orderId} del intento ${attempt.id} no existe`)
@@ -211,7 +223,7 @@ export class ApplyProviderPaymentCommand {
     now: Date,
   ): Promise<void> {
     if (attempt.status === 'approved') {
-      await this.applyApproved(order, attempt, payment, now)
+      await this.applyApproved(order, attempt, payment, now, false)
       return
     }
     if (order.status === 'pending_payment' || PAYING.includes(attempt.status)) return
@@ -225,11 +237,23 @@ export class ApplyProviderPaymentCommand {
     if (attempt.status === 'refunded') await this.orders.markRefunded(order.id, now, () => [])
   }
 
+  /**
+   * Un aprobado que ya estaba guardado vuelve a llegar: si el pedido todavía necesita su efecto
+   * (sigue `pending_payment` o es tardío), lo aplica de nuevo; si no, no hace nada.
+   */
+  private async resumeApproved(attempt: PaymentAttempt, payment: ProviderPayment): Promise<void> {
+    const order = await this.orders.findForPaymentById(attempt.orderId)
+    if (order === null) return
+    if (order.status !== 'pending_payment' && !LATE_ORDER.includes(order.status)) return
+    await this.applyApproved(order, attempt, payment, this.clock.now(), true)
+  }
+
   private async applyApproved(
     order: OrderForPayment,
     attempt: PaymentAttempt,
     payment: ProviderPayment,
     now: Date,
+    repeated: boolean,
   ): Promise<void> {
     let current: OrderForPayment | null = order
     if (current.status === 'pending_payment') {
@@ -250,7 +274,7 @@ export class ApplyProviderPaymentCommand {
     }
     if (LATE_ORDER.includes(current.status)) {
       await this.refund(attempt, payment, 'late_approval')
-    } else if ((await this.otherPaying(attempt)) !== null) {
+    } else if (!repeated && (await this.otherPaying(attempt)) !== null) {
       await this.refund(attempt, payment, 'duplicate_payment')
     }
   }
@@ -264,9 +288,30 @@ export class ApplyProviderPaymentCommand {
     )
   }
 
+  /**
+   * Devuelve a Mercado Pago el total de un pago aprobado (lo usa la conciliación para un Checkout
+   * Pro dividido que nunca se completó). Idempotente por `(intento, motivo)`: si ya hay una
+   * devolución con ese motivo no hace nada. Un error de la pasarela deja la fila `failed` y se
+   * avisa, no se relanza.
+   *
+   * @param attempt - Intento aprobado a devolver.
+   * @param reason - Motivo de la devolución.
+   * @throws {TypeError} En español, si el intento no tiene un pago en la pasarela.
+   */
+  async refundApproved(attempt: PaymentAttempt, reason: RefundReason): Promise<void> {
+    if (attempt.providerPaymentId === null) {
+      throw new TypeError(`El intento ${attempt.id} no tiene un pago en la pasarela para devolver`)
+    }
+    await this.refund(
+      attempt,
+      { providerPaymentId: attempt.providerPaymentId, amountArs: attempt.amountArs },
+      reason,
+    )
+  }
+
   private async refund(
     attempt: PaymentAttempt,
-    payment: ProviderPayment,
+    payment: Pick<ProviderPayment, 'providerPaymentId' | 'amountArs'>,
     reason: RefundReason,
   ): Promise<void> {
     if ((await this.payments.findRefundByPayment(attempt.id, reason)) !== null) return

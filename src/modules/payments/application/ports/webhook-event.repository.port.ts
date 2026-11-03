@@ -46,6 +46,21 @@ export interface WebhookEventRepository {
    */
   findById(id: string): Promise<StoredWebhookEvent | null>
   /**
+   * Notificaciones registradas y todavía sin procesar (`processed_at IS NULL`) recibidas en el
+   * rango `[receivedAfter, receivedBefore]`, de la más vieja a la más nueva. Las retoma el barrido
+   * de 60 s cuando la cola y el procesado en línea fallaron o el job agotó sus intentos.
+   *
+   * @param receivedBefore - Solo las recibidas hasta este momento (deja tiempo a los jobs vivos).
+   * @param receivedAfter - Solo las recibidas desde este momento (no reintenta para siempre).
+   * @param limit - Máximo de notificaciones a devolver.
+   * @returns Las notificaciones sin procesar.
+   */
+  listUnprocessed(
+    receivedBefore: Date,
+    receivedAfter: Date,
+    limit: number,
+  ): Promise<StoredWebhookEvent[]>
+  /**
    * Marca la notificación como procesada.
    *
    * @param id - Id de la fila.
