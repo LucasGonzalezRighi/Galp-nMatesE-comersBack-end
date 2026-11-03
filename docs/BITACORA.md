@@ -516,7 +516,9 @@ Rulings de la planificación (ledger del flujo, B-14 a B-31):
   - Estado inicial `pending_payment` / `none`, con `history[0]` del cliente.
   - El vencimiento suma `expired` en `reserved_until` (actor `system`).
 - **B-19 · Copias al comprar:** contacto, dirección (jsonb), plazo y costo del envío, medio de
-  pago, descuento del kit, y nombres, slugs y precios de líneas y piezas.
+  pago, descuento del kit, y nombres, slugs y precios de líneas y piezas. Las columnas
+  `payment_method`, `shipping_eta`, `product_slug` y el `slug` de las piezas no estaban en la
+  spec §4.3: son un agregado de B4, y la tabla de la spec quedó actualizada.
 - **B-20 · Dueño:** gana la sesión. Sin sesión, invitado por email (nuevo o actualizado); si el
   email es de una cuenta, el pedido queda sin dueño (solo token). La adopción al registrarse (B3)
   sigue.
@@ -566,7 +568,11 @@ Decisiones tomadas en el camino:
   parámetro, y el contrato lo declara como esquema de seguridad.
 - **El teléfono se normaliza en el DTO,** como `optionalPhoneSchema` del front (`+54 9 11 …` →
   `1123456789`): lo piden los casos compartidos del checkout.
-- **Doble envío simultáneo** (Task 5; corrige el Review Focus 1 del plan):
+- **`OrdersModule` no importa `CatalogModule`** (Task 4): lee `products` e `inventory` con Prisma
+  directo (solo lectura, ADR 0001) y no inyecta nada del catálogo.
+- **Textos que el mock dejaba a zod, fijados en español** (Task 5): un `type` de línea desconocido
+  o un método de envío inexistente responden con mensajes propios, no con los de la librería.
+- **Doble envío simultáneo** (Task 5; el Review Focus 1 del plan quedó reescrito en el cierre):
   - Con la misma clave, el segundo pedido que llega mientras corre el primero recibe
     `409 idempotency_in_progress` (interceptor de B1, sin cambios por B-22).
   - Se crea un solo pedido, todo 201 trae el mismo número y el mismo token, y el reintento recibe
@@ -651,6 +657,10 @@ Para la prueba en vivo se usó lo que ya tenía instalado el front: Next.js 16.4
   - Al cierre no quedan procesos en el 3001, el 4300 ni el 5273, ni contenedores de compose, y el
     front no tiene cambios.
 
+- **Base de desarrollo de compose al cierre:** quedó con `GLP-10001…10005` vencidos, cuatro
+  invitados, la cuenta `martina.b4.*` y jobs diferidos en Redis; `docker compose down -v` la
+  vacía.
+
 ### Commits
 
 | Commit    | Qué                                                                                        |
@@ -661,7 +671,8 @@ Para la prueba en vivo se usó lo que ya tenía instalado el front: Next.js 16.4
 | `06150fb` | Dominio de cotización y pedidos; casos de uso de creación, lectura y vencimiento (Task 3)  |
 | `60eaeab` | Repositorio Prisma con reserva atómica, cola de vencimiento, adaptadores y módulo (Task 4) |
 | `e971083` | Rutas de cotización, pedidos y mis pedidos, con E2E de doble envío y concurrencia (Task 5) |
-| Task 6    | Esta bitácora, el ADR 0004 y el README de pedidos                                          |
+| `c8f24ea` | Esta bitácora, el ADR 0004 y el README de pedidos                                          |
+| Cierre    | Review Focus 1 reescrito, spec §4.3, menores de código y de docs                           |
 
 ### Lo que queda para B5 en adelante
 
@@ -699,13 +710,9 @@ Para la prueba en vivo se usó lo que ya tenía instalado el front: Next.js 16.4
   - `address-input.dto.ts` repite mensajes, patrones y `Trimmed` de `identity-fields.ts`, y
     `shared` importa `identity/domain/province`. Mover los campos a
     `src/shared/infrastructure/http/fields.ts` y `PROVINCES` a `src/shared/domain`.
-  - `identity-customers.adapter.ts` importa `isUniqueViolation` del mapper de identidad: llevarlo
-    a `src/shared/infrastructure/prisma/`.
-  - `expireDue` deja de vencer y lanza si falla un `expire`: un error de limpieza le daría 500 a
-    cotizar, crear o listar. Aislar el error por pedido.
   - `expireDue` trae los pedidos con `findDue` y `expire` los vuelve a leer (N+1 de hasta 50).
-  - `OrderExpirationProcessor.onFailed` dice "pedido undefined" si no hay job, y comparte el
-    limitador de avisos con `onError`.
+  - `orderShippingAddress` (`domain/shipping.ts`) lanza `TypeError` (500) si `home` llega sin la
+    dirección completa o `branch` sin destino: hoy lo garantizan los DTOs por rama.
   - `optionalSessionFromContext` devuelve cualquier sesión ya cargada (hoy ninguna ruta combina
     guards).
   - `prisma/seed.ts`: una línea de 130 caracteres en el TSDoc de `seed()`.
@@ -714,8 +721,10 @@ Para la prueba en vivo se usó lo que ya tenía instalado el front: Next.js 16.4
   - Cosméticos: `ownerOf` sin tipo de retorno explícito; los constructores de
     `OrderNotFoundError` y `CartTotalTooBigError` sin TSDoc propio.
 - **Tests:**
-  - Ningún test del tope de 20 sumando líneas (todos los productos de prueba tienen 12 o menos).
   - Faltan el total demasiado grande por culpa del envío y un `price_changed` de un kit.
+  - Nada prueba que `POST /orders` siga bajo el límite global mientras el resto lo saltea.
+  - Ningún `POST /orders` por HTTP con un kit, ni `POST /shipping/quote` con el método
+    deshabilitado (los cubren los tests por debajo del HTTP).
   - El E2E de `expire` solo mira la clave `slug` de la caché, y ningún caso vence un pedido con el
     pago `rejected` o `cancelled`.
   - El spec del processor depende del campo privado `_worker` de `WorkerHost`.

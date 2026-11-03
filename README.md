@@ -241,10 +241,10 @@ docker compose exec -T postgres psql -U galpon -d galpon -c "SELECT number, stat
 **Vencer un pedido a mano** para probar (sin esperar 30 minutos):
 
 ```bash
-docker compose exec -T postgres psql -U galpon -d galpon -c "UPDATE orders SET reserved_until = now() - interval '1 second' WHERE number = 'GLP-10001'"
+docker compose exec -T postgres psql -U galpon -d galpon -c "UPDATE orders SET reserved_until = now() - interval '1 second' WHERE number = '<número>'"
 ```
 
-- Recargar `/checkout/resultado?pedido=GLP-10001` en la pestaña de la compra lo vence en el acto
+- Recargar `/checkout/resultado?pedido=<número>` en la pestaña de la compra lo vence en el acto
   y muestra "El pedido venció". Si nadie lo lee, el barrido lo vence en menos de un minuto (con el
   back andando).
 - Usá un segundo y no un minuto: la fila `expired` del historial lleva la fecha de

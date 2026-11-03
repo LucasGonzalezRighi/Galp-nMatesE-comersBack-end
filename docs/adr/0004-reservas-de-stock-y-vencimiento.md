@@ -42,7 +42,7 @@ cómo se comportan:
    ```
 
    - Las cantidades se suman por producto (suelto + piezas de kit) y los productos se recorren
-     ordenados por id, para que dos transacciones nunca tomen los mismos lockeos en orden inverso
+     ordenados por id, para que dos transacciones nunca tomen los mismos bloqueos en orden inverso
      (deadlock). Liberar también va en ese orden.
    - Si un producto no alcanza, la transacción sigue con los demás para juntar **todos** los
      faltantes con su disponible real, y después se deshace: `409 stock_changed` con un
@@ -54,7 +54,7 @@ cómo se comportan:
      `catalog:products:group:<group>` de cada producto. Las listas con `ids` ya no se cachean.
 
 3. **`version` no se usa para bloquear.** Se incrementa en cada cambio, pero la exclusión la da el
-   lockeo de fila del `UPDATE` condicional (ver "Alternativas").
+   bloqueo de fila del `UPDATE` condicional (ver "Alternativas").
 4. **El vencimiento tiene tres caminos, idénticos e idempotentes.** Todos terminan en
    `ExpireOrdersCommand` → `OrderRepository.expire(orderId, now)`:
 
@@ -131,8 +131,8 @@ cómo se comportan:
 ## Alternativas descartadas
 
 - **Bloqueo pesimista (`SELECT … FOR UPDATE` y después `UPDATE`):**
-  - Hace dos viajes por producto y tiene el lockeo tomado más tiempo, sin dar nada que el `UPDATE`
-    condicional no dé: ese `UPDATE` también toma el lockeo de la fila, y la condición se evalúa
+  - Hace dos viajes por producto y tiene el bloqueo tomado más tiempo, sin dar nada que el `UPDATE`
+    condicional no dé: ese `UPDATE` también toma el bloqueo de la fila, y la condición se evalúa
     sobre el valor confirmado.
   - Igual necesita ordenar los productos para no caer en deadlocks.
 - **Bloqueo optimista con `version` (leer, comparar y escribir con reintentos):**
@@ -140,7 +140,7 @@ cómo se comportan:
     alcance, y hay que reintentar en un bucle.
   - El `UPDATE` condicional solo falla cuando de verdad no hay stock.
 - **Solo filas (`on_hand − SUM(reservas activas)`):** el catálogo tendría que agregar en cada
-  lectura, y la reserva necesitaría lockear algo igual (o `SERIALIZABLE`) para no sobrevender.
+  lectura, y la reserva necesitaría bloquear algo igual (o `SERIALIZABLE`) para no sobrevender.
 - **Descontar `on_hand` al crear el pedido:** mezcla el stock físico con lo prometido. Las
   ediciones del admin chocarían con las reservas, y devolver el stock dependería de no perder nunca
   una liberación.

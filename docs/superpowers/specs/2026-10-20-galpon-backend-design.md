@@ -153,9 +153,9 @@ Los cueros y las virolas son listas fijas del dominio, no tablas: se guardan com
 
 | Tabla | Columnas | Claves e índices |
 |---|---|---|
-| `orders` | id, number (`GLP-12345`), customer_id, status (enum del contrato), payment_status (enum normalizado), contact_email, contact_first_name, contact_last_name, contact_phone, shipping_method, shipping_address (jsonb, copia), shipping_cost_ars, items_gross_ars, kit_savings_ars, subtotal_ars, total_ars, kit_discount_percent (copia), access_token_hash (invitados), reserved_until, placed_at, paid_at, cancelled_at | `number` único; índices `(customer_id, placed_at)` y `(status, reserved_until)` |
-| `order_items` | id, order_id, line_type (`product`\|`kit`), product_id (null en kits), name, detail, quantity, unit_price_ars, kit_savings_ars, total_ars, options (jsonb: cuero y virola), position | FK `order_id`. **Todo se copia al comprar**: si después cambia el precio o el nombre, el pedido no se altera |
-| `order_item_components` | order_item_id, role (`mate`\|`bombilla`\|`yerba`), product_id, name, unit_price_ars | PK `(order_item_id, role)` (las 3 piezas de un kit) |
+| `orders` | id, number (`GLP-12345`), customer_id, status (enum del contrato), payment_status (enum normalizado), payment_method (elegido en el checkout; B4), contact_email, contact_first_name, contact_last_name, contact_phone, shipping_method, shipping_address (jsonb, copia), shipping_cost_ars, shipping_eta (copia; B4), items_gross_ars, kit_savings_ars, subtotal_ars, total_ars, kit_discount_percent (copia), access_token_hash (invitados), reserved_until, placed_at, paid_at, cancelled_at | `number` único; índices `(customer_id, placed_at)` y `(status, reserved_until)` |
+| `order_items` | id, order_id, line_type (`product`\|`kit`), product_id (null en kits), product_slug (copia; B4), name, detail, quantity, unit_price_ars, kit_savings_ars, total_ars, options (jsonb: cuero y virola), position | FK `order_id`. **Todo se copia al comprar**: si después cambia el precio o el nombre, el pedido no se altera |
+| `order_item_components` | order_item_id, role (`mate`\|`bombilla`\|`yerba`), product_id, slug (copia; B4), name, unit_price_ars | PK `(order_item_id, role)` (las 3 piezas de un kit) |
 | `order_status_history` | id, order_id, from_status, to_status, actor (`system`\|`admin`\|`customer`\|`provider`), note, created_at | índice `(order_id, created_at)` |
 | `shipments` | order_id (PK), carrier, tracking_number, shipped_at, delivered_at | — |
 
