@@ -4,7 +4,6 @@ import { Logger, Module } from '@nestjs/common'
 import { ENV, type Env } from '../../config/env'
 import { SECRETS_PORT, type SecretsPort } from '../../shared/application/ports/secrets.port'
 import { type Clock, CLOCK } from '../../shared/domain/clock'
-import { OUTBOX_QUEUE } from '../../shared/infrastructure/outbox/outbox.relay'
 import { ExpireOrdersCommand } from '../orders/application/commands/expire-orders.command'
 import {
   ORDER_PAYMENTS_PORT,
@@ -45,7 +44,7 @@ import { BullWebhookQueue } from './infrastructure/bull-webhook-queue.adapter'
 import { EnvPaymentsSettings } from './infrastructure/env-payments-settings.adapter'
 import { hmacSha256Hex } from './infrastructure/hmac'
 import { MercadoPagoGateway } from './infrastructure/mercadopago.gateway'
-import { OutboxEventsProcessor } from './infrastructure/outbox-events.processor'
+import { OrderExpiredOutboxHandler } from './infrastructure/order-expired.outbox-handler'
 import { PAYMENT_WEBHOOKS_QUEUE } from './infrastructure/payment-webhooks.queue'
 import { PaymentWebhooksProcessor } from './infrastructure/payment-webhooks.processor'
 import { PaymentsSweep } from './infrastructure/payments-sweep'
@@ -91,9 +90,10 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
  * `PrismaPaymentRepository` escribe con su `tx`: Ruling B-45). La pasarela se elige por `MP_MODE`
  * y los E2E la reemplazan con `createApp({ gateway })`. Las colas usan
  * `enableOfflineQueue: false` y sus workers se cierran forzados si Redis no contesta (el contrato
- * arma la app sin `init()` contra un Redis que no existe). El consumidor de `outbox` despacha
- * `order.expired` (Ruling B-43): cancela el intento activo y devuelve lo cobrado de un pedido que
- * venció sin completarse. El barrido de 60 s vence, concilia y retoma notificaciones.
+ * arma la app sin `init()` contra un Redis que no existe). `OrderExpiredOutboxHandler` atiende
+ * `order.expired` del outbox compartido (Ruling B-43): cancela el intento activo y devuelve lo
+ * cobrado de un pedido que venció sin completarse. El barrido de 60 s vence, concilia y retoma
+ * notificaciones.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`, con un `Logger` de Nest como
  * `PaymentsLogger` y el HMAC de `node:crypto` como función. Las rutas: las cuatro de pago del
@@ -106,11 +106,6 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
     SettingsModule,
     BullModule.registerQueueAsync({
       name: PAYMENT_WEBHOOKS_QUEUE,
-      inject: [ENV],
-      useFactory: queueConnection,
-    }),
-    BullModule.registerQueueAsync({
-      name: OUTBOX_QUEUE,
       inject: [ENV],
       useFactory: queueConnection,
     }),
@@ -328,7 +323,7 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
       ],
     },
     PaymentWebhooksProcessor,
-    OutboxEventsProcessor,
+    OrderExpiredOutboxHandler,
     PaymentsSweep,
   ],
 })

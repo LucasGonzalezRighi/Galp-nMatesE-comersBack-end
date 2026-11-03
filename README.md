@@ -35,6 +35,13 @@ credenciales (las cookies de sesión del admin). La tienda no lo necesita: su se
 y reescribe `/api/v1/*` hacia él, así que el navegador siempre habla con la tienda. Un pedido desde
 otro origen no recibe cabeceras CORS y el navegador lo bloquea.
 
+**Aviso a la tienda:** cada guardado de combos del dashboard le pide a la tienda que regenere la
+etiqueta `combos` (`POST ${STORE_ORIGIN}/api/revalidate`, por la cola `storefront-revalidate`).
+
+| Variable                  | Por defecto | Notas                                                                                                                                                                         |
+| ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STORE_REVALIDATE_SECRET` | (sin valor) | El mismo `REVALIDATE_SECRET` de la tienda (32 caracteres o más). Obligatorio en `production`; sin él no se le avisa nada y la tienda se regenera por tiempo. Nunca se loguea. |
+
 ## Puesta en marcha
 
 ```bash

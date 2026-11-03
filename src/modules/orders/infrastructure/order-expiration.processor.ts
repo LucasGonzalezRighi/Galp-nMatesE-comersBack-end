@@ -1,16 +1,14 @@
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Inject, Logger, type OnModuleDestroy } from '@nestjs/common'
-import type { Job, Queue, Worker } from 'bullmq'
+import type { Job, Queue } from 'bullmq'
 
+import { closeWorker } from '../../../shared/infrastructure/redis/close-worker'
 import {
   createRateLimitedWarn,
   errorMessage,
 } from '../../../shared/infrastructure/redis/rate-limited-warn'
 import { ExpireOrdersCommand } from '../application/commands/expire-orders.command'
 import { ORDER_EXPIRATION_QUEUE, type OrderExpireJobData } from './order-expiration.queue'
-
-/** Cuánto espera el cierre de la app a que Redis conteste antes de cerrar el worker forzado. */
-export const WORKER_SHUTDOWN_PROBE_MS = 1_000
 
 /**
  * Worker de la cola `order-expiration`: cada job `order.expire` vence su pedido con
@@ -54,18 +52,12 @@ export class OrderExpirationProcessor extends WorkerHost implements OnModuleDest
   /**
    * Cierra el worker antes que el resto de la app. Con Redis caído, el cierre normal de BullMQ
    * espera para siempre a que termine el bucle del worker (y `app.close()` queda colgado); por eso,
-   * si Redis no contesta en {@link WORKER_SHUTDOWN_PROBE_MS}, lo cierra forzado: el job en curso,
-   * si lo hay, queda estancado y se reintenta (vencer es idempotente). Sin `app.init()` no hay
-   * worker y no hace nada.
+   * si Redis no contesta a tiempo, lo cierra forzado ({@link closeWorker}): el job en curso, si lo
+   * hay, queda estancado y se reintenta (vencer es idempotente). Sin `app.init()` no hay worker y
+   * no hace nada.
    */
   async onModuleDestroy(): Promise<void> {
-    let worker: Worker
-    try {
-      worker = this.worker
-    } catch {
-      return
-    }
-    await worker.close(!(await this.redisAnswers()))
+    await closeWorker(this, this.queue)
   }
 
   /**
@@ -91,24 +83,5 @@ export class OrderExpirationProcessor extends WorkerHost implements OnModuleDest
     const orderId = job?.data.orderId ?? 'desconocido'
     const jobId = job?.id ?? 'desconocido'
     this.warnFailed(`No se pudo vencer el pedido ${orderId} (job ${jobId}): ${errorMessage(error)}`)
-  }
-
-  /** Indica si Redis contesta a tiempo (la cola no encola offline: con Redis caído falla al toque). */
-  private async redisAnswers(): Promise<boolean> {
-    let timer: NodeJS.Timeout | undefined
-    const timeout = new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(false)
-      }, WORKER_SHUTDOWN_PROBE_MS)
-    })
-    const probe = this.queue.getJobCounts('delayed').then(
-      () => true,
-      () => false,
-    )
-    try {
-      return await Promise.race([probe, timeout])
-    } finally {
-      clearTimeout(timer)
-    }
   }
 }

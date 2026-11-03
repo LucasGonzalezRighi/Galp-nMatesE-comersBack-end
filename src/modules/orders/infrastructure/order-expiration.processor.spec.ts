@@ -2,9 +2,10 @@ import { Logger } from '@nestjs/common'
 import type { Job, Queue } from 'bullmq'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { WORKER_SHUTDOWN_PROBE_MS } from '../../../shared/infrastructure/redis/close-worker'
 import type { ExpireOrdersCommand } from '../application/commands/expire-orders.command'
 import type { OrderExpireJobData } from './order-expiration.queue'
-import { OrderExpirationProcessor, WORKER_SHUTDOWN_PROBE_MS } from './order-expiration.processor'
+import { OrderExpirationProcessor } from './order-expiration.processor'
 
 /** Processor con un `expireOne` y una cola falsos; `worker` simula el que crea `app.init()`. */
 function processorWith(options: {

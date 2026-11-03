@@ -1,11 +1,7 @@
-import { Logger } from '@nestjs/common'
 import type { Job, Queue } from 'bullmq'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { OutboxJobData } from '../../../shared/infrastructure/outbox/outbox.relay'
-import type { OnOrderExpiredCommand } from '../application/commands/on-order-expired.command'
 import type { ProcessWebhookEventCommand } from '../application/commands/process-webhook-event.command'
-import { OutboxEventsProcessor } from './outbox-events.processor'
 import { PaymentWebhooksProcessor } from './payment-webhooks.processor'
 import { WEBHOOK_PROCESS_JOB, type WebhookJobData } from './payment-webhooks.queue'
 import type { PrismaWebhookEventRepository } from './prisma-webhook-event.repository'
@@ -27,16 +23,6 @@ function webhooksProcessor(execute: () => Promise<void>) {
     fakeQueue() as unknown as Queue<WebhookJobData>,
   )
   return { events, process, processor }
-}
-
-function outboxProcessor(execute: () => Promise<void> = () => Promise.resolve()) {
-  const onExpired = { execute: vi.fn(execute) }
-  const queue = fakeQueue()
-  const processor = new OutboxEventsProcessor(
-    onExpired as unknown as OnOrderExpiredCommand,
-    queue as unknown as Queue<OutboxJobData>,
-  )
-  return { onExpired, processor, queue }
 }
 
 function job<T>(name: string, data: unknown): Job<T> {
@@ -95,50 +81,5 @@ describe('PaymentWebhooksProcessor', () => {
     await closing
 
     expect(worker.close).toHaveBeenCalledWith(true)
-  })
-})
-
-describe('OutboxEventsProcessor', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('order.expired cancela el intento activo del pedido (Ruling B-43)', async () => {
-    const { onExpired, processor } = outboxProcessor()
-
-    await processor.process(
-      job('order.expired', { payload: { orderId: 'o1', number: 'GLP-10001' } }),
-    )
-
-    expect(onExpired.execute).toHaveBeenCalledWith('o1')
-  })
-
-  it('los demás eventos se aceptan sin hacer nada', async () => {
-    const { onExpired, processor } = outboxProcessor()
-
-    await processor.process(job('order.created', { payload: { number: 'GLP-10001' } }))
-    await processor.process(job('order.paid', { payload: { orderId: 'o1' } }))
-
-    expect(onExpired.execute).not.toHaveBeenCalled()
-  })
-
-  it('un order.expired sin orderId falla', async () => {
-    const { processor } = outboxProcessor()
-
-    await expect(processor.process(job('order.expired', { payload: {} }))).rejects.toThrow(
-      'no trae el id del pedido',
-    )
-  })
-
-  it('avisa (una vez por minuto) cuando falla un job', () => {
-    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
-    const { processor, queue } = outboxProcessor()
-
-    processor.onFailed(job('order.expired', {}), new Error('Postgres caído'))
-    processor.onFailed(undefined, new Error('otra vez'))
-
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(String(warn.mock.calls[0]?.[0])).toContain('order.expired')
-    expect(queue.on).toHaveBeenCalledWith('error', expect.any(Function))
   })
 })

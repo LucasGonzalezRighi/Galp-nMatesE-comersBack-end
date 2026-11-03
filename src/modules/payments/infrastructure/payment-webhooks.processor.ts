@@ -1,12 +1,12 @@
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Inject, Logger, type OnModuleDestroy } from '@nestjs/common'
-import type { Job, Queue, Worker } from 'bullmq'
+import type { Job, Queue } from 'bullmq'
 
+import { closeWorker } from '../../../shared/infrastructure/redis/close-worker'
 import {
   createRateLimitedWarn,
   errorMessage,
 } from '../../../shared/infrastructure/redis/rate-limited-warn'
-import { WORKER_SHUTDOWN_PROBE_MS } from '../../orders/infrastructure/order-expiration.processor'
 import { ProcessWebhookEventCommand } from '../application/commands/process-webhook-event.command'
 import {
   PAYMENT_WEBHOOKS_QUEUE,
@@ -14,53 +14,6 @@ import {
   type WebhookJobData,
 } from './payment-webhooks.queue'
 import { PrismaWebhookEventRepository } from './prisma-webhook-event.repository'
-
-/**
- * Indica si Redis contesta a tiempo (las colas no encolan offline: con Redis caído fallan al
- * toque). Lo usan los workers de pagos al cerrar.
- *
- * @param queue - Cola a sondear.
- * @returns `true` si `getJobCounts` contesta en {@link WORKER_SHUTDOWN_PROBE_MS}.
- */
-export async function redisAnswers(queue: Pick<Queue, 'getJobCounts'>): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined
-  const timeout = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => {
-      resolve(false)
-    }, WORKER_SHUTDOWN_PROBE_MS)
-  })
-  const probe = queue.getJobCounts('waiting').then(
-    () => true,
-    () => false,
-  )
-  try {
-    return await Promise.race([probe, timeout])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/**
- * Cierra el worker de un processor antes que el resto de la app, como `OrderExpirationProcessor`:
- * con Redis caído el cierre normal de BullMQ espera para siempre (y `app.close()` queda colgado),
- * así que si Redis no contesta lo cierra forzado (el job en curso queda estancado y se reintenta).
- * Sin `app.init()` no hay worker y no hace nada.
- *
- * @param host - Processor (su `worker` lanza si todavía no existe).
- * @param queue - Cola del processor, para sondear Redis.
- */
-export async function closeWorker(
-  host: WorkerHost,
-  queue: Pick<Queue, 'getJobCounts'>,
-): Promise<void> {
-  let worker: Worker
-  try {
-    worker = host.worker
-  } catch {
-    return
-  }
-  await worker.close(!(await redisAnswers(queue)))
-}
 
 /**
  * Worker de la cola `payment-webhooks` (Ruling B-38): cada job `webhook.process` procesa su

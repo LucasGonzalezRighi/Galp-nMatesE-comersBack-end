@@ -9,6 +9,7 @@ import { OrdersModule } from './modules/orders/orders.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { ReviewsModule } from './modules/reviews/reviews.module'
 import { SettingsModule } from './modules/settings/settings.module'
+import { StorefrontSyncModule } from './modules/storefront-sync/storefront-sync.module'
 import { LoggerModule } from './shared/infrastructure/logger/logger.module'
 import { PrismaModule } from './shared/infrastructure/prisma/prisma.module'
 import { RedisModule } from './shared/infrastructure/redis/redis.module'
@@ -32,6 +33,7 @@ import { SharedModule } from './shared/shared.module'
     IdentityModule,
     OrdersModule,
     PaymentsModule,
+    StorefrontSyncModule,
   ],
 })
 export class AppModule {}

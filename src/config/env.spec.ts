@@ -19,6 +19,11 @@ const LIVE_MISSING =
   'Con MP_MODE=live hacen falta MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET y PUBLIC_API_ORIGIN.'
 const PRODUCTION_SIMULATED = 'En producción MP_MODE tiene que ser live.'
 
+/** Secreto de revalidación de la tienda (32 caracteres, de mentira). */
+const STORE_SECRET = 'x'.repeat(32)
+const STORE_SECRET_PRODUCTION =
+  'En producción hace falta STORE_REVALIDATE_SECRET (el mismo REVALIDATE_SECRET de la tienda).'
+
 /** Devuelve el mensaje del error que lanza `parseEnv`, o falla si no lanza. */
 function errorOf(source: Record<string, string | undefined>): string {
   try {
@@ -60,10 +65,36 @@ describe('parseEnv', () => {
       ...REQUIRED,
       ...LIVE,
       NODE_ENV: 'production',
+      STORE_REVALIDATE_SECRET: STORE_SECRET,
       PORT: '4000',
       LOG_LEVEL: 'warn',
     })
     expect(env).toMatchObject({ NODE_ENV: 'production', PORT: 4000, LOG_LEVEL: 'warn' })
+  })
+
+  describe('Aviso a la tienda', () => {
+    it('STORE_REVALIDATE_SECRET es opcional fuera de producción', () => {
+      expect(parseEnv(REQUIRED).STORE_REVALIDATE_SECRET).toBeUndefined()
+      expect(parseEnv({ ...REQUIRED, NODE_ENV: 'test' }).STORE_REVALIDATE_SECRET).toBeUndefined()
+      expect(
+        parseEnv({ ...REQUIRED, STORE_REVALIDATE_SECRET: STORE_SECRET }).STORE_REVALIDATE_SECRET,
+      ).toBe(STORE_SECRET)
+    })
+
+    it('con menos de 32 caracteres lanza un error con la pista, sin mostrar el valor', () => {
+      const short = 'y'.repeat(31)
+      const message = errorOf({ ...REQUIRED, STORE_REVALIDATE_SECRET: short })
+      expect(message).toContain(
+        'STORE_REVALIDATE_SECRET: tiene un valor inválido; se espera el mismo REVALIDATE_SECRET de la tienda, de 32 caracteres o más',
+      )
+      expect(message).not.toContain(short)
+    })
+
+    it('en producción sin el secreto lanza el mensaje exacto', () => {
+      const message = errorOf({ ...REQUIRED, ...LIVE, NODE_ENV: 'production' })
+      expect(message).toContain(STORE_SECRET_PRODUCTION)
+      expect(message.split(STORE_SECRET_PRODUCTION)).toHaveLength(2)
+    })
   })
 
   it('rechaza una DATABASE_URL que no es de Postgres sin mostrar su valor', () => {
