@@ -1,11 +1,11 @@
 import { MPBadRequestError, MPNotFoundError, MPServerError } from 'mercadopago'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FixedClock } from '../../../../test/support/clock'
 import { RecordingPaymentsLogger } from '../../../../test/support/payments'
 import type { OrderForPayment } from '../../orders/application/ports/order-payments.port'
 import { InvalidCardTokenError, PaymentGatewayError } from '../domain/payments-errors'
-import { MercadoPagoGateway } from './mercadopago.gateway'
+import { createMercadoPagoClients, MercadoPagoGateway } from './mercadopago.gateway'
 
 const ACCESS_TOKEN = 'TEST-0000000000000000-000000-00000000000000000000000000000000-000000000'
 
@@ -115,6 +115,7 @@ describe('MercadoPagoGateway', () => {
         expiration_date_from: '2026-11-02T08:59:00.000-03:00',
         expiration_date_to: '2026-11-02T08:59:59.000-03:00',
       },
+      requestOptions: { idempotencyKey: expect.any(String) as unknown },
     })
   })
 
@@ -197,7 +198,10 @@ describe('MercadoPagoGateway', () => {
     await expect(gateway.getPayment('999')).resolves.toBeNull()
     await expect(gateway.cancelPayment('999')).resolves.toBeNull()
     expect(clients.payment.get).toHaveBeenCalledWith({ id: '999' })
-    expect(clients.payment.cancel).toHaveBeenCalledWith({ id: '999' })
+    expect(clients.payment.cancel).toHaveBeenCalledWith({
+      id: '999',
+      requestOptions: { idempotencyKey: expect.any(String) as unknown },
+    })
   })
 
   it('cancela un pago pendiente y devuelve cómo quedó', async () => {
@@ -302,5 +306,92 @@ describe('MercadoPagoGateway', () => {
     await expect(failing.gateway.getInstallments(request)).rejects.toThrow(PaymentGatewayError)
     await expect(offline.gateway.getInstallments(request)).rejects.toThrow(PaymentGatewayError)
     expect(failing.logger.warnings[0]).toContain('status 400')
+  })
+})
+
+describe('MercadoPagoGateway con los clientes reales del SDK', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Pasarela con los clientes reales del SDK y un `fetch` global falso que anota lo que sale. */
+  function realSdkGateway() {
+    const sent: { method: string; path: string; idempotencyKey: string | null }[] = []
+    const bodies: Record<string, unknown> = {
+      'POST /checkout/preferences': { id: 'p1', init_point: 'https://www.mercadopago.com.ar/p1' },
+      'PUT /checkout/preferences/p1': { id: 'p1' },
+      'POST /v1/payments': APPROVED,
+      'PUT /v1/payments/999': { ...APPROVED, id: 999, status: 'cancelled' },
+      'POST /v1/payments/1234567890/refunds': { id: 555, status: 'approved' },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        // El SDK termina algunos paths en "/" (`/checkout/preferences/`).
+        const path = url.pathname.replace(/\/+$/, '')
+        const method = init?.method ?? 'GET'
+        sent.push({
+          method,
+          path,
+          idempotencyKey: new Headers(init?.headers).get('X-Idempotency-Key'),
+        })
+        return Promise.resolve(Response.json(bodies[`${method} ${path}`] ?? {}))
+      }),
+    )
+    const gateway = new MercadoPagoGateway(
+      { accessToken: ACCESS_TOKEN, clock: new FixedClock() },
+      createMercadoPagoClients(ACCESS_TOKEN),
+    )
+    return { gateway, sent }
+  }
+
+  it('vencer la preferencia y cancelar el pago no heredan la clave del último cobro', async () => {
+    const { gateway, sent } = realSdkGateway()
+
+    await gateway.createPreference({
+      order: ORDER,
+      idempotencyKey: 'key-preference',
+      notificationUrl: null,
+      backUrl: 'https://galpon.test/checkout/resultado?pedido=GLP-10001',
+      expiresAt: ORDER.reservedUntil,
+      statementDescriptor: 'GALPON MATES',
+    })
+    await gateway.expirePreference('p1')
+    await gateway.createCardPayment({
+      order: ORDER,
+      idempotencyKey: 'key-card',
+      token: 'tok_1',
+      paymentMethodId: 'visa',
+      issuerId: null,
+      installments: 1,
+      payer: { email: 'ana@example.com', identification: { type: 'DNI', number: '12345678' } },
+      notificationUrl: null,
+      statementDescriptor: 'GALPON MATES',
+    })
+    await gateway.cancelPayment('999')
+    await gateway.refundPayment('1234567890', 'key-refund')
+    await gateway.cancelPayment('999')
+    await gateway.expirePreference('p1')
+
+    expect(sent.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      'POST /checkout/preferences',
+      'PUT /checkout/preferences/p1',
+      'POST /v1/payments',
+      'PUT /v1/payments/999',
+      'POST /v1/payments/1234567890/refunds',
+      'PUT /v1/payments/999',
+      'PUT /checkout/preferences/p1',
+    ])
+    expect(
+      sent.filter(({ method }) => method === 'POST').map((call) => call.idempotencyKey),
+    ).toEqual(['key-preference', 'key-card', 'key-refund'])
+    const own = sent.filter(({ method }) => method === 'PUT').map((call) => call.idempotencyKey)
+    expect(own).toHaveLength(4)
+    for (const key of own) {
+      expect(['key-preference', 'key-card', 'key-refund']).not.toContain(key)
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    }
+    expect(new Set(own).size).toBe(4)
   })
 })

@@ -79,9 +79,14 @@ async function cardToken(accessToken: string): Promise<string> {
 describe.skipIf(ACCESS_TOKEN === undefined)(
   'sandbox de Mercado Pago (credenciales de prueba)',
   () => {
+    // Una sola pasarela (y un solo `MercadoPagoConfig`) para todas las llamadas, como en la
+    // aplicación: el SDK guarda en el config las opciones de la última llamada, y con una pasarela
+    // nueva por llamada ese arrastre nunca se vería.
+    let instance: MercadoPagoGateway | undefined
     function gateway(): MercadoPagoGateway {
       if (ACCESS_TOKEN === undefined) throw new Error('Falta MP_ACCESS_TOKEN')
-      return new MercadoPagoGateway({ accessToken: ACCESS_TOKEN, clock: new SystemClock() })
+      instance ??= new MercadoPagoGateway({ accessToken: ACCESS_TOKEN, clock: new SystemClock() })
+      return instance
     }
 
     it('crea una preferencia real con el initPoint de Mercado Pago', async () => {

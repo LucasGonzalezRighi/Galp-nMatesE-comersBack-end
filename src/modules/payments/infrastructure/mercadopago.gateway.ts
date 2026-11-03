@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   MercadoPagoConfig,
   MPNotFoundError,
@@ -139,6 +141,10 @@ export class MercadoPagoGateway implements PaymentGatewayPort {
         updatePreferenceRequest: toExpiredPreferenceBody(
           this.options.clock.now(),
         ) as PreferenceBody,
+        // El SDK 3.6.1 guarda las `requestOptions` de cada llamada en el `MercadoPagoConfig`
+        // compartido: sin clave propia, este PUT saldría con la del último cobro o devolución y
+        // Mercado Pago lo resolvería con esa respuesta guardada (o con 409) sin vencer nada.
+        requestOptions: { idempotencyKey: randomUUID() },
       })
     } catch (error: unknown) {
       throw this.fail(`vencer la preferencia ${preferenceId}`, error)
@@ -171,7 +177,13 @@ export class MercadoPagoGateway implements PaymentGatewayPort {
   /** {@inheritDoc PaymentGatewayPort.cancelPayment} */
   async cancelPayment(providerPaymentId: string): Promise<ProviderPayment | null> {
     try {
-      return toProviderPayment(await this.clients.payment.cancel({ id: providerPaymentId }))
+      const response = await this.clients.payment.cancel({
+        id: providerPaymentId,
+        // Clave propia y nueva (ver `expirePreference`): cancelar el mismo pago dos veces es
+        // seguro y no debe heredar la clave del último cobro o devolución.
+        requestOptions: { idempotencyKey: randomUUID() },
+      })
+      return toProviderPayment(response)
     } catch (error: unknown) {
       if (error instanceof MPNotFoundError) return null
       throw this.fail(`cancelar el pago ${providerPaymentId}`, error)
