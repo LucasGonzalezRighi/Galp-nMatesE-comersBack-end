@@ -404,14 +404,21 @@ panel de Mercado Pago (Tus integraciones → la aplicación → Credenciales de 
    similar): va en `PUBLIC_API_ORIGIN`. En el panel, la URL de "Modo pruebas" es
    `${PUBLIC_API_ORIGIN}/api/v1/webhooks/mercadopago`, con el evento "Pagos". El back además
    manda esa `notification_url` en cada preferencia y pago, y esa tiene prioridad.
-5. **La cuenta compradora de prueba** (usuario, contraseña y el código de 6 dígitos): Checkout Pro
+5. **Otro origen público HTTPS, ahora hacia la tienda** (otro túnel, al puerto donde corra la
+   tienda compilada): va en `STORE_ORIGIN`. Checkout Pro es el único flujo que lo necesita así: el
+   back manda `back_urls` (success, pending y failure) con `${STORE_ORIGIN}/checkout/resultado` y
+   `auto_return: approved`, y Mercado Pago descarta las `back_urls` que no son HTTPS públicas (nada
+   de `localhost`) y exige `back_urls.success` para el `auto_return`. Con el `STORE_ORIGIN` por
+   defecto (`http://localhost:3000`) la preferencia probablemente se rechaza con 400, que la tienda
+   ve como 502. El pago con tarjeta no lo usa.
+6. **La cuenta compradora de prueba** (usuario, contraseña y el código de 6 dígitos): Checkout Pro
    exige comprar logueado con ella, en una ventana de incógnito.
-6. Opcional: el User ID de la cuenta vendedora, que llega en cada notificación.
+7. Opcional: el User ID de la cuenta vendedora, que llega en cada notificación.
 
 Con eso, el `.env` del back lleva `MP_MODE=live`, las tres variables y `STORE_ORIGIN` (adonde
-vuelve el comprador). La tienda se compila con su public key. Las tarjetas de prueba de Argentina
-son la Visa `4509 9535 6623 3704` y la Mastercard `5031 7557 3453 0604`, con CVV `123`, vencimiento
-`11/30` y DNI `12345678`. El nombre del titular elige el resultado (`APRO`, `OTHE`, `CONT`, `FUND`,
+vuelve el comprador, con el origen HTTPS público del paso 5). La tienda se compila con su public
+key. Las tarjetas de prueba de Argentina son la Visa `4509 9535 6623 3704` y la Mastercard
+`5031 7557 3453 0604`, con CVV `123`, vencimiento `11/30` y DNI `12345678`. El nombre del titular elige el resultado (`APRO`, `OTHE`, `CONT`, `FUND`,
 …). Para 3DS: `5483 9281 6457 4623` (desafío exitoso) y `5361 9568 0611 7557` (no autorizado).
 
 **E2E del sandbox** (`test/e2e/mercadopago.sandbox.e2e-spec.ts`): se omite sin `MP_ACCESS_TOKEN`
@@ -444,7 +451,10 @@ Qué falta confirmar con el sandbox:
 
 - El `status_detail` real de cada titular (el simulador sigue la tabla que se infiere de la
   documentación).
-- Si Mercado Pago acepta `back_urls` con `http://localhost` junto con `auto_return`.
+- Qué responde Mercado Pago a unas `back_urls` que no son HTTPS públicas: la documentación dice que
+  las descarta y que `auto_return` exige `back_urls.success`, pero no si la preferencia falla con
+  400 (`invalid_back_urls`) o se crea sin la vuelta automática. Con el `STORE_ORIGIN` del paso 5
+  no hace falta saberlo.
 - El desafío 3DS real: Mercado Pago pide un `POST` del `creq` a `external_resource_url`, y el
   contrato solo lleva `challenge.url`.
 
