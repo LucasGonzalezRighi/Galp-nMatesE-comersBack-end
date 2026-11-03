@@ -7,8 +7,9 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 - **Diseño:** [`docs/superpowers/specs/2026-10-20-galpon-backend-design.md`](docs/superpowers/specs/2026-10-20-galpon-backend-design.md).
 - **Bitácora** (qué se hizo en cada pieza, decisiones y versiones): [`docs/BITACORA.md`](docs/BITACORA.md).
 - **Decisiones de arquitectura:** [ADR 0001 · monolito hexagonal](docs/adr/0001-nest-hexagonal-monolito.md),
-  [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md) y
-  [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md).
+  [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md),
+  [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md) y
+  [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -79,12 +80,12 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 `npm run contract:check` arma la app (sin Docker), genera el Swagger y lo compara, normalizado,
 con `../frontend/docs/api/openapi.yaml` (o `CONTRACT_PATH`). Falla si una operación implementada
 difiere del contrato o si Swagger expone una ruta que no está en `IMPLEMENTED_PATHS`
-(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 31
-implementadas y 46 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
+(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 36
+implementadas y 41 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
 `requestBody`. Además corre los casos compartidos de validación del front
-(`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad
-(`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan los mismos errores en
-los dos lados.
+(`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad y del checkout,
+contacto y envío (`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan
+los mismos errores en los dos lados.
 
 Para ver las diferencias de una ruta: `node scripts/openapi-diff.mjs products/{slug}` (en Git Bash,
 sin `/` inicial o entre comillas, para que no la convierta en una ruta de Windows).
@@ -93,9 +94,10 @@ sin `/` inicial o entre comillas, para que no la convierta en una ruta de Window
 
 Las 13 lecturas públicas del contrato (`/categories`, `/products…`, `/reviews/featured`,
 `/content/*`, `/settings/public`) están implementadas, sin límite de pedidos por IP (la tienda las
-pide desde un solo servidor). Probadas contra Postgres y Redis reales: los E2E con Testcontainers y
-esta misma prueba (la tienda compilada en modo `live` muestra los 27 productos del seed; ver
-"Estado de la verificación" en [`docs/BITACORA.md`](docs/BITACORA.md)).
+pide desde un solo servidor). Desde B3 funcionan la cuenta y el admin, y desde B4 el carrito, el
+checkout hasta elegir el medio de pago y los pedidos (ver "Pedidos y stock"). Probadas contra
+Postgres y Redis reales: los E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada
+pieza en [`docs/BITACORA.md`](docs/BITACORA.md)).
 
 1. Acá, con Docker Desktop abierto: `npm run db:up`, `npm run db:migrate`, `npm run db:seed` y
    `npm run dev`. Si vas a probar la recuperación de contraseña desde la tienda compilada, arrancá
@@ -114,25 +116,27 @@ esta misma prueba (la tienda compilada en modo `live` muestra los 27 productos d
    cd apps/store && node ../../node_modules/next/dist/bin/next start --port 4300
    ```
 
-   `http://localhost:4300/` y `/tienda` tienen que mostrar los 27 productos del seed, y la cuenta
-   (registro, ingreso, direcciones, recuperación) funciona contra el back. Al terminar, cerrá
-   `next start` y `npm run dev`, y `npm run db:down` si no vas a seguir.
+   `http://localhost:4300/` y `/tienda` tienen que mostrar los 27 productos del seed. La cuenta
+   (registro, ingreso, direcciones, recuperación) funciona contra el back, y también el carrito,
+   el checkout hasta elegir el medio de pago (que crea el pedido y reserva el stock), el resultado
+   sin pagar o vencido y "Mis pedidos". Al terminar, cerrá `next start` y `npm run dev`, y
+   `npm run db:down` si no vas a seguir.
 
 Qué falla todavía en modo `live`, y en qué pieza llega:
 
-- **Carrito y checkout (B4):** `POST /cart/quote` da 404. El checkout muestra "No pudimos actualizar
-  el resumen" y no se puede comprar.
-- **Pedidos (B4):** `/cuenta/pedidos` muestra la lista vacía ("Todavía no hiciste pedidos"), porque
-  `GET /me/orders` devuelve una página vacía. El detalle de un pedido da 404.
-- **Pagos (B5).**
+- **Pagos (B5):** "Pagar $… con Mercado Pago" da 404 en
+  `POST /orders/{number}/payments/mercadopago/preference` y muestra "No pudimos iniciar el pago.
+  Probá de nuevo.". Las rutas de la tarjeta (`…/mercadopago/card` e `installments`) tampoco
+  existen todavía. El pedido queda en "Esperando el pago" hasta vencer.
 - **Contacto, arrepentimiento y reseñas nuevas (B7).**
 
 ## Cuenta y admin
 
 Desde B3 el back maneja las cuentas de la tienda y el ingreso al admin. Usa sesiones en Redis,
 cookies `__Host-` y un token CSRF por sesión
-([ADR 0003](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md)). De las 19 operaciones de
-`/auth/*`, `/me*` y `/admin/auth/*` están implementadas 18; falta `GET /me/orders/{number}` (B4).
+([ADR 0003](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md)). Las 19 operaciones de
+`/auth/*`, `/me*` y `/admin/auth/*` están implementadas (desde B4, `GET /me/orders` y
+`GET /me/orders/{number}` viven en el módulo `orders`; ver "Pedidos y stock").
 
 - **Cookies:** `__Host-galpon_session` (tienda: 30 días; la anónima que solo da el CSRF, 24 h) y
   `__Host-galpon_admin` (admin: 8 h). Duran un plazo fijo, que no se renueva con el uso.
@@ -187,6 +191,73 @@ cookies `__Host-` y un token CSRF por sesión
   - Todas las pantallas con datos (Resumen, Pedidos, Productos, Líneas, Contenido, Reseñas,
     Mensajes y Ajustes) muestran "No pudimos cargar…": sus rutas `/admin/*` dan 404 hasta B6.
 
+## Pedidos y stock
+
+Desde B4 el módulo `orders` implementa las 6 operaciones del carrito y los pedidos:
+`POST /cart/quote`, `POST /shipping/quote`, `POST /orders`, `GET /orders/{number}`,
+`GET /me/orders` y `GET /me/orders/{number}`. El porqué del diseño está en el
+[ADR 0004](docs/adr/0004-reservas-de-stock-y-vencimiento.md).
+
+- **Cotización:** `POST /cart/quote` arma las líneas igual que el mock del front: claves de línea,
+  detalle, kit con nombre `Kit` y su ahorro por unidad, y tope de 20 por producto sumando todas
+  las líneas. No reserva nada. La tienda no usa `POST /shipping/quote`: el costo del envío sale de
+  `/settings/public`.
+- **Crear el pedido:** la tienda llama a `POST /orders` al elegir el medio de pago, con una
+  `Idempotency-Key` (UUID v4).
+  - No pide `X-CSRF-Token` (en el contrato la ruta es pública), pero lee la cookie de sesión si
+    viene.
+  - Con sesión de cliente, el pedido queda en esa cuenta. Sin sesión, se vincula al invitado con
+    ese email (o se crea uno). Si el email es de una cuenta, el pedido queda sin dueño y solo se lee
+    con su token.
+  - Responde 201 con `{ order, orderToken }`. Los números arrancan en `GLP-10001`.
+  - Si algo cambió desde la cotización responde 409 `stock_changed`, `price_changed` o
+    `total_changed`, con un aviso por producto en `changes`, y la tienda muestra "Algo cambió en
+    tu carrito".
+  - Es la única ruta de pedidos con el límite global de 120 por minuto por IP. Las demás no tienen
+    límite, porque toda la tienda llega desde la IP de su servidor.
+- **Reserva de 30 minutos:** `reservedUntil` es `createdAt` + 30 minutos (una constante del
+  contrato, no una variable de entorno). El stock queda en `inventory.reserved` y en una fila de
+  `stock_reservations` por producto. El catálogo muestra como disponible `on_hand − reserved` (hasta
+  20, en `maxQuantity`).
+- **Vencimiento:** un pedido sin pago pasa a `expired` y devuelve el stock por el primero de tres
+  caminos: el job `order.expire` de la cola `order-expiration` (corre en `reservedUntil`), el
+  barrido de cada 60 s o la lectura (`GET /orders/{number}`, `GET /me/orders*`, y también
+  `POST /cart/quote` y `POST /orders`). Los tres hacen lo mismo y liberan una sola vez. Un pago
+  `pending` o `action_required` no vence (B5).
+- **Leer un pedido:** `GET /orders/{number}` con `X-Order-Token` (`ot_` + 64 hex; la base guarda
+  solo su SHA-256 y el log lo tapa) o con la sesión del dueño. Si no, 404 "No encontramos ese
+  pedido.", sin distinguir por qué. `GET /me/orders` devuelve 10 por página, del más nuevo al más
+  viejo.
+- **Eventos:** `order.created` y `order.expired` quedan en el outbox, en la misma transacción.
+
+Para ver el stock reservado y los últimos pedidos en el Postgres de compose (`-T` evita el error
+de TTY de Git Bash):
+
+```bash
+docker compose exec -T postgres psql -U galpon -d galpon -c "SELECT p.slug, i.on_hand, i.reserved FROM inventory i JOIN products p ON p.id = i.product_id WHERE i.reserved > 0"
+docker compose exec -T postgres psql -U galpon -d galpon -c "SELECT number, status, payment_status, reserved_until FROM orders ORDER BY placed_at DESC LIMIT 10"
+```
+
+**Vencer un pedido a mano** para probar (sin esperar 30 minutos):
+
+```bash
+docker compose exec -T postgres psql -U galpon -d galpon -c "UPDATE orders SET reserved_until = now() - interval '1 second' WHERE number = 'GLP-10001'"
+```
+
+- Recargar `/checkout/resultado?pedido=GLP-10001` en la pestaña de la compra lo vence en el acto
+  y muestra "El pedido venció". Si nadie lo lee, el barrido lo vence en menos de un minuto (con el
+  back andando).
+- Usá un segundo y no un minuto: la fila `expired` del historial lleva la fecha de
+  `reserved_until`, y si queda antes de `created_at` el historial sale desordenado.
+- El job diferido sigue en la cola para la hora original. Cuando corre, no encuentra nada que
+  vencer.
+
+**Números de pedido:** salen de la secuencia `order_number_seq` de Postgres (de 10001 a 99999, sin
+ciclo), como `GLP-` y cinco dígitos. Un 409 no gasta número (se pide después de reservar), pero un
+fallo posterior sí, porque una secuencia no vuelve atrás. `npm run db:reset` la reinicia. Los
+`GLP-09001…09012` quedan para la demo del admin (B6). El seed no siembra pedidos y nunca baja
+`on_hand` por debajo de lo reservado: deja la fila como está y lo avisa.
+
 ## Scripts
 
 | Script                   | Qué hace                                                                          |
@@ -217,8 +288,10 @@ cookies `__Host-` y un token CSRF por sesión
 - **E2E** (`npm run test:e2e`): Postgres y Redis reales con Testcontainers. Cubren health, Prisma,
   seed, idempotencia, outbox, el repositorio del catálogo y las 13 lecturas públicas. Desde B3
   suman sesiones en Redis, los adaptadores de identidad y la autenticación completa por HTTP
-  (cookies, CSRF, rotación, bloqueo, recuperación y admin). Incluyen también el contrato y los
-  casos compartidos de validación. Corren de a un archivo.
+  (cookies, CSRF, rotación, bloqueo, recuperación y admin). Desde B4, el repositorio de pedidos
+  con la reserva atómica, la cola y el barrido de vencimiento, y los pedidos por HTTP (doble envío,
+  10 compras simultáneas sobre 5 unidades, vencimiento al leer y dueño correcto). Incluyen también
+  el contrato y los casos compartidos de validación. Corren de a un archivo.
 - **Verificación completa**, la misma que corre la CI:
 
   ```bash

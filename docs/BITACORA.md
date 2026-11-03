@@ -437,3 +437,291 @@ Playwright 1.64.1 (Chromium headless 156). Docker Engine 28.4.0.
   - El E2E de auth ya hace 16 logins desde una IP: hay que cuidar el límite si se suman casos.
   - Los caminos de `StaleSessionError` (sesión de cliente sin cliente, admin deshabilitado o
     inexistente) no tienen test.
+
+## B4 · Pedidos y stock (2026-11-03)
+
+Plan: [`docs/superpowers/plans/2026-11-02-b4-pedidos.md`](superpowers/plans/2026-11-02-b4-pedidos.md)
+(6 tareas en 5 olas). Decisiones de arquitectura en
+[ADR 0004 · reservas de stock y vencimiento](adr/0004-reservas-de-stock-y-vencimiento.md).
+
+### Qué quedó
+
+- **Esquema** (Task 1):
+  - Tablas `orders`, `order_items`, `order_item_components`, `order_status_history`, `shipments`
+    y `stock_reservations`, con 6 enums (`order_status`, `payment_status`, `payment_method`,
+    `line_type`, `order_actor` y `reservation_status`).
+  - Escritos a mano en la migración `20261102234632_b4_pedidos`: la secuencia `order_number_seq`
+    (10001 a 99999, sin ciclo) y los CHECK `order_items_quantity_check` (1 a 20),
+    `stock_reservations_quantity_check` y `orders_totals_check` (subtotal = bruto − ahorro,
+    total = subtotal + envío).
+  - `reviews.order_item_id` gana su FK a `order_items` (`SET NULL`).
+  - El seed nunca baja `on_hand` por debajo de `reserved`: deja la fila y avisa.
+- **Cimientos compartidos** (Task 2, `src/shared`):
+  - `DomainError` y `ProblemFilter` llevan `changes` (solo en los 409) y `errors` (solo en los
+    422), con `ChangeNotice` y `FieldError` en `src/shared/domain/change-notice.ts`.
+  - `OptionalCustomerSessionGuard` y `@OptionalSession()`: sin cookie no toca Redis; con cookie y
+    Redis caído, 503.
+  - Mudanzas: `customerIdOf`/`adminUserIdOf` a `auth/session-ids.ts` y `AddressInputDto` a
+    `http/address-input.dto.ts` (identidad re-exporta). `IdentityModule` exporta
+    `CUSTOMER_REPOSITORY`.
+  - pino tapa `X-Order-Token`. `GET /products?ids=` ya no pasa por la caché, y las claves
+    `catalog:products:slug:*` y `catalog:products:group:*` se exportan para borrarlas al reservar.
+  - Soporte de tests: `test/support/http.ts` (`Jar`, `call`, `refreshCsrf`) y
+    `createApp({ clock })`.
+- **Dominio y casos de uso** (Task 3, `src/modules/orders/{domain,application}`):
+  - `priceCart`, puro, sigue el mock del front paso a paso: claves de línea, kits, tope de 20 por
+    producto entre todas las líneas, disponibilidad compartida, precedencia de los problemas de
+    línea, neto sin IVA y tope del total.
+  - `CreateOrderCommand`, `ExpireOrdersCommand`, `QuoteCartQuery`, `QuoteShippingQuery`,
+    `GetOrderQuery`, `ListMyOrdersQuery` y `GetMyOrderQuery`, sin Nest y cableados con
+    `useFactory`. Cinco puertos: catálogo, ajustes, repositorio, clientes y programador del
+    vencimiento.
+- **Adaptadores y módulo** (Task 4):
+  - `PrismaOrderRepository`: reserva atómica con `UPDATE` condicional por producto ordenado,
+    todos los faltantes juntos, número después del stock, y pedido completo y outbox en una sola
+    transacción. `expire` es condicional e idempotente.
+  - `CatalogProductsAdapter` (lee `products` + `inventory` sin caché), `SettingsStoreAdapter` e
+    `IdentityCustomersAdapter` (si dos crean el mismo invitado, devuelve el que ganó).
+  - Cola `order-expiration`: `BullOrderExpirationScheduler`, `OrderExpirationProcessor` y el
+    barrido `OrderExpirationSweep` cada 60 s.
+- **Rutas** (Task 5):
+  - `CartController` (`POST /cart/quote` y `POST /shipping/quote`), `OrdersController`
+    (`POST /orders` y `GET /orders/{number}`) y `MyOrdersController` (`GET /me/orders` y
+    `GET /me/orders/{number}`), con los DTOs del contrato. `GET /me/orders` deja `MeController`.
+  - El contrato pasa a **36 operaciones implementadas de 77**, y los casos compartidos de
+    validación suman el contacto y el envío del checkout.
+- **Docs** (Task 6): este apartado, la sección "Pedidos y stock" del README y el ADR 0004.
+  `.env.example` no cambia: B4 no suma variables (los 30 minutos son una constante del contrato).
+
+### Decisiones
+
+Rulings de la planificación (ledger del flujo, B-14 a B-31):
+
+- **B-14 · El mock manda donde el contrato solo da un ejemplo:**
+  - Claves `product:{id}:{cuero|-}:{virola|-}` y `kit:{m}:{b}:{y}:{cuero}`.
+  - `detail` `Cuero negro · Alpaca cincelada` y `{mate} + {bombilla} + {yerba} · Cuero negro`.
+  - Kit con nombre `Kit` y opciones `{ leather, ferrule: 'Alpaca cincelada' }`.
+  - Tope de 20 por producto en el orden del carrito; opciones ignoradas fuera de los mates; mate
+    sin opciones → 422 `items.{i}.options`.
+  - Piezas no disponibles → `unavailable`; `quantity_reduced` antes que `price_changed`; líneas
+    bloqueadas en cero.
+- **B-15 · Dinero:** ahorro del kit por unidad (`percentOf` sobre la suma de las tres piezas) por
+  cantidad; neto sin IVA redondeado por unidad y en el subtotal; más de `2_147_483_647` → 422.
+- **B-16 · Número:** `GLP-` + secuencia desde 10001. Los `GLP-09001…09012` quedan para la demo del
+  admin (B6).
+- **B-17 · Token:** `ot_` + 64 hex, solo su SHA-256 en la base, sin vencimiento propio, también en
+  el replay.
+- **B-18 · Reserva:**
+  - 30 minutos, como constante. `reserved_until` no cambia nunca.
+  - Estado inicial `pending_payment` / `none`, con `history[0]` del cliente.
+  - El vencimiento suma `expired` en `reserved_until` (actor `system`).
+- **B-19 · Copias al comprar:** contacto, dirección (jsonb), plazo y costo del envío, medio de
+  pago, descuento del kit, y nombres, slugs y precios de líneas y piezas.
+- **B-20 · Dueño:** gana la sesión. Sin sesión, invitado por email (nuevo o actualizado); si el
+  email es de una cuenta, el pedido queda sin dueño (solo token). La adopción al registrarse (B3)
+  sigue.
+- **B-21 · Seguridad de las rutas:**
+  - `/cart/quote`, `/shipping/quote` y `POST /orders` sin CSRF; sesión opcional en `POST /orders`.
+  - `GET /orders/{number}` por token o sesión, siempre con el mismo 404.
+  - `/me/orders*` con sesión y 10 por página.
+- **B-22 · Idempotencia:** `@Idempotent('orders')` sin cambios; solo se guarda el 201.
+- **B-23 · Honeypot:** `website` con texto → 201 con `GLP-00000`, sin guardar ni reservar.
+- **B-24 · Stock:** contador + filas, `UPDATE` condicional, `ChangeNotice` por producto,
+  precedencia stock > precio > total, títulos y `detail` fijos, caché borrada al reservar o
+  liberar.
+- **B-25 · Vencimiento:** job, barrido y lectura, idempotentes. `pending` y `action_required` no
+  vencen.
+- **B-26 · Envío:** costo y plazo de `shipping_options`; método deshabilitado → 422 con el
+  `detail` que muestra la tienda; `/shipping/quote` pide el código postal salvo en el retiro.
+- **B-27 · Límites:** `@SkipThrottle()` en todo menos `POST /orders` (120 por minuto por IP).
+- **B-28 · Eventos:** `order.created` y `order.expired` en el outbox, en la misma transacción.
+- **B-29 · Mudanzas:** DTOs de pedidos de identidad a `orders`, `GET /me/orders` a
+  `MyOrdersController`, `AddressInputDto` y `session-ids` a `shared`.
+- **B-30 · Seed:** sin pedidos sembrados; nunca baja `on_hand` por debajo de lo reservado; FK de
+  `reviews.order_item_id`.
+- **B-31 · Olas:**
+  - W1: Tasks 1 y 2 en paralelo.
+  - W2: Task 3. W3: Task 4. W4: Task 5. W5: Task 6.
+
+Decisiones tomadas en el camino:
+
+- **El número se pide después del stock** (Task 4, sugerido en la revisión de las Tasks 1 y 2): un
+  409 por carrera no gasta números de la secuencia, que no vuelve atrás.
+- **Eventos como función** (Task 3): `aggregateId` es el número, que asigna el repositorio dentro
+  de la transacción. El caso de uso pasa `(order) => eventos` y el repositorio la llama con el
+  pedido ya guardado.
+- **`expire` exige también `reserved_until <= now`** (Task 3): un job que corre antes de hora no
+  vence nada. El repositorio compara con el reloj de la app, no con el de Postgres.
+- **Sin `include` dentro de las transacciones** (Task 4): con el adapter de `pg`, Prisma manda
+  esas consultas en paralelo por la misma conexión y `pg` avisa `DeprecationWarning`. `expire` lee
+  el pedido antes de abrir la transacción.
+- **`maxWait: 5_000`** en la transacción de crear (Task 4): con muchos pedidos a la vez, el pool de
+  10 conexiones se llenaba y los 2 s por defecto daban 500.
+- **El processor cierra su worker** (Task 4): con Redis caído, el `close()` normal de BullMQ no
+  termina nunca y colgaba el cierre de la app. Si la cola no contesta en 1 s, cierra forzado (el
+  job en curso se reintenta, y vencer es idempotente).
+- **Discriminador de líneas con `@Transform`** (Task 5): class-transformer 0.5.1 respondía 500 con
+  `items: [null]`. Un `type` desconocido da un solo 422 `items.N.type`.
+- **`X-Order-Token` con un decorador propio** (Task 5): con `@Headers()`, Swagger lo publicaba como
+  parámetro, y el contrato lo declara como esquema de seguridad.
+- **El teléfono se normaliza en el DTO,** como `optionalPhoneSchema` del front (`+54 9 11 …` →
+  `1123456789`): lo piden los casos compartidos del checkout.
+- **Doble envío simultáneo** (Task 5; corrige el Review Focus 1 del plan):
+  - Con la misma clave, el segundo pedido que llega mientras corre el primero recibe
+    `409 idempotency_in_progress` (interceptor de B1, sin cambios por B-22).
+  - Se crea un solo pedido, todo 201 trae el mismo número y el mismo token, y el reintento recibe
+    el 201 guardado con `Idempotent-Replayed: true`.
+  - "Los dos reciben 201" exigiría que el interceptor espere al primero (B8).
+- **E2E de vencimiento moviendo las fechas del pedido** (Task 5), en lugar de adelantar el reloj de
+  toda la app, que habría vencido los pedidos de los otros casos.
+
+### Versiones reales instaladas
+
+B4 no instaló nada: usa `@nestjs/bullmq` 12.0.0 y `bullmq` 6.5.3, que ya estaban desde B1.
+`package.json`, `package-lock.json` y `scripts/dependency-versions.json` no cambiaron.
+
+Para la prueba en vivo se usó lo que ya tenía instalado el front: Next.js 16.4.2 y Playwright
+1.64.1 (Chromium headless). Docker Engine 28.4.0.
+
+### Verificación
+
+- **Suite completa en verde:**
+  - `npm run typecheck`, `npm run lint` (versiones y fronteras) y `npm run format:check`.
+  - `npm test`: 50 archivos, 410 tests.
+  - `npm run test:e2e`: 15 archivos, 330 tests y 1 omitido (234 s). Testcontainers con
+    `postgres:17-alpine` y `redis:8-alpine`.
+  - `npm run contract:check`: 3 archivos, 205 tests y 1 omitido. **36 operaciones implementadas y
+    41 pendientes de 77**, sin diferencias.
+- **Review Focus del plan, cubierto con tests:**
+  1. Doble envío: un solo pedido, mismo número y token, replay con `Idempotent-Replayed`; la misma
+     clave con otro cuerpo → 422 `idempotency_key_reused`; una clave nueva tras un 409 → 201.
+  2. Sin sobreventa: 10 pedidos simultáneos sobre 5 unidades → 5 pedidos, `reserved = 5`, 5
+     reservas activas y 5 `409` con "X se agotó." (dominio, repositorio y HTTP). El mismo
+     producto suelto y en un kit comparte el stock.
+  3. Vencimiento: `GET /orders/{number}` responde `expired` aunque la cola no haya corrido, con
+     `history[1].at = reservedUntil`. El stock vuelve, y job, barrido y lectura liberan una sola
+     vez.
+  4. Dueño correcto: con sesión, en `GET /me/orders`; invitado con el email de una cuenta, solo
+     por token (404 por sesión); invitado que después se registra, en su cuenta.
+  5. Cuentas del kit (`75997` / `15200` / `136794` / `56526`), claves con `Alpaca cincelada`, y mate
+     suelto + kit sin stock para la segunda línea.
+- **Prueba en vivo de la tienda (Task 6):**
+  - Back compilado (`node dist/main`) en el 3001 con `STORE_ORIGIN=http://localhost:4300`, sobre
+    el Postgres y el Redis de compose, migrado (`20261102234632_b4_pedidos`) y sembrado.
+  - Tienda compilada en modo `live` (`npm run build -w @galpon/store` y
+    `next start --port 4300`), con el entorno en la misma línea (sin `.env.local`).
+  - Script de Playwright `live-store.mjs` en el workspace: 11 de 11 pasos en verde. Capturas
+    locales en `.superpowers/sdd/2026-11-02-b4-pedidos/captures/` (git ignora esa carpeta: un clon
+    no las tiene):
+    - Carrito con el Mate Imperial Premium y un kit (Imperial Premium + Bombillón 100% Alpaca +
+      Yerba Canarias Serena): `$39.999` y `$70.648`, "Ahorrás $7.850" (10 % de `$78.498`) y
+      subtotal `$110.647` (`b4-1-carrito-mate-y-kit.png`).
+    - Checkout de invitado: contacto, "Retiro en persona" y paso 3
+      (`b4-2-checkout-paso-pago.png`).
+    - "Mercado Pago" → `POST /orders` 201 (`GLP-10003` en la corrida final) y "Reservamos tu pedido
+      por 30 minutos (hasta el 03/11/2026 01:28).". El mate queda con `maxQuantity` 10: 12 − 2, el
+      suelto y el del kit (`b4-3-reserva-30-minutos.png`).
+    - "Pagar $110.647 con Mercado Pago" → 404 en `…/payments/mercadopago/preference` (B5) y "No
+      pudimos iniciar el pago. Probá de nuevo." (`b4-4-pago-falla-b5.png`).
+    - `/checkout/resultado?pedido=…` → "No completaste el pago" (`b4-5-resultado-sin-pagar.png`).
+    - `reserved_until` al pasado por SQL y recarga → "El pedido venció"
+      (`b4-6-pedido-vencido.png`). En la base: pedido `expired`/`none`, las tres reservas
+      `released`, historial `pending_payment` (cliente) y `expired` (sistema), outbox
+      `order.created` y `order.expired`, y el mate de nuevo con `maxQuantity` 12 (`inventory`
+      12/0).
+    - Cuenta: registro, contacto precargado con el email de la sesión, envío a domicilio y
+      "Mercado Pago" → 201 con el `customer_id` de la cuenta. `/cuenta/pedidos` lo lista con
+      "Esperando el pago" (`b4-7-cuenta-pedidos-esperando-pago.png`). El detalle muestra "Sin
+      pagar", "Envío a domicilio", la dirección, el plazo, los totales con el envío de `$6.500` y
+      el historial (`b4-8-cuenta-detalle-historial-envio.png`).
+    - Precio subido por SQL entre la cotización y la confirmación (Camionero Virola de Aluminio,
+      `$24.999` → `$26.999`): `409 price_changed` "Cambiaron los precios" con un solo `change`, y
+      el alert "Algo cambió en tu carrito" con un ítem: "Camionero Virola de Aluminio cambió de
+      precio: ahora cuesta $26.999." (`b4-9-precio-cambiado-alert.png`). "Confirmar de nuevo" →
+      201 con total `26999` y el botón "Pagar $26.999 con Mercado Pago"
+      (`b4-10-confirmar-de-nuevo-201.png`). Al final el precio volvió a `$24.999`.
+  - **Barrido en vivo:** con el back andando, dos pedidos pendientes con `reserved_until` movido al
+    pasado quedaron `expired` a los 42 s, sin ninguna lectura: reservas `released`, un
+    `order.expired` cada uno e `inventory.reserved` en 0 en todo el catálogo.
+  - **Logs:** ningún `warn` ni `error` en toda la prueba. Las 9 apariciones de `x-order-token`
+    salen como `[Redacted]`, y no hay ningún `ot_…` en claro.
+  - Las dos primeras corridas del script se cortaron por un SQL ambiguo del propio script, cuando
+    la tienda ya mostraba "El pedido venció". Por eso la corrida final arranca en `GLP-10003`. No
+    hubo nada que corregir en el back ni en la tienda.
+  - Al cierre no quedan procesos en el 3001, el 4300 ni el 5273, ni contenedores de compose, y el
+    front no tiene cambios.
+
+### Commits
+
+| Commit    | Qué                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------ |
+| `3f00c5a` | Plan de B4                                                                                 |
+| `ec4853f` | Pedidos, ítems, historial, envíos y reservas; secuencia `GLP-` (Task 1)                    |
+| `b464242` | `changes` y `errors` en los problemas, sesión opcional, listas por ids sin caché (Task 2)  |
+| `06150fb` | Dominio de cotización y pedidos; casos de uso de creación, lectura y vencimiento (Task 3)  |
+| `60eaeab` | Repositorio Prisma con reserva atómica, cola de vencimiento, adaptadores y módulo (Task 4) |
+| `e971083` | Rutas de cotización, pedidos y mis pedidos, con E2E de doble envío y concurrencia (Task 5) |
+| Task 6    | Esta bitácora, el ADR 0004 y el README de pedidos                                          |
+
+### Lo que queda para B5 en adelante
+
+**Para B5 (pagos):**
+
+- Las rutas de pago que la tienda ya llama y hoy dan 404: preferencia de Mercado Pago, tarjeta,
+  cuotas y `cancel-payment`, todas con `X-Order-Token`.
+- Al aprobar un pago, pasar las reservas a `committed` (y descontar `on_hand` y `reserved`).
+- Consumir `order.expired` para cancelar la preferencia de Mercado Pago.
+- Decidir cuándo vence un pedido con el pago `pending` o `action_required` (hoy no vence nunca).
+
+**Para B6 (admin):**
+
+- Pedidos del admin y la demo `GLP-09001…09012`.
+- Si el admin edita `on_hand`, no puede bajarlo por debajo de `reserved` (el CHECK lo rechaza):
+  hace falta un mensaje claro, y `version` sirve para detectar ediciones simultáneas.
+
+**Para B7 (comunidad, soporte y emails):**
+
+- `verified_purchase` de las reseñas a partir de `order_items`.
+- Si se agrega verificación de email, la adopción de pedidos de invitado al registrarse (B-20,
+  ADR 0004) debería esperarla.
+
+**Para B8 (producción):**
+
+- `trust proxy` y un límite por sesión: hoy toda la tienda comparte el límite de 120 por minuto de
+  `POST /orders`, por la IP del servidor de Next.
+- Que el interceptor de idempotencia espere al pedido en curso en lugar de responder 409. La
+  tienda trata cualquier 409 como "Algo cambió en tu carrito" y descarta la clave.
+- Purgar las `idempotency_keys` vencidas: el 201 guardado tiene el `orderToken` en claro.
+
+**Menores anotados en las revisiones:**
+
+- **Código:**
+  - `address-input.dto.ts` repite mensajes, patrones y `Trimmed` de `identity-fields.ts`, y
+    `shared` importa `identity/domain/province`. Mover los campos a
+    `src/shared/infrastructure/http/fields.ts` y `PROVINCES` a `src/shared/domain`.
+  - `identity-customers.adapter.ts` importa `isUniqueViolation` del mapper de identidad: llevarlo
+    a `src/shared/infrastructure/prisma/`.
+  - `expireDue` deja de vencer y lanza si falla un `expire`: un error de limpieza le daría 500 a
+    cotizar, crear o listar. Aislar el error por pedido.
+  - `expireDue` trae los pedidos con `findDue` y `expire` los vuelve a leer (N+1 de hasta 50).
+  - `OrderExpirationProcessor.onFailed` dice "pedido undefined" si no hay job, y comparte el
+    limitador de avisos con `onError`.
+  - `optionalSessionFromContext` devuelve cualquier sesión ya cargada (hoy ninguna ruta combina
+    guards).
+  - `prisma/seed.ts`: una línea de 130 caracteres en el TSDoc de `seed()`.
+  - Si `create` falla por stock, el invitado creado en ese intento queda guardado (es inofensivo:
+    el próximo pedido lo vincula).
+  - Cosméticos: `ownerOf` sin tipo de retorno explícito; los constructores de
+    `OrderNotFoundError` y `CartTotalTooBigError` sin TSDoc propio.
+- **Tests:**
+  - Ningún test del tope de 20 sumando líneas (todos los productos de prueba tienen 12 o menos).
+  - Faltan el total demasiado grande por culpa del envío y un `price_changed` de un kit.
+  - El E2E de `expire` solo mira la clave `slug` de la caché, y ningún caso vence un pedido con el
+    pago `rejected` o `cancelled`.
+  - El spec del processor depende del campo privado `_worker` de `WorkerHost`.
+  - Nada prueba que `POST /orders` siga bajo el límite global, ni el 503 de
+    `GET /orders/{number}` con cookie y Redis caído.
+  - Ningún `POST /orders` con kit por HTTP, ni `POST /shipping/quote` con un método deshabilitado
+    (los cubren las Tasks 3 y 4 por debajo del HTTP).
+  - `prisma.e2e-spec.ts`: el tercer test nuevo usa el producto que crea el segundo (falla con
+    `-t`).
