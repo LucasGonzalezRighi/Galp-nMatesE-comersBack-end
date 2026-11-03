@@ -6,6 +6,24 @@ import type { OrderRepository } from '../ports/order.repository.port'
 /** Pedidos que vence cada barrido o cada lectura que vence "de paso". */
 export const EXPIRE_BATCH_SIZE = 50
 
+/** Pedido de una tanda que no se pudo vencer. */
+export interface ExpireFailure {
+  /** Id del pedido. */
+  orderId: string
+  /** Número del pedido. */
+  number: string
+  /** Lo que lanzó el repositorio. */
+  error: unknown
+}
+
+/** Resultado de {@link ExpireOrdersCommand.expireDue}. */
+export interface ExpireDueResult {
+  /** Cuántos pedidos venció. */
+  expired: number
+  /** Los que no se pudieron vencer (siguen atrasados: el próximo barrido los reintenta). */
+  failed: ExpireFailure[]
+}
+
 /** Eventos del vencimiento: `order.expired`, en la misma transacción. */
 function expiredEvents(order: Order) {
   return [orderExpiredEvent(order)]
@@ -28,13 +46,18 @@ export class ExpireOrdersCommand {
   ) {}
 
   /**
-   * Vence una tanda de pedidos atrasados (barrido y antes de cotizar, crear o listar).
+   * Vence una tanda de pedidos atrasados (barrido y antes de cotizar, crear o listar). Cada pedido
+   * se vence por separado: si uno falla, sigue con los demás y lo devuelve en `failed` en vez de
+   * lanzar, así una limpieza que falla por un pedido ajeno no corta la cotización, la creación ni
+   * el listado. Quien llama decide qué hacer con los fallos (el barrido los avisa; acá no hay
+   * logger).
    *
    * @param limit - Máximo de pedidos (por defecto {@link EXPIRE_BATCH_SIZE}).
-   * @returns Cuántos venció.
+   * @returns Cuántos venció y cuáles fallaron.
    * @throws {RangeError} En español, si `limit` no es un entero positivo.
+   * @throws Lo que lance `findDue`: sin la lista de atrasados no hay nada que aislar.
    */
-  async expireDue(limit: number = EXPIRE_BATCH_SIZE): Promise<number> {
+  async expireDue(limit: number = EXPIRE_BATCH_SIZE): Promise<ExpireDueResult> {
     if (!Number.isInteger(limit) || limit < 1) {
       throw new RangeError(
         `El máximo de pedidos a vencer tiene que ser un entero positivo (llegó ${String(limit)})`,
@@ -42,11 +65,15 @@ export class ExpireOrdersCommand {
     }
     const now = this.clock.now()
     const due = await this.orders.findDue(now, limit)
-    let expired = 0
+    const result: ExpireDueResult = { expired: 0, failed: [] }
     for (const order of due) {
-      if ((await this.orders.expire(order.id, now, expiredEvents)) !== null) expired += 1
+      try {
+        if ((await this.orders.expire(order.id, now, expiredEvents)) !== null) result.expired += 1
+      } catch (error: unknown) {
+        result.failed.push({ orderId: order.id, number: order.number, error })
+      }
     }
-    return expired
+    return result
   }
 
   /**

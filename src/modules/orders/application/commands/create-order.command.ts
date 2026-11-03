@@ -96,7 +96,7 @@ export class CreateOrderCommand {
    * 422 (mate sin opciones), 409 `stock_changed`, `price_changed` o `total_changed` (en esa
    * precedencia); con el honeypot lleno devuelve un pedido inventado sin guardar nada; si no,
    * decide el dueño, reserva y guarda el pedido con el evento `order.created` y programa su
-   * vencimiento.
+   * vencimiento (si programarlo falla, el pedido igual se devuelve: el barrido lo vence).
    *
    * @param input - Pedido del checkout.
    * @param context - Cliente de la sesión, si hay.
@@ -118,6 +118,7 @@ export class CreateOrderCommand {
     if (!isPaymentMethod(input.paymentMethod)) {
       throw new TypeError(`La forma de pago "${String(input.paymentMethod)}" no existe`)
     }
+    // Si algún pedido no se pudo vencer, el pedido nuevo sigue igual: el barrido lo reintenta.
     await this.expire.expireDue()
     const settings = await this.settings.get()
     const option = findShippingOption(
@@ -200,7 +201,12 @@ export class CreateOrderCommand {
         ),
       )
     }
-    await this.scheduler.schedule(created.value.id, created.value.reservedUntil)
+    try {
+      await this.scheduler.schedule(created.value.id, created.value.reservedUntil)
+    } catch {
+      // El pedido ya está guardado: sin el job, lo vencen el barrido o la lectura. No hay logger
+      // acá (`application` no importa Nest); el adaptador avisa por su cuenta si la cola falla.
+    }
     return toCreateOrderResult(created.value, token)
   }
 

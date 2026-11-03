@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import type { Job, Queue } from 'bullmq'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -26,9 +27,15 @@ function job(data: unknown): Job<OrderExpireJobData> {
   return { id: 'j1', data } as Job<OrderExpireJobData>
 }
 
+/** Mensajes que recibió el `warn` espiado del logger. */
+function warnings(warn: { mock: { calls: unknown[][] } }): string[] {
+  return warn.mock.calls.map(([message]) => String(message))
+}
+
 describe('OrderExpirationProcessor', () => {
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('vence el pedido del job y avisa si lo venció', async () => {
@@ -90,5 +97,31 @@ describe('OrderExpirationProcessor', () => {
     const { processor } = processorWith({})
 
     await expect(processor.onModuleDestroy()).resolves.toBeUndefined()
+  })
+
+  it('un job fallido sin job dice "desconocido" y avisa como mucho una vez por minuto', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { processor } = processorWith({})
+
+    processor.onFailed(undefined, new Error('se perdió el lock'))
+    processor.onFailed(job({ orderId: 'o1' }), new Error('Postgres caído'))
+
+    expect(warnings(warn)).toEqual([
+      'No se pudo vencer el pedido desconocido (job desconocido): se perdió el lock',
+    ])
+  })
+
+  it('el aviso de conexión y el de un job fallido tienen límites separados', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { processor } = processorWith({})
+
+    processor.onError(new Error('ECONNREFUSED'))
+    processor.onFailed(job({ orderId: 'o1' }), new Error('Postgres caído'))
+    processor.onError(new Error('ECONNREFUSED otra vez'))
+
+    expect(warnings(warn)).toEqual([
+      'El worker de vencimientos no llega a Redis: ECONNREFUSED',
+      'No se pudo vencer el pedido o1 (job j1): Postgres caído',
+    ])
   })
 })

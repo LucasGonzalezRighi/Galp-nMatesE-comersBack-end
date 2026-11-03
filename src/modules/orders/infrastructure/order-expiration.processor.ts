@@ -21,7 +21,9 @@ export const WORKER_SHUTDOWN_PROBE_MS = 1_000
 @Processor(ORDER_EXPIRATION_QUEUE)
 export class OrderExpirationProcessor extends WorkerHost implements OnModuleDestroy {
   private readonly logger = new Logger(OrderExpirationProcessor.name)
-  private readonly warn = createRateLimitedWarn(this.logger)
+  /** Avisos de conexión y de jobs fallidos, cada uno con su propio límite de uno por minuto. */
+  private readonly warnConnection = createRateLimitedWarn(this.logger)
+  private readonly warnFailed = createRateLimitedWarn(this.logger)
 
   /**
    * @param expire - Vencimiento de pedidos.
@@ -67,24 +69,28 @@ export class OrderExpirationProcessor extends WorkerHost implements OnModuleDest
   }
 
   /**
-   * Avisa (como mucho una vez por minuto) cuando el worker no llega a Redis.
+   * Avisa (como mucho una vez por minuto) cuando el worker no llega a Redis. Tiene su propio
+   * límite: un aviso de conexión no tapa el de un job fallido.
    *
    * @param error - Error de la conexión.
    */
   @OnWorkerEvent('error')
   onError(error: Error): void {
-    this.warn(`El worker de vencimientos no llega a Redis: ${errorMessage(error)}`)
+    this.warnConnection(`El worker de vencimientos no llega a Redis: ${errorMessage(error)}`)
   }
 
   /**
-   * Avisa cuando un intento de vencer un pedido falla (BullMQ lo reintenta).
+   * Avisa (como mucho una vez por minuto) cuando un intento de vencer un pedido falla (BullMQ lo
+   * reintenta). Si BullMQ no sabe de qué job fue, dice "desconocido".
    *
    * @param job - Job que falló, si se conoce.
    * @param error - Motivo.
    */
   @OnWorkerEvent('failed')
   onFailed(job: Job<OrderExpireJobData> | undefined, error: Error): void {
-    this.warn(`No se pudo vencer el pedido ${String(job?.data.orderId)}: ${errorMessage(error)}`)
+    const orderId = job?.data.orderId ?? 'desconocido'
+    const jobId = job?.id ?? 'desconocido'
+    this.warnFailed(`No se pudo vencer el pedido ${orderId} (job ${jobId}): ${errorMessage(error)}`)
   }
 
   /** Indica si Redis contesta a tiempo (la cola no encola offline: con Redis caído falla al toque). */

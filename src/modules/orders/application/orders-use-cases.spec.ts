@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { FixedClock, FIXED_NOW } from '../../../../test/support/clock'
 import {
@@ -19,6 +19,7 @@ import {
 } from '../domain/orders-errors'
 import { CreateOrderCommand, type CreateOrderInput } from './commands/create-order.command'
 import { ExpireOrdersCommand } from './commands/expire-orders.command'
+import type { OrderExpirationSchedulerPort } from './ports/order-expiration.port'
 import { GetMyOrderQuery } from './queries/get-my-order.query'
 import { GetOrderQuery } from './queries/get-order.query'
 import { ListMyOrdersQuery } from './queries/list-my-orders.query'
@@ -500,6 +501,31 @@ describe('CreateOrderCommand', () => {
     expect(t.customers.customers).toEqual([account])
   })
 
+  it('si programar el vencimiento falla, el pedido ya guardado se devuelve igual', async () => {
+    const t = setup()
+    const scheduler: OrderExpirationSchedulerPort = {
+      schedule: () => Promise.reject(new Error('Redis caído')),
+    }
+    const createOrder = new CreateOrderCommand(
+      t.catalog,
+      t.settings,
+      t.orders,
+      t.customers,
+      t.secrets,
+      t.clock,
+      scheduler,
+      t.expire,
+    )
+
+    const result = await createOrder.execute(orderInput(), GUEST)
+
+    expect(result.order).toMatchObject({ number: 'GLP-10001', status: 'pending_payment' })
+    expect(t.orders.orders).toHaveLength(1)
+    expect(t.stock.reserved(imperialPremium.id)).toBe(1)
+    t.clock.advance(RESERVATION_MS)
+    expect(await t.expire.expireDue()).toEqual({ expired: 1, failed: [] })
+  })
+
   it('vence primero los pedidos atrasados, así su stock vuelve a estar disponible', async () => {
     const t = setup()
     t.stock.set(imperialPremium.id, 1)
@@ -664,7 +690,7 @@ describe('ExpireOrdersCommand', () => {
     t.clock.advance(RESERVATION_MS)
     expect(await t.expire.expireOne(id)).toMatchObject({ status: 'expired' })
     expect(await t.expire.expireOne(id)).toBeNull()
-    expect(await t.expire.expireDue()).toBe(0)
+    expect(await t.expire.expireDue()).toEqual({ expired: 0, failed: [] })
     expect(t.orders.expirations).toBe(1)
     expect(t.stock.reserved(imperialPremium.id)).toBe(0)
     expect(t.orders.events.at(-1)).toEqual({
@@ -681,10 +707,43 @@ describe('ExpireOrdersCommand', () => {
     await t.createOrder.execute(orderInput(), GUEST)
     t.clock.advance(RESERVATION_MS)
 
-    expect(await t.expire.expireDue(1)).toBe(1)
-    expect(await t.expire.expireDue()).toBe(1)
-    expect(await t.expire.expireDue()).toBe(0)
+    expect(await t.expire.expireDue(1)).toEqual({ expired: 1, failed: [] })
+    expect(await t.expire.expireDue()).toEqual({ expired: 1, failed: [] })
+    expect(await t.expire.expireDue()).toEqual({ expired: 0, failed: [] })
     await expect(t.expire.expireDue(0)).rejects.toThrow(RangeError)
+  })
+
+  it('si vencer un pedido falla, sigue con los demás, lo devuelve en failed y no rompe la cotización', async () => {
+    const t = setup()
+    await t.createOrder.execute(orderInput(), GUEST)
+    await t.createOrder.execute(orderInput(), GUEST)
+    await t.createOrder.execute(orderInput(), GUEST)
+    const [broken] = t.orders.orders
+    const failure = new Error('deadlock detected')
+    const realExpire = t.orders.expire.bind(t.orders)
+    vi.spyOn(t.orders, 'expire').mockImplementation((orderId, now, events) =>
+      orderId === broken?.id ? Promise.reject(failure) : realExpire(orderId, now, events),
+    )
+    t.clock.advance(RESERVATION_MS)
+
+    expect(await t.expire.expireDue()).toEqual({
+      expired: 2,
+      failed: [{ orderId: broken?.id, number: 'GLP-10001', error: failure }],
+    })
+    expect(t.orders.orders.map((order) => order.status)).toEqual([
+      'pending_payment',
+      'expired',
+      'expired',
+    ])
+    expect(t.stock.reserved(imperialPremium.id)).toBe(1)
+    const quote = await t.quoteCart.execute(orderInput().items)
+    expect(quote.lines[0]).toMatchObject({ issue: null, maxQuantity: 11 })
+    const page = await t.listMyOrders.execute('cus-1', 1)
+    expect(page.items.map((order) => order.status)).toEqual([
+      'expired',
+      'expired',
+      'pending_payment',
+    ])
   })
 
   it('no vence un pedido con un pago en curso', async () => {
@@ -693,7 +752,7 @@ describe('ExpireOrdersCommand', () => {
     t.orders.update('GLP-10001', { paymentStatus: 'pending' })
     t.clock.advance(RESERVATION_MS)
 
-    expect(await t.expire.expireDue()).toBe(0)
+    expect(await t.expire.expireDue()).toEqual({ expired: 0, failed: [] })
     const order = await t.orders.findByNumber('GLP-10001')
     expect(order === null ? null : await t.expire.expireIfDue(order)).toMatchObject({
       status: 'pending_payment',

@@ -63,6 +63,11 @@ export interface OrderRepository {
    * historial con fecha `reservedUntil` (`actor: system`) y guarda los eventos. Es idempotente:
    * llamarlo dos veces (o a la vez) libera una sola vez.
    *
+   * Los `UPDATE inventory SET reserved = reserved − q` tienen que ir ordenados por `productId`,
+   * en el mismo orden que usa {@link create} al reservar: si vencer y crear un pedido
+   * multiproducto bloquean las filas de inventario en órdenes distintos, Postgres aborta uno de
+   * los dos por deadlock (`40P01`).
+   *
    * @param orderId - Id del pedido.
    * @param now - Momento actual.
    * @param events - Eventos del outbox, armados con el pedido vencido.

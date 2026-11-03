@@ -284,6 +284,17 @@ describe('OrdersController (HTTP con casos de uso simulados)', () => {
     })
   })
 
+  it('GET /orders/{number} con cookie y Redis caído → 503', async () => {
+    sessions.failWith = () => new DomainError('service_unavailable', 503, 'Redis no responde.')
+
+    const response = await request(server())
+      .get('/orders/GLP-10001')
+      .set('Cookie', `${CUSTOMER_SESSION_COOKIE}=${customer.id}`)
+
+    expect(response.status).toBe(503)
+    expect(getOrder.execute).not.toHaveBeenCalled()
+  })
+
   it('GET /orders/{number} de otro o inexistente → 404 sin datos', async () => {
     getOrder.execute.mockRejectedValueOnce(new OrderNotFoundError())
 

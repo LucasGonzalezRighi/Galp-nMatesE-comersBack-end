@@ -7,11 +7,26 @@ import {
 } from '../../../shared/infrastructure/redis/rate-limited-warn'
 import {
   EXPIRE_BATCH_SIZE,
+  type ExpireFailure,
   ExpireOrdersCommand,
 } from '../application/commands/expire-orders.command'
 
 /** Cada cuánto corre el barrido de pedidos vencidos. */
 export const ORDER_EXPIRATION_SWEEP_INTERVAL_MS = 60_000
+
+/** Cuántos pedidos fallidos se detallan en el aviso del barrido. */
+const FAILURES_IN_WARNING = 5
+
+/** Aviso con los pedidos que no se pudieron vencer (los primeros, con su motivo). */
+function failuresMessage(failed: readonly ExpireFailure[]): string {
+  const detailed = failed
+    .slice(0, FAILURES_IN_WARNING)
+    .map((failure) => `${failure.number}: ${errorMessage(failure.error)}`)
+    .join('; ')
+  const rest = failed.length - FAILURES_IN_WARNING
+  const more = rest > 0 ? ` (y ${String(rest)} más)` : ''
+  return `No se pudieron vencer ${String(failed.length)} pedidos atrasados: ${detailed}${more}`
+}
 
 /**
  * Barrido de pedidos vencidos: cada {@link ORDER_EXPIRATION_SWEEP_INTERVAL_MS} vence hasta 50
@@ -52,13 +67,18 @@ export class OrderExpirationSweep implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Vence una tanda de pedidos atrasados. Si ya hay una vuelta en curso, devuelve esa. Nunca
-   * lanza: los fallos se avisan con `warn` y la vuelta cuenta 0.
+   * lanza: si no se pudo ni buscar los atrasados, avisa con `warn` y la vuelta cuenta 0; si
+   * algún pedido no se pudo vencer, avisa cuáles y cuenta los que sí.
    *
    * @returns Cuántos pedidos venció.
    */
   runOnce(): Promise<number> {
     this.running ??= this.expire
       .expireDue(EXPIRE_BATCH_SIZE)
+      .then((result) => {
+        if (result.failed.length > 0) this.warn(failuresMessage(result.failed))
+        return result.expired
+      })
       .catch((error: unknown) => {
         this.warn(`No se pudieron vencer los pedidos atrasados: ${errorMessage(error)}`)
         return 0

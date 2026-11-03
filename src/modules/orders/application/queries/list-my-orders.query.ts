@@ -27,6 +27,7 @@ export class ListMyOrdersQuery {
     if (!Number.isInteger(page) || page < 1) {
       throw new RangeError(`La página tiene que ser un entero desde 1; se recibió ${String(page)}.`)
     }
+    // Si algún pedido no se pudo vencer, el listado sigue igual: el barrido lo reintenta.
     await this.expire.expireDue()
     const { items, total } = await this.orders.listByCustomer(customerId, page, MY_ORDERS_PAGE_SIZE)
     return {

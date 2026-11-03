@@ -1,10 +1,10 @@
-import {
-  Prisma,
-  type Address as AddressRow,
-  type Customer as CustomerRow,
-  type Province as DbProvince,
-  type User as UserRow,
+import type {
+  Address as AddressRow,
+  Customer as CustomerRow,
+  Province as DbProvince,
+  User as UserRow,
 } from '../../../generated/prisma/client'
+import { isUniqueViolation } from '../../../shared/infrastructure/prisma/prisma-errors'
 import type { Address, AddressInput } from '../domain/address.entity'
 import type { Customer } from '../domain/customer.entity'
 import { EmailAlreadyRegisteredError } from '../domain/identity-errors'
@@ -130,15 +130,6 @@ export function toAddressData(
     province: toDbProvince(input.province),
     isDefault: input.isDefault,
   }
-}
-
-/**
- * Indica si un error de Prisma es una violación de unicidad (`P2002`).
- *
- * @param error - Lo que se atrapó.
- */
-export function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
 
 /**

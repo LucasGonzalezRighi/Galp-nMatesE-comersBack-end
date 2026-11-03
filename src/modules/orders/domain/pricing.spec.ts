@@ -145,6 +145,41 @@ describe('priceCart: Review Focus 5', () => {
     expect(priced.lines).toHaveLength(1)
     expect(priced.reservation).toEqual([{ productId: imperialPremium.id, quantity: 3 }])
   })
+
+  it('el tope de 20 por producto se comparte entre líneas: mate ×15 y un kit ×10 deja el kit en 5', () => {
+    const products = productMap([
+      { ...imperialPremium, available: 50 },
+      bombillon100,
+      yerbaCanarias,
+    ])
+    const priced = price([mate(15), kit(10)], products)
+
+    expect(priced.quote.lines[0]).toMatchObject({
+      issue: null,
+      maxQuantity: 20,
+      totalArs: 599985,
+    })
+    expect(priced.quote.lines[1]).toMatchObject({
+      issue: 'quantity_reduced',
+      maxQuantity: 5,
+      unitPriceArs: 75997,
+      kitSavingsArs: 38000,
+      totalArs: 341985,
+    })
+    expect(priced.stockChanges).toEqual([
+      {
+        kind: 'stock',
+        productId: imperialPremium.id,
+        message: 'Quedan 5 unidades de Mate Imperial Premium.',
+      },
+    ])
+    expect(priced.lines.map((line) => line.quantity)).toEqual([15, 5])
+    expect(priced.reservation).toEqual([
+      { productId: imperialPremium.id, quantity: 20 },
+      { productId: bombillon100.id, quantity: 5 },
+      { productId: yerbaCanarias.id, quantity: 5 },
+    ])
+  })
 })
 
 describe('priceCart: líneas', () => {

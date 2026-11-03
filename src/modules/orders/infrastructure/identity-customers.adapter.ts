@@ -1,11 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common'
 
 import { newId } from '../../../shared/domain/id'
+import { isUniqueViolation } from '../../../shared/infrastructure/prisma/prisma-errors'
 import {
   CUSTOMER_REPOSITORY,
   type CustomerRepository,
 } from '../../identity/application/ports/customer.repository.port'
-import { isUniqueViolation } from '../../identity/infrastructure/identity.mapper'
 import type {
   CustomerDirectoryPort,
   DirectoryCustomer,

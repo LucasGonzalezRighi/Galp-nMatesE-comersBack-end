@@ -29,6 +29,7 @@ export class QuoteCartQuery {
    * @throws {RangeError} En español, si las líneas o las cantidades están fuera de rango.
    */
   async execute(items: CartItem[]): Promise<CartQuote> {
+    // Si algún pedido no se pudo vencer, la cotización sigue igual: el barrido lo reintenta.
     await this.expire.expireDue()
     const settings = await this.settings.get()
     const products = await this.catalog.findForCart(cartProductIds(items))

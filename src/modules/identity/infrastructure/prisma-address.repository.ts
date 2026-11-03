@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common'
 
 import type { Prisma } from '../../../generated/prisma/client'
+import { isUniqueViolation } from '../../../shared/infrastructure/prisma/prisma-errors'
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
 import type { AddressRepository, NewAddress } from '../application/ports/address.repository.port'
 import type { Address, AddressInput } from '../domain/address.entity'
-import { isUniqueViolation, toAddress, toAddressData } from './identity.mapper'
+import { toAddress, toAddressData } from './identity.mapper'
 
 /** Orden de la libreta: la predeterminada primero y después por alta (los ids son UUID v7). */
 const ADDRESS_ORDER = [
