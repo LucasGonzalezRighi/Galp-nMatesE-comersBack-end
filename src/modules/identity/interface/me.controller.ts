@@ -8,7 +8,6 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   UseGuards,
 } from '@nestjs/common'
 import {
@@ -31,7 +30,6 @@ import {
   CustomerSessionGuard,
 } from '../../../shared/infrastructure/auth/session.guards'
 import { ApiProblemResponses, schemaRef } from '../../../shared/infrastructure/http/openapi'
-import type { Page } from '../../../shared/infrastructure/http/page'
 import { validationProblem } from '../../../shared/infrastructure/http/validation.pipe'
 import { CreateMyAddressCommand } from '../application/commands/create-my-address.command'
 import { DeleteMyAddressCommand } from '../application/commands/delete-my-address.command'
@@ -42,8 +40,7 @@ import { ListMyAddressesQuery } from '../application/queries/list-my-addresses.q
 import type { AddressView, CustomerView } from '../application/read-models'
 import { AddressBookInputDto, AddressInputDto } from './dto/address-book-input.dto'
 import { CustomerUpdateDto } from './dto/customer-update.dto'
-import { CustomerDto, OrderSummaryPageDto } from './dto/identity.response.dto'
-import { MY_ORDERS_PAGE_SIZE, MyOrdersQueryDto } from './dto/my-orders.query.dto'
+import { CustomerDto } from './dto/identity.response.dto'
 import { customerIdOf } from './identity-http'
 
 /** Error del `PATCH /me` sin ningún campo (como el mock del front). */
@@ -64,8 +61,9 @@ const ADDRESS_ID_PARAM = {
 const SESSION_AND_CSRF = { customerSession: [], csrfToken: [] }
 
 /**
- * Cuenta del cliente con la sesión iniciada (`/me`): sus datos, sus pedidos (vacío hasta B4) y su
- * libreta de direcciones. Las lecturas piden la sesión; las escrituras, además, su CSRF.
+ * Cuenta del cliente con la sesión iniciada (`/me`): sus datos y su libreta de direcciones. Las
+ * lecturas piden la sesión; las escrituras, además, su CSRF. Sus pedidos (`/me/orders`) los sirve
+ * `MyOrdersController`, en el módulo `orders`.
  */
 @ApiTags('account')
 @ApiExtraModels(AddressInputDto)
@@ -125,22 +123,6 @@ export class MeController {
   ): Promise<CustomerView> {
     if (body.isEmpty()) throw validationProblem([{ ...EMPTY_UPDATE }])
     return this.updateMe.execute(customerIdOf(session), body.toPatch())
-  }
-
-  /**
-   * Lista los pedidos del cliente de a 10. Hasta B4 (pedidos) la lista está vacía.
-   *
-   * @param query - Página pedida, ya validada.
-   * @returns La página (`OrderSummaryPage` del contrato).
-   */
-  @Get('orders')
-  @UseGuards(CustomerSessionGuard)
-  @ApiCookieAuth('customerSession')
-  @ApiOperation({ operationId: 'listMyOrders', summary: 'Listar mis pedidos' })
-  @ApiOkResponse({ type: OrderSummaryPageDto, description: 'Página de pedidos.' })
-  @ApiProblemResponses(401, 422, 429, 500)
-  orders(@Query() query: MyOrdersQueryDto): Page<never> {
-    return { items: [], page: query.page, pageSize: MY_ORDERS_PAGE_SIZE, total: 0 }
   }
 
   /**

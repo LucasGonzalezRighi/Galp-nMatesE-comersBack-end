@@ -193,13 +193,6 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
       expect(after.body).toEqual([{ ...HOME, apartment: '5° B', label: null, id: firstId }])
     })
 
-    it('GET /me/orders → página vacía hasta B4', async () => {
-      const response = await call(browser, 'get', '/me/orders')
-
-      expect(response.status).toBe(200)
-      expect(response.body).toEqual({ items: [], page: 1, pageSize: 10, total: 0 })
-    })
-
     it('POST /auth/logout → 204, cookie borrada y GET /me después → 401', async () => {
       const closed = { ...browser }
 

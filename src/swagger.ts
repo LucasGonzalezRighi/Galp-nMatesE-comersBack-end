@@ -5,6 +5,7 @@ import { API_PREFIX } from './app.setup'
 import type { Env } from './config/env'
 import { CATALOG_OPENAPI_SCHEMAS } from './modules/catalog/interface/dto/catalog.response.dto'
 import { IDENTITY_OPENAPI_SCHEMAS } from './modules/identity/interface/dto/identity.response.dto'
+import { ORDERS_OPENAPI_SCHEMAS } from './modules/orders/interface/dto/orders.response.dto'
 import { REVIEWS_OPENAPI_SCHEMAS } from './modules/reviews/interface/dto/reviews.response.dto'
 import { SHARED_OPENAPI_SCHEMAS } from './shared/infrastructure/http/openapi'
 
@@ -40,6 +41,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       ...CATALOG_OPENAPI_SCHEMAS,
       ...REVIEWS_OPENAPI_SCHEMAS,
       ...IDENTITY_OPENAPI_SCHEMAS,
+      ...ORDERS_OPENAPI_SCHEMAS,
     },
   }
   return SwaggerModule.createDocument(app, config, { ignoreGlobalPrefix: true })

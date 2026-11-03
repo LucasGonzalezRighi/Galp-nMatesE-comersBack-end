@@ -38,6 +38,9 @@ import { OrderExpirationProcessor } from './infrastructure/order-expiration.proc
 import { OrderExpirationSweep } from './infrastructure/order-expiration.sweep'
 import { PrismaOrderRepository } from './infrastructure/prisma-order.repository'
 import { SettingsStoreAdapter } from './infrastructure/settings-store.adapter'
+import { CartController } from './interface/cart.controller'
+import { MyOrdersController } from './interface/my-orders.controller'
+import { OrdersController } from './interface/orders.controller'
 
 /**
  * Pedidos y stock: cotización del carrito y del envío, creación con el stock reservado 30
@@ -66,6 +69,7 @@ import { SettingsStoreAdapter } from './infrastructure/settings-store.adapter'
       }),
     }),
   ],
+  controllers: [CartController, OrdersController, MyOrdersController],
   providers: [
     { provide: ORDER_REPOSITORY, useClass: PrismaOrderRepository },
     { provide: PRODUCT_CATALOG_PORT, useClass: CatalogProductsAdapter },

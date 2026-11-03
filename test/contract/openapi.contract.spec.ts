@@ -57,6 +57,12 @@ const IMPLEMENTED_PATHS: readonly string[] = [
   'GET /admin/auth/me',
   'GET /admin/auth/csrf',
   'POST /admin/auth/password',
+  // B4: pedidos y stock (cotización del carrito y del envío, pedidos y "mis pedidos").
+  'POST /cart/quote',
+  'POST /shipping/quote',
+  'POST /orders',
+  'GET /orders/{number}',
+  'GET /me/orders/{number}',
 ]
 
 /** Operaciones que Swagger genera y el contrato no tiene, a propósito. */

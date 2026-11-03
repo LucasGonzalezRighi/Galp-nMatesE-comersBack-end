@@ -9,6 +9,11 @@ import { CustomerUpdateDto } from '../../src/modules/identity/interface/dto/cust
 import { ForgotPasswordDto } from '../../src/modules/identity/interface/dto/forgot-password.dto'
 import { LoginDto } from '../../src/modules/identity/interface/dto/login.dto'
 import { RegisterDto } from '../../src/modules/identity/interface/dto/register.dto'
+import { CustomerInputDto } from '../../src/modules/orders/interface/dto/customer-input.dto'
+import {
+  ShippingInputDto,
+  toShippingInput,
+} from '../../src/modules/orders/interface/dto/shipping-input.dto'
 import type { FieldError } from '../../src/shared/infrastructure/http/problem.filter'
 import { createValidationPipe } from '../../src/shared/infrastructure/http/validation.pipe'
 
@@ -150,6 +155,14 @@ function partialCase(
   }
 }
 
+/** Errores del caso; los que el archivo deja sin texto (`null`) solo tienen que fallar. */
+function errorsOrAnyMessage(validationCase: ValidationCase): Record<string, string> {
+  const entries = Object.entries(validationCase.errors ?? {}) as [string, string | null][]
+  return Object.fromEntries(
+    entries.map(([field, message]) => [field, message ?? (expect.any(String) as string)]),
+  )
+}
+
 const MAPPINGS: readonly Mapping[] = [
   { name: 'RegisterDto (registerSchema)', dto: RegisterDto, check: wholeCase('registerSchema') },
   { name: 'LoginDto (loginSchema)', dto: LoginDto, check: wholeCase('loginSchema') },
@@ -216,6 +229,31 @@ const MAPPINGS: readonly Mapping[] = [
         ? null
         : { body: { phone: c.input.phone }, output: {}, errors }
     },
+  },
+  {
+    // Contacto del checkout (`POST /orders`): el DTO entero, con el teléfono normalizado como en
+    // el front (vacío o ausente quedan `null`, que la comparación omite como el front).
+    name: 'CustomerInputDto (checkoutContactSchema)',
+    dto: CustomerInputDto,
+    check: wholeCase('checkoutContactSchema'),
+  },
+  {
+    // Envío del checkout (`POST /orders`): el DTO entero. El destino sale como lo guarda el pedido
+    // (`toShippingInput`: el retiro queda en `null` aunque llegue una dirección y el piso vacío
+    // también) y el front omite esos `null`. El método que no existe no tiene texto fijo en el
+    // archivo: solo tiene que fallar `method`.
+    name: 'ShippingInputDto (shippingSchema)',
+    dto: ShippingInputDto,
+    effective: (value) => {
+      const { method, address } = toShippingInput(
+        value as Pick<ShippingInputDto, 'method' | 'address'>,
+      )
+      return { method, address: address === null ? null : withoutNulls({ ...address }) }
+    },
+    check: (c) =>
+      c.schema === 'shippingSchema'
+        ? { body: c.input, output: c.output ?? {}, errors: errorsOrAnyMessage(c) }
+        : null,
   },
 ]
 

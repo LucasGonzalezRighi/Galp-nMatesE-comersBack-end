@@ -160,21 +160,6 @@ describe('MeController (HTTP con casos de uso simulados)', () => {
     expect(response.body).toMatchObject({ type: 'csrf_invalid' })
   })
 
-  it('GET /me/orders → página vacía de 10 hasta B4; page se valida', async () => {
-    const first = await read('/me/orders')
-    const second = await read('/me/orders?page=2')
-    const zero = await read('/me/orders?page=0')
-    const pageSize = await read('/me/orders?pageSize=10')
-
-    expect(first.status).toBe(200)
-    expect(first.body).toEqual({ items: [], page: 1, pageSize: 10, total: 0 })
-    expect(second.body).toEqual({ items: [], page: 2, pageSize: 10, total: 0 })
-    expect(zero.status).toBe(422)
-    expect(firstError(zero)).toMatchObject({ field: 'page', code: 'too_small' })
-    expect(pageSize.status).toBe(422)
-    expect(firstError(pageSize)).toMatchObject({ field: 'pageSize', code: 'unrecognized_key' })
-  })
-
   it('POST /me/addresses normaliza número y código postal en mayúsculas → 201', async () => {
     const response = await write('post', '/me/addresses').send({
       ...HOME,
