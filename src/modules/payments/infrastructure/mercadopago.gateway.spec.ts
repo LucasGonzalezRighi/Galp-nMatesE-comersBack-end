@@ -147,6 +147,15 @@ describe('MercadoPagoGateway', () => {
     })
   })
 
+  it('validateCardCharge no llama a Mercado Pago: valida el token y las cuotas al cobrar', async () => {
+    const { clients, fetchMock, gateway } = gatewayWith()
+
+    await expect(gateway.validateCardCharge()).resolves.toBeUndefined()
+
+    expect(clients.payment.create).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('un token inválido da InvalidCardTokenError y el log no lleva el token', async () => {
     const { clients, gateway, logger } = gatewayWith()
     clients.payment.create.mockRejectedValue(

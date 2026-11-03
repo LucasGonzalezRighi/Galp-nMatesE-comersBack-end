@@ -687,17 +687,18 @@ export class FakeGateway implements PaymentGatewayPort {
     return Promise.resolve()
   }
 
+  /** {@inheritDoc PaymentGatewayPort.validateCardCharge} */
+  validateCardCharge(input: CardChargeInput): Promise<void> {
+    this.track('validateCardCharge', [input])
+    const checked = this.checkCharge(input)
+    return checked instanceof Error ? Promise.reject(checked) : Promise.resolve()
+  }
+
   /** {@inheritDoc PaymentGatewayPort.createCardPayment} */
   createCardPayment(input: CardChargeInput): Promise<ProviderPayment> {
     this.track('createCardPayment', [input])
-    const token = parseSimulatedToken(input.token)
-    if (token === null) return Promise.reject(new InvalidCardTokenError())
-    const offered = simulatedInstallments(input.order.totalArs, 3, true).map(
-      (option) => option.installments,
-    )
-    if (!offered.includes(input.installments)) {
-      return Promise.reject(new InstallmentsNotAvailableError())
-    }
+    const token = this.checkCharge(input)
+    if (token instanceof Error) return Promise.reject(token)
     this.sequence += 1
     const providerPaymentId = String(1_000_000_000 + this.sequence)
     const outcome = simulatedOutcome(token.holder)
@@ -760,6 +761,16 @@ export class FakeGateway implements PaymentGatewayPort {
         input.paymentTypeId === 'credit_card',
       ),
     )
+  }
+
+  /** El token leído, o el 422 de token o cuotas que daría el cobro. */
+  private checkCharge(input: CardChargeInput): Error | { holder: string; lastFour: string | null } {
+    const token = parseSimulatedToken(input.token)
+    if (token === null) return new InvalidCardTokenError()
+    const offered = simulatedInstallments(input.order.totalArs, 3, true).map(
+      (option) => option.installments,
+    )
+    return offered.includes(input.installments) ? token : new InstallmentsNotAvailableError()
   }
 
   private track(method: keyof PaymentGatewayPort, args: unknown[]): void {

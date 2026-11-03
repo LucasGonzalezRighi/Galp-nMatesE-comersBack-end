@@ -11,6 +11,7 @@ import {
   PAYMENT_GATEWAY_PORT,
   type PaymentGatewayPort,
 } from '../../src/modules/payments/application/ports/payment-gateway.port'
+import { PaymentGatewayError } from '../../src/modules/payments/domain/payments-errors'
 import type { ProviderPayment } from '../../src/modules/payments/domain/provider-payment'
 import { EnvPaymentsSettings } from '../../src/modules/payments/infrastructure/env-payments-settings.adapter'
 import { PaymentsSweep } from '../../src/modules/payments/infrastructure/payments-sweep'
@@ -305,6 +306,33 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
       expect(await prisma().payment.count({ where: { orderId: order.id } })).toBe(1)
     })
 
+    it('502 de la pasarela en la preferencia → el reintento con la misma clave crea otra, sin 500', async () => {
+      const order = await placeOrder()
+      const key = randomUUID()
+      const failure = vi
+        .spyOn(gateway(), 'createPreference')
+        .mockRejectedValueOnce(new PaymentGatewayError())
+      try {
+        const failed = await pay('preference', order.number, order.token, { key })
+        const retry = await pay('preference', order.number, order.token, { key })
+
+        expect(failed.status).toBe(502)
+        expect(retry.status).toBe(200)
+        expect(retry.body).toMatchObject({ initPoint: expect.any(String) as string })
+      } finally {
+        failure.mockRestore()
+      }
+
+      const attempts = await prisma().payment.findMany({
+        where: { orderId: order.id },
+        orderBy: { createdAt: 'asc' },
+      })
+      expect(attempts.map((attempt) => [attempt.status, attempt.isActive])).toEqual([
+        ['cancelled', false],
+        ['none', true],
+      ])
+    })
+
     it('cancel-payment → 204 y paymentStatus cancelled; repetido → 204; la preferencia ya no se puede resolver', async () => {
       const order = await placeOrder()
       const preference = await pay('preference', order.number, order.token)
@@ -377,6 +405,62 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
         title: 'La clave ya se usó',
       })
       expect(await prisma().payment.count({ where: { orderId: order.id } })).toBe(1)
+    })
+
+    it('cuotas que no se ofrecen → 422; con la misma clave y el mismo cuerpo otra vez 422 (nunca 500) y el CONT activo sigue pendiente', async () => {
+      const order = await placeOrder()
+      const pending = await pay('card', order.number, order.token, { body: cardBody('CONT') })
+      expect(pending.status).toBe(200)
+      const key = randomUUID()
+      const body = cardBody('APRO', 4)
+
+      const first = await pay('card', order.number, order.token, { key, body })
+      const again = await pay('card', order.number, order.token, { key, body })
+
+      for (const response of [first, again]) {
+        expect(response.status).toBe(422)
+        expect(response.body).toMatchObject({
+          type: 'validation_error',
+          errors: [{ field: 'installments', code: 'invalid_value' }],
+        })
+      }
+      const attempts = await prisma().payment.findMany({ where: { orderId: order.id } })
+      expect(attempts.map((attempt) => [attempt.status, attempt.isActive])).toEqual([
+        ['pending', true],
+      ])
+      expect((await readOrder(order)).paymentStatus).toBe('pending')
+    })
+
+    it('502 de la pasarela → el intento queda cancelled con la clave suelta y el reintento con la misma clave cobra (antes daba 500)', async () => {
+      const order = await placeOrder()
+      const key = randomUUID()
+      const body = cardBody('APRO')
+      const failure = vi
+        .spyOn(gateway(), 'createCardPayment')
+        .mockRejectedValueOnce(new PaymentGatewayError())
+      try {
+        const failed = await pay('card', order.number, order.token, { key, body })
+        const retry = await pay('card', order.number, order.token, { key, body })
+
+        expect(failed.status).toBe(502)
+        expect(failed.body).toMatchObject({ type: 'payment_gateway_error' })
+        expect(retry.status).toBe(200)
+        expect(retry.body).toMatchObject({ paymentStatus: 'approved' })
+      } finally {
+        failure.mockRestore()
+      }
+
+      const attempts = await prisma().payment.findMany({
+        where: { orderId: order.id },
+        orderBy: { createdAt: 'asc' },
+      })
+      expect(
+        attempts.map((attempt) => [attempt.status, attempt.isActive, attempt.idempotencyKey]),
+      ).toEqual([
+        ['cancelled', false, `${key}:released:${String(attempts[0]?.id)}`],
+        ['approved', false, key],
+      ])
+      expect((await readOrder(order)).status).toBe('paid')
     })
 
     it('CONT → pending; vencida la reserva, el barrido concilia pero no lo vence', async () => {

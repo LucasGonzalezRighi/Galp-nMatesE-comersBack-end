@@ -3,12 +3,12 @@ import { newId } from '../../../../shared/domain/id'
 import type { PaymentAttempt } from '../../domain/payment-attempt'
 import type { ProviderPayment } from '../../domain/provider-payment'
 import type { OrderAccess, PaymentOrderAccess } from '../order-access'
-import type { PaymentGatewayPort } from '../ports/payment-gateway.port'
+import type { CardChargeInput, PaymentGatewayPort } from '../ports/payment-gateway.port'
 import type { PaymentRepository } from '../ports/payment.repository.port'
 import { SILENT_PAYMENTS_LOGGER, type PaymentsLogger } from '../ports/payments-logger.port'
 import type { PaymentsSettings } from '../ports/payments-settings.port'
 import type { CardPaymentResultView } from '../read-models'
-import { releaseAtProvider } from '../release-attempt'
+import { releaseAtProvider, releasedIdempotencyKey } from '../release-attempt'
 import type { ApplyProviderPaymentCommand } from './apply-provider-payment.command'
 import { assertIdempotencyKey } from './create-preference.command'
 
@@ -46,8 +46,10 @@ export function toCardPaymentResult(attempt: PaymentAttempt): CardPaymentResultV
 /**
  * `POST /orders/{number}/payments/mercadopago/card`: cancela el intento activo anterior, cobra con
  * el token y aplica la respuesta inmediata en la misma llamada (Ruling B-40): un `APRO` deja el
- * pedido pagado al instante. Si la pasarela rechaza el pedido de cobro (token, cuotas, error),
- * el intento queda `cancelled` y el error sale tal cual.
+ * pedido pagado al instante. Un token o unas cuotas inválidos se rechazan antes de cancelar nada.
+ * Si la pasarela falla al cobrar (502, error de red, un token que solo Mercado Pago sabe inválido),
+ * el intento queda `cancelled`, suelta su `idempotency_key` para el reintento y el error sale tal
+ * cual.
  */
 export class PayWithCardCommand {
   /**
@@ -88,6 +90,19 @@ export class PayWithCardCommand {
     assertIdempotencyKey(idempotencyKey)
     if (input.token.trim() === '') throw new TypeError('El pago con tarjeta necesita un token')
     const order = await this.access.payable(access)
+    const charge: CardChargeInput = {
+      order,
+      idempotencyKey,
+      token: input.token,
+      paymentMethodId: input.paymentMethodId,
+      issuerId: input.issuerId,
+      installments: input.installments,
+      payer: input.payer,
+      notificationUrl: this.settings.notificationUrl,
+      statementDescriptor: this.settings.statementDescriptor,
+    }
+    // Antes de tocar nada: un token o unas cuotas inválidas (422) no cancelan el intento activo.
+    await this.gateway.validateCardCharge(charge)
     const { attempt, previous } = await this.payments.startAttempt({
       id: newId(),
       orderId: order.id,
@@ -100,19 +115,13 @@ export class PayWithCardCommand {
     if (previous !== null) await releaseAtProvider(this.gateway, previous, this.logger)
     let payment: ProviderPayment
     try {
-      payment = await this.gateway.createCardPayment({
-        order,
-        idempotencyKey,
-        token: input.token,
-        paymentMethodId: input.paymentMethodId,
-        issuerId: input.issuerId,
-        installments: input.installments,
-        payer: input.payer,
-        notificationUrl: this.settings.notificationUrl,
-        statementDescriptor: this.settings.statementDescriptor,
-      })
+      payment = await this.gateway.createCardPayment(charge)
     } catch (error: unknown) {
-      await this.payments.update(attempt.id, { status: 'cancelled', isActive: false })
+      await this.payments.update(attempt.id, {
+        status: 'cancelled',
+        isActive: false,
+        idempotencyKey: releasedIdempotencyKey(attempt),
+      })
       throw error
     }
     const applied = await this.apply.execute(payment, { attemptId: attempt.id, source: 'card' })

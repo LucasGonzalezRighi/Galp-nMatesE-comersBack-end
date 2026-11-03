@@ -41,6 +41,22 @@ export async function releaseAtProvider(
 }
 
 /**
+ * Qué clave idempotente le queda a un intento que la pasarela dejó cancelado sin cobrar (502, 422
+ * de token o cuotas, error de red). La columna es única y el interceptor libera la clave de la
+ * tienda cuando la ruta falla, así que el reintento (la tienda conserva la clave tras un 5xx) la
+ * vuelve a usar: el intento caído tiene que soltarla. El resultado no es un UUID, así que nunca
+ * choca con una clave nueva de la tienda, y conserva el origen para auditar.
+ *
+ * @param attempt - Intento cancelado por la falla de la pasarela.
+ * @returns `<clave>:released:<id del intento>`.
+ */
+export function releasedIdempotencyKey(
+  attempt: Pick<PaymentAttempt, 'id' | 'idempotencyKey'>,
+): string {
+  return `${attempt.idempotencyKey}:released:${attempt.id}`
+}
+
+/**
  * Texto de un error para guardar o avisar.
  *
  * @param error - Lo que se atrapó.

@@ -52,6 +52,11 @@ export interface PaymentAttemptPatch {
   issuerId?: string | null
   /** Si queda activo. */
   isActive?: boolean
+  /**
+   * Clave idempotente nueva. Solo para liberar la de un intento que la pasarela dejó cancelado
+   * (la columna es única y la tienda reintenta con la misma clave): ver `releasedIdempotencyKey`.
+   */
+  idempotencyKey?: string
   /** Cuándo se aprobó. */
   approvedAt?: Date | null
 }

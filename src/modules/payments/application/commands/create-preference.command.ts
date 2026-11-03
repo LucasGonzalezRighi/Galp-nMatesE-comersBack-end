@@ -6,7 +6,7 @@ import type { PaymentRepository } from '../ports/payment.repository.port'
 import { SILENT_PAYMENTS_LOGGER, type PaymentsLogger } from '../ports/payments-logger.port'
 import type { PaymentsSettings } from '../ports/payments-settings.port'
 import type { PreferenceView } from '../read-models'
-import { releaseAtProvider } from '../release-attempt'
+import { releaseAtProvider, releasedIdempotencyKey } from '../release-attempt'
 
 /**
  * Dirección de la tienda a la que vuelve Mercado Pago (las tres `back_urls` y el simulador).
@@ -34,7 +34,8 @@ export function assertIdempotencyKey(idempotencyKey: string): void {
 /**
  * `POST /orders/{number}/payments/mercadopago/preference`: cancela el intento activo anterior
  * (también en Mercado Pago, con mejor esfuerzo), crea un intento `mp_redirect` y la preferencia de
- * Checkout Pro, que vence con la reserva. Si la pasarela falla, el intento queda `cancelled`.
+ * Checkout Pro, que vence con la reserva. Si la pasarela falla, el intento queda `cancelled` y
+ * suelta su `idempotency_key` para que el reintento de la tienda (misma clave) cree otro.
  */
 export class CreatePreferenceCommand {
   /**
@@ -90,7 +91,11 @@ export class CreatePreferenceCommand {
       })
       return { initPoint: preference.initPoint }
     } catch (error: unknown) {
-      await this.payments.update(attempt.id, { status: 'cancelled', isActive: false })
+      await this.payments.update(attempt.id, {
+        status: 'cancelled',
+        isActive: false,
+        idempotencyKey: releasedIdempotencyKey(attempt),
+      })
       throw error
     }
   }

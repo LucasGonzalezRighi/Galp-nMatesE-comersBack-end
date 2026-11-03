@@ -88,6 +88,17 @@ export interface PaymentGatewayPort {
    */
   expirePreference(preferenceId: string): Promise<void>
   /**
+   * Valida, sin cobrar ni crear nada, lo que la pasarela ya puede saber del cobro: el formato del
+   * token y las cuotas que ofrece (el simulador). Se llama antes de cancelar el intento activo,
+   * así un dato inválido (422) no se lleva por delante un pago pendiente. Mercado Pago real
+   * valida el token y las cuotas recién al cobrar: ahí no hace nada.
+   *
+   * @param input - El mismo cobro que después va a {@link PaymentGatewayPort.createCardPayment}.
+   * @throws {InvalidCardTokenError} Si el token no es válido (422 en `token`).
+   * @throws {InstallmentsNotAvailableError} Si las cuotas no se ofrecen (422 en `installments`).
+   */
+  validateCardCharge(input: CardChargeInput): Promise<void>
+  /**
    * Cobra con tarjeta.
    *
    * @param input - Token, cuotas y pagador.

@@ -151,6 +151,15 @@ export class MercadoPagoGateway implements PaymentGatewayPort {
     }
   }
 
+  /**
+   * {@inheritDoc PaymentGatewayPort.validateCardCharge}
+   *
+   * Mercado Pago valida el token y las cuotas al cobrar: no hay nada que mirar antes.
+   */
+  validateCardCharge(): Promise<void> {
+    return Promise.resolve()
+  }
+
   /** {@inheritDoc PaymentGatewayPort.createCardPayment} */
   async createCardPayment(input: CardChargeInput): Promise<ProviderPayment> {
     try {

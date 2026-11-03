@@ -117,6 +117,22 @@ describe('SimulatedGateway (Ruling B-55)', () => {
     )
   })
 
+  it('validateCardCharge da los mismos 422 que el cobro, sin guardar ningún pago', async () => {
+    const { gateway, settings } = setup()
+    settings.installmentsMax = 3
+
+    await expect(gateway.validateCardCharge(charge(simToken('APRO'), 3))).resolves.toBeUndefined()
+    await expect(gateway.validateCardCharge(charge(simToken('APRO'), 4))).rejects.toThrow(
+      InstallmentsNotAvailableError,
+    )
+    await expect(
+      gateway.validateCardCharge(charge('ff8080814c11e237014c1ff593b57b4d')),
+    ).rejects.toThrow(InvalidCardTokenError)
+    expect(gateway.callsTo('validateCardCharge')).toHaveLength(3)
+    expect(gateway.callsTo('createCardPayment')).toEqual([])
+    await expect(gateway.getPayment('1234567890')).resolves.toBeNull()
+  })
+
   it('getPayment devuelve lo último aplicado; remember lo reemplaza', async () => {
     const { gateway } = setup()
     const payment = await gateway.createCardPayment(charge(simToken('3DS')))

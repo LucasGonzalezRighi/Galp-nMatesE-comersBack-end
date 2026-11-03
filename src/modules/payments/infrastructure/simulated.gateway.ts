@@ -108,17 +108,16 @@ export class SimulatedGateway implements PaymentGatewayPort {
     return Promise.resolve()
   }
 
+  /** {@inheritDoc PaymentGatewayPort.validateCardCharge} */
+  async validateCardCharge(input: CardChargeInput): Promise<void> {
+    this.track('validateCardCharge', [input])
+    await this.parseCharge(input)
+  }
+
   /** {@inheritDoc PaymentGatewayPort.createCardPayment} */
   async createCardPayment(input: CardChargeInput): Promise<ProviderPayment> {
     this.track('createCardPayment', [input])
-    const token = parseSimulatedToken(input.token)
-    if (token === null) throw new InvalidCardTokenError()
-    const offered = simulatedInstallments(
-      input.order.totalArs,
-      await this.settings.maxWithoutInterest(),
-      true,
-    ).map((option) => option.installments)
-    if (!offered.includes(input.installments)) throw new InstallmentsNotAvailableError()
+    const token = await this.parseCharge(input)
     const outcome = simulatedOutcome(token.holder)
     const providerPaymentId = this.newPaymentId()
     const payment: ProviderPayment = {
@@ -185,6 +184,26 @@ export class SimulatedGateway implements PaymentGatewayPort {
         input.paymentTypeId === 'credit_card',
       ),
     )
+  }
+
+  /**
+   * Token y cuotas del cobro: los mismos 422 antes de cancelar el activo y al cobrar.
+   *
+   * @throws {InvalidCardTokenError} Si el token no es de este simulador.
+   * @throws {InstallmentsNotAvailableError} Si las cuotas no están en la tabla del simulador.
+   */
+  private async parseCharge(
+    input: CardChargeInput,
+  ): Promise<{ holder: string; lastFour: string | null }> {
+    const token = parseSimulatedToken(input.token)
+    if (token === null) throw new InvalidCardTokenError()
+    const offered = simulatedInstallments(
+      input.order.totalArs,
+      await this.settings.maxWithoutInterest(),
+      true,
+    ).map((option) => option.installments)
+    if (!offered.includes(input.installments)) throw new InstallmentsNotAvailableError()
+    return token
   }
 
   /** Id de pago de 10 dígitos que todavía no usó. */

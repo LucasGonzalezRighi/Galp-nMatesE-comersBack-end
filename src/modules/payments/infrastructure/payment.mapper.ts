@@ -69,6 +69,7 @@ export function toPaymentUpdate(patch: PaymentAttemptPatch): Prisma.PaymentUnche
   if (patch.cardLastFour !== undefined) data.cardLastFour = patch.cardLastFour
   if (patch.issuerId !== undefined) data.issuerId = patch.issuerId
   if (patch.isActive !== undefined) data.isActive = patch.isActive
+  if (patch.idempotencyKey !== undefined) data.idempotencyKey = patch.idempotencyKey
   if (patch.approvedAt !== undefined) data.approvedAt = patch.approvedAt
   return data
 }

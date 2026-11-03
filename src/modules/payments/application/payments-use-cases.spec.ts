@@ -181,6 +181,22 @@ describe('CreatePreferenceCommand', () => {
     expect(only(h.payments.of(order.id))).toMatchObject({ status: 'cancelled', isActive: false })
     expect(h.orders.get(order.id).paymentStatus).toBe('cancelled')
   })
+
+  it('tras el 502 suelta la clave: el reintento con la misma clave crea otra preferencia, sin choque', async () => {
+    const { h, order, access } = setup()
+    h.gateway.failures.createPreference = new PaymentGatewayError()
+    await expect(h.preference.execute(access, KEY_1)).rejects.toBeInstanceOf(PaymentGatewayError)
+    const [failed] = h.payments.of(order.id)
+    expect(failed?.idempotencyKey).toBe(`${KEY_1}:released:${String(failed?.id)}`)
+    delete h.gateway.failures.createPreference
+
+    await expect(h.preference.execute(access, KEY_1)).resolves.toHaveProperty('initPoint')
+
+    expect(h.payments.of(order.id).map((a) => [a.status, a.isActive, a.idempotencyKey])).toEqual([
+      ['cancelled', false, `${KEY_1}:released:${String(failed?.id)}`],
+      ['none', true, KEY_1],
+    ])
+  })
 })
 
 describe('PayWithCardCommand', () => {
@@ -289,7 +305,7 @@ describe('PayWithCardCommand', () => {
     await expect(h.orders.expireOne(order.id)).resolves.toMatchObject({ status: 'expired' })
   })
 
-  it('token inválido → 422 en token y el intento queda cancelled', async () => {
+  it('token inválido → 422 en token, antes de crear ningún intento', async () => {
     const { h, order, access } = setup()
     const error: unknown = await h.card
       .execute(access, { ...cardInput('APRO'), token: '9a8b7c6d5e4f' }, KEY_1)
@@ -299,17 +315,64 @@ describe('PayWithCardCommand', () => {
       status: 422,
       errors: [{ field: 'token', code: 'invalid_token' }],
     })
-    expect(only(h.payments.of(order.id))).toMatchObject({ status: 'cancelled', isActive: false })
-    expect(h.orders.get(order.id).paymentStatus).toBe('cancelled')
+    expect(h.payments.of(order.id)).toEqual([])
+    expect(h.gateway.callsTo('createCardPayment')).toEqual([])
+    expect(h.orders.get(order.id).paymentStatus).toBe('none')
   })
 
-  it('cuotas que la pasarela no ofrece → 422 en installments', async () => {
+  it('cuotas que la pasarela no ofrece → 422 en installments, antes de crear ningún intento', async () => {
     const { h, order, access } = setup()
     await expect(h.card.execute(access, cardInput('APRO', 4), KEY_1)).rejects.toBeInstanceOf(
       InstallmentsNotAvailableError,
     )
-    expect(only(h.payments.of(order.id))).toMatchObject({ status: 'cancelled', isActive: false })
+    expect(h.payments.of(order.id)).toEqual([])
+    expect(h.gateway.callsTo('createCardPayment')).toEqual([])
     expect(h.orders.get(order.id).status).toBe('pending_payment')
+  })
+
+  it('un 422 de token o cuotas no cancela el intento activo anterior (un CONT sigue pendiente)', async () => {
+    const { h, order, access } = setup()
+    await h.card.execute(access, cardInput('CONT'), KEY_1)
+    await expect(h.card.execute(access, cardInput('APRO', 4), KEY_2)).rejects.toBeInstanceOf(
+      InstallmentsNotAvailableError,
+    )
+    await expect(
+      h.card.execute(access, { ...cardInput('APRO'), token: '9a8b7c6d5e4f' }, KEY_2),
+    ).rejects.toBeInstanceOf(InvalidCardTokenError)
+    expect(only(h.payments.of(order.id))).toMatchObject({
+      status: 'pending',
+      isActive: true,
+      idempotencyKey: KEY_1,
+    })
+    expect(h.gateway.callsTo('cancelPayment')).toEqual([])
+    expect(h.orders.get(order.id).paymentStatus).toBe('pending')
+  })
+
+  it('si la pasarela falla al cobrar, el intento queda cancelled con la clave suelta y el reintento con la misma clave cobra', async () => {
+    const { h, order, access } = setup()
+    h.gateway.failures.createCardPayment = new PaymentGatewayError()
+    await expect(h.card.execute(access, cardInput('APRO'), KEY_1)).rejects.toMatchObject({
+      code: 'payment_gateway_error',
+      status: 502,
+    })
+    const failed = only(h.payments.of(order.id))
+    expect(failed).toMatchObject({
+      status: 'cancelled',
+      isActive: false,
+      idempotencyKey: `${KEY_1}:released:${failed.id}`,
+    })
+    expect(h.orders.get(order.id).paymentStatus).toBe('cancelled')
+    delete h.gateway.failures.createCardPayment
+
+    await expect(h.card.execute(access, cardInput('APRO'), KEY_1)).resolves.toMatchObject({
+      paymentStatus: 'approved',
+    })
+
+    expect(h.payments.of(order.id).map((a) => [a.status, a.isActive, a.idempotencyKey])).toEqual([
+      ['cancelled', false, failed.idempotencyKey],
+      ['approved', false, KEY_1],
+    ])
+    expect(h.orders.get(order.id).status).toBe('paid')
   })
 })
 
