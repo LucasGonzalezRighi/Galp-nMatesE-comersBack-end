@@ -8,6 +8,10 @@ import {
   MAILER_PORT,
   type MailerPort,
 } from '../../src/modules/identity/application/ports/mailer.port'
+import {
+  PAYMENT_GATEWAY_PORT,
+  type PaymentGatewayPort,
+} from '../../src/modules/payments/application/ports/payment-gateway.port'
 import { type Clock, CLOCK } from '../../src/shared/domain/clock'
 
 /** Adaptadores que un E2E puede reemplazar al armar la app. */
@@ -16,6 +20,11 @@ export interface AppOverrides {
   mailer?: MailerPort
   /** Reloj en lugar del `SystemClock` (por ejemplo, un `FixedClock` para vencer reservas). */
   clock?: Clock
+  /**
+   * Pasarela de pagos en lugar de la que elige `MP_MODE` (sin `MP_*` es la `SimulatedGateway`):
+   * por ejemplo, un `FakeGateway` de `test/support/payments.ts` para programar fallas.
+   */
+  gateway?: PaymentGatewayPort
 }
 
 /**
@@ -32,6 +41,9 @@ export async function createApp(overrides: AppOverrides = {}): Promise<INestAppl
   }
   if (overrides.clock !== undefined) {
     builder.overrideProvider(CLOCK).useValue(overrides.clock)
+  }
+  if (overrides.gateway !== undefined) {
+    builder.overrideProvider(PAYMENT_GATEWAY_PORT).useValue(overrides.gateway)
   }
   const moduleRef = await builder.compile()
   const app = moduleRef.createNestApplication<INestApplication<Server>>()

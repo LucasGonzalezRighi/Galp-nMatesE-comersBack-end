@@ -6,6 +6,7 @@ import { ContentModule } from './modules/content/content.module'
 import { HealthModule } from './modules/health/health.module'
 import { IdentityModule } from './modules/identity/identity.module'
 import { OrdersModule } from './modules/orders/orders.module'
+import { PaymentsModule } from './modules/payments/payments.module'
 import { ReviewsModule } from './modules/reviews/reviews.module'
 import { SettingsModule } from './modules/settings/settings.module'
 import { LoggerModule } from './shared/infrastructure/logger/logger.module'
@@ -30,6 +31,7 @@ import { SharedModule } from './shared/shared.module'
     ReviewsModule,
     IdentityModule,
     OrdersModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}
