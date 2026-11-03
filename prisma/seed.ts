@@ -264,7 +264,7 @@ async function seedAdmin(tx: Tx): Promise<number> {
 
 /**
  * Carga en la base los datos del diseño: 6 líneas, 27 productos publicados con fotos y stock,
- * 15 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío y el admin
+ * 18 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío y el admin
  * semilla del panel.
  *
  * Es idempotente (todo es `upsert` por `slug`, `(productId, position)`, `key`, `id = 1`,
@@ -280,7 +280,7 @@ async function seedAdmin(tx: Tx): Promise<number> {
  *   rechaza una fila (la transacción se deshace entera).
  * @example
  * const summary = await seed(prisma)
- * // { categories: 6, products: 27, reviews: 15, contentBlocks: 7, users: 1 }
+ * // { categories: 6, products: 27, reviews: 18, contentBlocks: 7, users: 1 }
  */
 export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
   return prisma.$transaction(

@@ -21,7 +21,7 @@ export interface Env {
    * credenciales; no se admite en `production`) y `live` habla con Mercado Pago.
    */
   MP_MODE: 'simulated' | 'live'
-  /** Access token de Mercado Pago (`APP_USR-…` o `TEST-…`). Obligatorio con `live`; nunca se loguea. */
+  /** Access token de Mercado Pago (de prueba o productivo, hoy los dos `APP_USR-…`). Obligatorio con `live`; nunca se loguea. */
   MP_ACCESS_TOKEN?: string | undefined
   /** Clave secreta de las notificaciones (firma `x-signature`). Obligatoria con `live`. */
   MP_WEBHOOK_SECRET?: string | undefined

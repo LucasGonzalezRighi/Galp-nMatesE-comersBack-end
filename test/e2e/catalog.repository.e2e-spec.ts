@@ -208,14 +208,14 @@ describe('lecturas del catálogo, contenidos, reseñas y ajustes (Postgres + Red
     expect(categories[0]?.image?.publicId).toBe('galpon/productos/mate-imperial-premium')
   })
 
-  it('lee reseñas aprobadas con estadísticas y las 5 destacadas', async () => {
+  it('lee reseñas aprobadas con estadísticas y las 10 destacadas', async () => {
     const page = await get(ListProductReviewsQuery).execute('mate-imperial-premium', 1)
     const featured = await get(ListFeaturedReviewsQuery).execute()
 
     expect(page).toMatchObject({ page: 1, pageSize: 10, total: 3, stats: { count: 3 } })
     expect(page?.items.every(({ verifiedPurchase }) => verifiedPurchase)).toBe(true)
     expect(page?.stats.distribution[0]).toEqual({ stars: 5, count: 2, percent: 67 })
-    expect(featured).toHaveLength(5)
+    expect(featured).toHaveLength(10)
     const dates = featured.map(({ createdAt }) => createdAt)
     expect(dates).toEqual(dates.toSorted().reverse())
     await expect(get(ListProductReviewsQuery).execute('no-existe', 1)).resolves.toBeNull()

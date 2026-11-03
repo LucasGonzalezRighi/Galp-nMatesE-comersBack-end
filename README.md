@@ -69,8 +69,8 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
   vuelve a migrar (después, `npm run db:seed`).
 - **Cliente de Prisma** en `src/generated/prisma` (no se versiona): lo genera `postinstall`, o
   `npm run db:generate` después de cambiar `prisma/schema.prisma`.
-- **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos, 15 reseñas
-  (5 destacadas), 7 contenidos, ajustes y 3 envíos, los mismos datos de las fixtures del front, y
+- **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos, 18 reseñas
+  (10 destacadas), 7 contenidos, ajustes y 3 envíos, los mismos datos de las fixtures del front, y
   el admin semilla (ver "Cuenta y admin"). Es idempotente (`upsert` por `slug`/`key`; el admin
   solo se crea si falta): correrlo dos veces deja lo mismo.
 - Los datos salen de `prisma/seed-data/`, que se regenera desde las fixtures del front con

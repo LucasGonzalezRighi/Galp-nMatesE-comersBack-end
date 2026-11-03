@@ -78,7 +78,7 @@ describe('seed', () => {
     expect(first).toEqual({
       categories: 6,
       products: 27,
-      reviews: 15,
+      reviews: 18,
       contentBlocks: 7,
       users: 1,
     })
@@ -91,7 +91,7 @@ describe('seed', () => {
       products: 27,
       published: 27,
       inventory: 27,
-      reviews: 15,
+      reviews: 18,
       contentBlocks: 7,
       settings: 1,
       shippingOptions: 3,
@@ -156,7 +156,7 @@ describe('seed', () => {
 
   it('guarda reseñas, contenidos, ajustes y envíos', async () => {
     const reviews = await db().review.findMany()
-    expect(reviews.filter((r) => r.featured)).toHaveLength(5)
+    expect(reviews.filter((r) => r.featured)).toHaveLength(10)
     expect(reviews.every((r) => r.status === 'approved')).toBe(true)
     expect(reviews.every((r) => r.verifiedPurchase)).toBe(true)
     expect(reviews.some((r) => r.rating.toString() === '4.5')).toBe(true)

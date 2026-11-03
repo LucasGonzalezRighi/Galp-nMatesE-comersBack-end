@@ -37,7 +37,8 @@ back 3001; CORS con credenciales solo para `http://localhost:5173`.
 **B2 · Catálogo y contenido**
 
 - Seed idempotente con los datos del diseño (fixtures del front importadas a `prisma/seed-data/`):
-  6 líneas, 27 productos, 15 reseñas, 7 contenidos, ajustes y 3 envíos.
+  6 líneas, 27 productos, 15 reseñas, 7 contenidos, ajustes y 3 envíos (desde el 2026-11-03, 18
+  reseñas con 10 destacadas: el front sumó las del collage sobre el mate).
 - Módulos `catalog`, `content`, `reviews` (lectura) y `settings` (público), con casos de uso,
   puertos, repositorios Prisma y caché read-through en Redis (`catalog:*` 60 s, `content:*` y
   `settings:store` 300 s; las reseñas no se cachean).
@@ -1013,9 +1014,9 @@ Para la prueba en vivo se usó lo que ya tenía el front: Next.js 16.4.2 y Playw
       - **Diagnóstico de la CSP:**
         - Aun con esa URL escrita a mano en `galpon.order`, la tienda no abre el diálogo:
           `readOrderSession` solo acepta `https:` o una ruta propia.
-        - Un `iframe` agregado a mano lo bloquea la CSP de la tienda: "Framing
-          'http://localhost:3001/' violates … frame-src 'self' https://_.mercadopago.com
-          https://_.mercadolibre.com https:" (`b5-13-csp-bloquea-desafio-http.png`).
+        - Un `iframe` agregado a mano lo bloquea la CSP de la tienda (`frame-src 'self'
+https://*.mercadopago.com https://*.mercadolibre.com https:` no admite
+          `http://localhost:3001/`; `b5-13-csp-bloquea-desafio-http.png`).
         - No se tocó el front.
       - El desafío del back en su propia pestaña (`b5-14-desafio-3ds-del-back.png`) → Confirmar →
         "Listo. Ya podés cerrar esta ventana." (`b5-15-desafio-listo.png`).
@@ -1083,8 +1084,17 @@ Para la prueba en vivo se usó lo que ya tenía el front: Next.js 16.4.2 y Playw
   - si Mercado Pago acepta `back_urls` de `localhost` con `auto_return`;
   - el 3DS real: Mercado Pago pide un `POST` del `creq` a `external_resource_url`, y el contrato
     solo lleva `challenge.url`.
-- Corregir `.env.example`: dice que el access token de prueba empieza con `TEST-…`, pero hoy
-  empieza con `APP_USR-`, como el productivo (el README ya lo dice).
+
+**Casos raros anotados (sin arreglo, inofensivos):**
+
+- Si el aviso de Mercado Pago llega antes que la respuesta del cobro con tarjeta, el intento de la
+  tarjeta queda activo en `none` sobre un pedido ya pagado: un pago nuevo da 409 y
+  `payment_status` sigue `approved`.
+- En `live`, un 422 de token o de cuotas se conoce recién al cobrar, así que el intento activo
+  anterior ya quedó cancelado (también en Mercado Pago). El simulador valida antes de cancelar.
+- Un duplicado aprobado que se corta entre guardarse y pedir la devolución no se retoma: un
+  reintento no sabe cuál de los dos aprobados pagó el pedido. Si la devolución quedó `failed`, la
+  muestra la alerta de B6; si no llegó a crearse, queda para revisar a mano en Mercado Pago.
 
 **Para B6 (admin):**
 

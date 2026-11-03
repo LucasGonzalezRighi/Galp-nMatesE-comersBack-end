@@ -156,11 +156,11 @@ describe('lecturas públicas del contrato (HTTP + Postgres + Redis)', () => {
     expect(authors).not.toContain('Pendiente')
   })
 
-  it('GET /reviews/featured → las 5 destacadas', async () => {
+  it('GET /reviews/featured → las 10 destacadas', async () => {
     const response = await request(server()).get('/api/v1/reviews/featured')
 
     expect(response.status).toBe(200)
-    expect(response.body).toHaveLength(5)
+    expect(response.body).toHaveLength(10)
   })
 
   it('GET /content/home → la forma HomeContent', async () => {
