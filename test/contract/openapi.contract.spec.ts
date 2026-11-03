@@ -63,6 +63,12 @@ const IMPLEMENTED_PATHS: readonly string[] = [
   'POST /orders',
   'GET /orders/{number}',
   'GET /me/orders/{number}',
+  // B5: pagos con Mercado Pago (preferencia, tarjeta, cuotas, cancelación y webhook).
+  'POST /orders/{number}/payments/mercadopago/preference',
+  'POST /orders/{number}/payments/mercadopago/card',
+  'POST /orders/{number}/payments/mercadopago/installments',
+  'POST /orders/{number}/cancel-payment',
+  'POST /webhooks/mercadopago',
 ]
 
 /** Operaciones que Swagger genera y el contrato no tiene, a propósito. */

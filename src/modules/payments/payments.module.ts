@@ -52,6 +52,9 @@ import { PaymentsSweep } from './infrastructure/payments-sweep'
 import { PrismaPaymentRepository } from './infrastructure/prisma-payment.repository'
 import { PrismaWebhookEventRepository } from './infrastructure/prisma-webhook-event.repository'
 import { SimulatedGateway } from './infrastructure/simulated.gateway'
+import { PaymentsController } from './interface/payments.controller'
+import { SimulatedMercadoPagoController } from './interface/simulated-mercadopago.controller'
+import { WebhooksController } from './interface/webhooks.controller'
 
 /** Cola con `enableOfflineQueue: false`: con Redis caído falla al instante y no cuelga el cierre. */
 function queueConnection(env: Env) {
@@ -92,9 +95,11 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
  * `order.expired` (Ruling B-43). El barrido de 60 s vence, concilia y retoma notificaciones.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`, con un `Logger` de Nest como
- * `PaymentsLogger` y el HMAC de `node:crypto` como función.
+ * `PaymentsLogger` y el HMAC de `node:crypto` como función. Las rutas: las cuatro de pago del
+ * pedido, el webhook y el simulador (que solo existe en `MP_MODE=simulated` fuera de producción).
  */
 @Module({
+  controllers: [PaymentsController, WebhooksController, SimulatedMercadoPagoController],
   imports: [
     OrdersModule,
     SettingsModule,

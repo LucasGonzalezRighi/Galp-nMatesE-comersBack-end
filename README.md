@@ -80,8 +80,8 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 `npm run contract:check` arma la app (sin Docker), genera el Swagger y lo compara, normalizado,
 con `../frontend/docs/api/openapi.yaml` (o `CONTRACT_PATH`). Falla si una operación implementada
 difiere del contrato o si Swagger expone una ruta que no está en `IMPLEMENTED_PATHS`
-(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 36
-implementadas y 41 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
+(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 41
+implementadas y 36 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
 `requestBody`. Además corre los casos compartidos de validación del front
 (`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad y del checkout,
 contacto y envío (`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan

@@ -14,6 +14,7 @@ import {
   ShippingInputDto,
   toShippingInput,
 } from '../../src/modules/orders/interface/dto/shipping-input.dto'
+import { CardPaymentInputDto } from '../../src/modules/payments/interface/dto/card-payment-input.dto'
 import type { FieldError } from '../../src/shared/infrastructure/http/problem.filter'
 import { createValidationPipe } from '../../src/shared/infrastructure/http/validation.pipe'
 
@@ -69,6 +70,20 @@ const { cases } = JSON.parse(readFileSync(CASES_PATH, 'utf8')) as { cases: Valid
 
 /** Campos válidos que se completan cuando el caso solo prueba otros campos del DTO. */
 const VALID_REGISTER = { email: 'lucia@example.com', password: 'galpon2026ok' }
+
+/** Pago con tarjeta válido salvo el documento, que pone cada caso de `cardholderSchema`. */
+const VALID_CARD_PAYMENT = {
+  token: 'sim_APRO_3704_0123456789abcdef0123456789abcdef',
+  paymentMethodId: 'visa',
+  issuerId: null,
+  installments: 1,
+}
+
+/** Campos del documento en `cardholderSchema` → su ruta en `CardPaymentInputDto`. */
+const DOCUMENT_FIELDS: Readonly<Record<string, string>> = {
+  identificationType: 'payer.identification.type',
+  identificationNumber: 'payer.identification.number',
+}
 
 const pipe = createValidationPipe()
 
@@ -253,6 +268,40 @@ const MAPPINGS: readonly Mapping[] = [
     check: (c) =>
       c.schema === 'shippingSchema'
         ? { body: c.input, output: c.output ?? {}, errors: errorsOrAnyMessage(c) }
+        : null,
+  },
+  {
+    // Documento de quien paga con tarjeta (`POST …/card`): `identificationType` e
+    // `identificationNumber` del front son `payer.identification.type` y `.number`, con la regla
+    // por tipo (Ruling B-51: al DNI se le quitan puntos y espacios). Solo los casos "Documento"
+    // (7 a 16): los de "Titular de la tarjeta" (1 a 6) prueban `cardholderName`, que no llega al
+    // back porque viaja dentro del token de Mercado Pago.
+    name: 'CardPaymentInputDto (documento de cardholderSchema)',
+    dto: CardPaymentInputDto,
+    effective: (value) => {
+      const payer = isRecord(value.payer) ? value.payer : {}
+      const identification = isRecord(payer.identification) ? payer.identification : {}
+      return {
+        identificationType: identification.type,
+        identificationNumber: identification.number,
+      }
+    },
+    check: (c) =>
+      c.schema === 'cardholderSchema' && c.name.startsWith('Documento:')
+        ? {
+            body: {
+              ...VALID_CARD_PAYMENT,
+              payer: {
+                email: 'lucia@example.com',
+                identification: {
+                  type: c.input.identificationType,
+                  number: c.input.identificationNumber,
+                },
+              },
+            },
+            output: pick(c.output ?? {}, Object.keys(DOCUMENT_FIELDS)),
+            errors: errorsOf(c, (field) => DOCUMENT_FIELDS[field] ?? null),
+          }
         : null,
   },
 ]

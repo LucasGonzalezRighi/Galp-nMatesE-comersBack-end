@@ -6,7 +6,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { seed } from '../../prisma/seed'
 import type {
-  CartQuote,
   CreateOrderResultView,
   OrderSummaryPageView,
   OrderView,
@@ -26,6 +25,7 @@ import {
   newJar,
   refreshCsrf,
 } from '../support/http'
+import { HOME_ADDRESS, MATE_OPTIONS, mateLine, ordersHttp } from '../support/orders-http'
 
 /** Producto del seed, con lo que usan los casos. */
 interface SeedProduct {
@@ -33,25 +33,6 @@ interface SeedProduct {
   name: string
   priceArs: number
 }
-
-/** Línea del carrito como la manda la tienda. */
-type CartLine = Record<string, unknown>
-
-/** Cuero y virola de un mate. */
-const OPTIONS = { leather: 'Negro', ferrule: 'Alpaca cincelada' }
-
-/** Dirección de domicilio completa (el envío a domicilio cuesta 6500 en el seed). */
-const HOME = {
-  street: 'Av. Corrientes',
-  number: '1234',
-  apartment: null,
-  postalCode: 'C1043',
-  city: 'CABA',
-  province: 'CABA',
-}
-
-/** Costo del envío a domicilio en el seed. */
-const HOME_SHIPPING_ARS = 6500
 
 /** Contraseña válida para las cuentas que se registran. */
 const PASSWORD = 'galpon2026ok'
@@ -135,41 +116,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
     return item.maxQuantity
   }
 
-  function mateLine(id: string, quantity = 1): CartLine {
-    return { type: 'product', productId: id, quantity, options: OPTIONS }
-  }
-
-  async function quote(items: CartLine[]): Promise<CartQuote> {
-    const response = await send(newJar(), 'post', '/cart/quote', { body: { items } })
-    expect(response.status).toBe(200)
-    return response.body as CartQuote
-  }
-
-  /** Cuerpo de `POST /orders` con el total que cotiza el back (envío a domicilio). */
-  async function orderBody(
-    items: CartLine[],
-    email: string,
-  ): Promise<Record<string, unknown> & { expectedTotalArs: number }> {
-    const { subtotalArs } = await quote(items)
-    return {
-      customer: { email, firstName: 'Lucía', lastName: 'Pérez', phone: null },
-      shipping: { method: 'home', address: HOME },
-      items,
-      paymentMethod: 'mp_redirect',
-      expectedTotalArs: subtotalArs + HOME_SHIPPING_ARS,
-      website: '',
-    }
-  }
-
-  function placeOrder(jar: Jar, body: unknown, key = randomUUID()): Promise<request.Response> {
-    return send(jar, 'post', '/orders', { body, headers: { 'Idempotency-Key': key } })
-  }
-
-  async function createdOrder(jar: Jar, body: unknown): Promise<CreateOrderResultView> {
-    const response = await placeOrder(jar, body)
-    expect(response.status, JSON.stringify(response.body)).toBe(201)
-    return response.body as CreateOrderResultView
-  }
+  const { quote, orderBody, placeOrder, createdOrder } = ordersHttp(server)
 
   /** Cliente registrado, con su sesión en el jar (y un CSRF que queda viejo). */
   async function registered(email: string): Promise<Jar> {
@@ -298,7 +245,12 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
           lastName: 'Pérez',
           phone: null,
         },
-        shipping: { method: 'home', address: HOME, costArs: 6500, eta: '3 a 6 días hábiles' },
+        shipping: {
+          method: 'home',
+          address: HOME_ADDRESS,
+          costArs: 6500,
+          eta: '3 a 6 días hábiles',
+        },
         itemsGrossArs: 39999,
         kitSavingsArs: 0,
         subtotalArs: 39999,
@@ -326,7 +278,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
           kitSavingsArs: 0,
           totalArs: 39999,
           productSlug: 'mate-imperial-premium',
-          options: OPTIONS,
+          options: MATE_OPTIONS,
           kitItems: null,
         },
       ])
