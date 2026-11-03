@@ -1,4 +1,4 @@
-import { formatPesos } from '../../orders/domain/format-pesos'
+import { formatPesos } from '../../../shared/domain/format-pesos'
 
 /** Una opción de cuotas (`InstallmentOption` del contrato). */
 export interface InstallmentOption {

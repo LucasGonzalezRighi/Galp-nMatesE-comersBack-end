@@ -2,7 +2,7 @@
 // generados por la app; montos enteros en pesos con sufijo _ars; fechas timestamptz.
 // Lo que Prisma no sabe expresar (extensión citext, CHECK, índices parciales y la secuencia de
 // números de pedido) está escrito a mano en las migraciones b2_catalogo_contenido, b3_identidad,
-// b4_pedidos y b5_pagos.
+// b4_pedidos, b5_pagos y b5c_combos.
 
 generator client {
   provider     = "prisma-client"
@@ -32,6 +32,14 @@ enum ProductStatus {
   archived
 
   @@map("product_status")
+}
+
+/// Estado de un combo: borrador (la tienda no lo ve) o publicado.
+enum ComboStatus {
+  draft
+  published
+
+  @@map("combo_status")
 }
 
 /// Estado de moderación de una reseña.
@@ -146,10 +154,12 @@ enum PaymentMethod {
   @@map("payment_method")
 }
 
-/// Tipo de línea de un pedido: un producto suelto o un kit de mate, bombilla y yerba.
+/// Tipo de línea de un pedido: un producto suelto, un kit de mate, bombilla y yerba, o un combo
+/// de 2 o 3 productos con precio final.
 enum LineType {
   product
   kit
+  combo
 
   @@map("line_type")
 }
@@ -328,6 +338,7 @@ model Product {
   orderItems   OrderItem[]
   components   OrderItemComponent[]
   reservations StockReservation[]
+  comboItems   ComboItem[]
 
   @@index([status, categoryId])
   @@index([categoryId])
@@ -376,6 +387,44 @@ model ProductImage {
   @@id([productId, position])
   @@index([mediaAssetId])
   @@map("product_images")
+}
+
+/// Combo del dashboard: 2 o 3 productos de grupos distintos con un precio final. Los listados
+/// ordenan por `position` y después por `createdAt` (sin único: renumerar va en una transacción).
+/// CHECK `combos_price_ars_check` (1 a 99.999.999) y `combos_position_check` (≥ 1) en la
+/// migración.
+model Combo {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  name        String
+  description String
+  /// Precio final del combo en pesos enteros.
+  priceArs    Int         @map("price_ars")
+  status      ComboStatus @default(draft)
+  position    Int
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  items ComboItem[]
+
+  @@index([position])
+  @@map("combos")
+}
+
+/// Pieza de un combo, en el orden en que se cargó (`position` 1 a 3, CHECK
+/// `combo_items_position_check` en la migración). Un producto que está en un combo no se puede
+/// borrar.
+model ComboItem {
+  comboId   String @map("combo_id") @db.Uuid
+  position  Int
+  productId String @map("product_id") @db.Uuid
+
+  combo   Combo   @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@id([comboId, position])
+  @@unique([comboId, productId])
+  @@index([productId])
+  @@map("combo_items")
 }
 
 /// Stock de un producto. Disponible = `onHand - reserved`; CHECK `0 <= reserved <= on_hand` en
@@ -468,8 +517,9 @@ model Order {
   @@map("orders")
 }
 
-/// Línea de un pedido, en el orden del carrito (`position`). En un kit `productId` y
-/// `productSlug` son `null` y las piezas van en `OrderItemComponent`. CHECK
+/// Línea de un pedido, en el orden del carrito (`position`). En un kit o un combo `productId` y
+/// `productSlug` son `null` y las piezas van en `OrderItemComponent` (el combo es una copia: no
+/// guarda el id del combo). CHECK
 /// `order_items_quantity_check` (1 a 20) en la migración.
 model OrderItem {
   id            String   @id @default(uuid(7)) @db.Uuid
@@ -484,7 +534,8 @@ model OrderItem {
   unitPriceArs  Int      @map("unit_price_ars")
   kitSavingsArs Int      @map("kit_savings_ars")
   totalArs      Int      @map("total_ars")
-  /// Cuero y virola (`{ leather, ferrule }`) de un mate o de un kit; `null` en el resto.
+  /// Cuero y virola (`{ leather, ferrule }`) de un mate, de un kit o de un combo con mate; `null`
+  /// en el resto.
   options       Json?
   position      Int
 
@@ -498,7 +549,8 @@ model OrderItem {
   @@map("order_items")
 }
 
-/// Pieza de un kit (mate, bombilla o yerba), con su slug, nombre y precio al comprar.
+/// Pieza de un kit o de un combo (mate, bombilla o yerba), con su slug, nombre y precio al
+/// comprar.
 model OrderItemComponent {
   orderItemId  String       @map("order_item_id") @db.Uuid
   role         ProductGroup
@@ -506,6 +558,8 @@ model OrderItemComponent {
   slug         String
   name         String
   unitPriceArs Int          @map("unit_price_ars")
+  /// Orden de la pieza en la línea (1..n, el del combo); los kits van mate, bombilla y yerba.
+  position     Int          @default(0)
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)

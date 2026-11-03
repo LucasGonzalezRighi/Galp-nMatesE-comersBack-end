@@ -4,6 +4,7 @@ import { FERRULES, LEATHERS } from '../../catalog/domain/product.entity'
 import { isProvince } from '../../identity/domain/province'
 import type { CartItemOptions, Ferrule, Leather } from '../domain/cart-line'
 import type { Order, OrderPaymentInfo } from '../domain/order.entity'
+import type { LineType } from '../domain/order-status'
 import type { OrderKitItemDraft, OrderLineDraft } from '../domain/pricing'
 import type { ShippingAddress } from '../domain/shipping'
 
@@ -133,6 +134,19 @@ export function cartItemOptionsJson(
   return { leather: options.leather, ferrule: options.ferrule }
 }
 
+/**
+ * Tipo de línea guardado → el del dominio. La base ya admite `combo` (migración b5c_combos), pero
+ * el dominio de pedidos todavía no guarda combos, así que ninguna fila lo tiene.
+ *
+ * @throws {Error} En español, si la línea guardada es un combo.
+ */
+function toLineType(lineType: OrderRow['items'][number]['lineType']): LineType {
+  if (lineType === 'combo') {
+    throw new Error('Una línea de combo todavía no se puede leer como línea de pedido')
+  }
+  return lineType
+}
+
 /** Línea guardada → línea del dominio, con las piezas del kit en orden mate, bombilla, yerba. */
 function toLine(item: OrderRow['items'][number]): OrderLineDraft {
   const kitItems: OrderKitItemDraft[] | null =
@@ -148,7 +162,7 @@ function toLine(item: OrderRow['items'][number]): OrderLineDraft {
           }))
       : null
   return {
-    type: item.lineType,
+    type: toLineType(item.lineType),
     name: item.name,
     detail: item.detail,
     quantity: item.quantity,

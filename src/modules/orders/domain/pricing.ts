@@ -1,4 +1,5 @@
 import type { ChangeNotice, FieldError } from '../../../shared/domain/change-notice'
+import { formatPesos } from '../../../shared/domain/format-pesos'
 import { Pesos } from '../../../shared/domain/pesos'
 import type { ProductGroup } from '../../catalog/domain/category.entity'
 import { MAX_QUANTITY_PER_PRODUCT } from '../../catalog/domain/inventory.entity'
@@ -11,7 +12,6 @@ import {
   leatherLabel,
   MAX_CART_LINES,
 } from './cart-line'
-import { formatPesos } from './format-pesos'
 import type { LineType } from './order-status'
 import { CartTotalTooBigError } from './orders-errors'
 

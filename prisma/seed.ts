@@ -12,11 +12,12 @@ import { argon2id, hash } from 'argon2'
 import { Prisma, PrismaClient } from '../src/generated/prisma/client'
 import { SEED_ADMIN } from './seed-data/admin'
 import { SEED_CATEGORIES } from './seed-data/categories'
+import { SEED_COMBOS } from './seed-data/combos'
 import { SEED_CONTENT_BLOCKS } from './seed-data/content'
 import { SEED_PRODUCTS } from './seed-data/products'
 import { SEED_REVIEWS } from './seed-data/reviews'
 import { SEED_SETTINGS, SEED_SHIPPING_OPTIONS } from './seed-data/settings'
-import type { SeedImage, SeedProduct, SeedReview } from './seed-data/types'
+import type { SeedCombo, SeedImage, SeedProduct, SeedReview } from './seed-data/types'
 
 /** Cuántas filas de cada tipo dejó sembradas (creó, actualizó o ya estaban) una corrida del seed. */
 export interface SeedSummary {
@@ -28,6 +29,8 @@ export interface SeedSummary {
   reviews: number
   /** Contenidos editables. */
   contentBlocks: number
+  /** Combos, cada uno con sus piezas. */
+  combos: number
   /** Usuarios semilla: el admin, recién creado o el que ya estaba. */
   users: number
 }
@@ -46,24 +49,51 @@ const PASSWORD_HASH_OPTIONS = {
 /** Namespace UUID v5 fijo de las reseñas del seed (elegido una vez; no cambiarlo). */
 const REVIEW_NAMESPACE = '6f1c7a52-9a4e-4d3b-8f0e-2b7d5c1e9a30'
 
+/** Namespace UUID v5 fijo de los combos del seed (elegido una vez; no cambiarlo). */
+const COMBO_NAMESPACE = 'b7446644-ef56-4a17-9184-e0751e818650'
+
 /** Tiempo máximo de la transacción del seed: son unos 200 `upsert` en serie. */
 const TRANSACTION_TIMEOUT_MS = 120_000
 
 /**
- * Id determinístico de una reseña del seed: UUID v5 (SHA-1, RFC 9562) de
- * `productSlug|authorName|createdAt`, para que la misma reseña caiga siempre en la misma fila.
+ * UUID v5 (SHA-1, RFC 9562) de un nombre dentro de un namespace: siempre el mismo para el mismo
+ * par, así una fila del seed cae siempre en el mismo id.
+ *
+ * @param namespace - UUID del namespace.
+ * @param name - Nombre a identificar.
+ * @returns El UUID v5.
+ */
+function uuidV5(namespace: string, name: string): string {
+  const namespaceBytes = Buffer.from(namespace.replaceAll('-', ''), 'hex')
+  const bytes = createHash('sha1')
+    .update(namespaceBytes)
+    .update(name, 'utf8')
+    .digest()
+    .subarray(0, 16)
+  bytes.writeUInt8((bytes.readUInt8(6) & 0x0f) | 0x50, 6) // versión 5
+  bytes.writeUInt8((bytes.readUInt8(8) & 0x3f) | 0x80, 8) // variante RFC
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/**
+ * Id determinístico de una reseña del seed: UUID v5 de `productSlug|authorName|createdAt`.
  *
  * @param review - Reseña del seed.
  * @returns El UUID v5 de la reseña.
  */
 function reviewSeedId(review: SeedReview): string {
-  const namespace = Buffer.from(REVIEW_NAMESPACE.replaceAll('-', ''), 'hex')
-  const name = `${review.productSlug}|${review.authorName}|${review.createdAt}`
-  const bytes = createHash('sha1').update(namespace).update(name, 'utf8').digest().subarray(0, 16)
-  bytes.writeUInt8((bytes.readUInt8(6) & 0x0f) | 0x50, 6) // versión 5
-  bytes.writeUInt8((bytes.readUInt8(8) & 0x3f) | 0x80, 8) // variante RFC
-  const hex = bytes.toString('hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  return uuidV5(REVIEW_NAMESPACE, `${review.productSlug}|${review.authorName}|${review.createdAt}`)
+}
+
+/**
+ * Id determinístico de un combo del seed: UUID v5 de su clave del mock (`cmb-duo-imperial`).
+ *
+ * @param combo - Combo del seed.
+ * @returns El UUID v5 del combo.
+ */
+export function comboSeedId(combo: Pick<SeedCombo, 'key'>): string {
+  return uuidV5(COMBO_NAMESPACE, combo.key)
 }
 
 /**
@@ -215,6 +245,41 @@ async function seedReviews(tx: Tx): Promise<void> {
   }
 }
 
+/**
+ * Siembra los combos por su id determinístico ({@link comboSeedId}) y reemplaza sus piezas, en el
+ * orden del combo (`position` 1..n). Los combos creados desde el dashboard tienen otro id (UUID
+ * v7), así que no se tocan.
+ *
+ * @throws {Error} Si una pieza de un combo no está en la base.
+ */
+async function seedCombos(tx: Tx): Promise<void> {
+  const products = await tx.product.findMany({
+    where: { slug: { in: [...new Set(SEED_COMBOS.flatMap((c) => c.productSlugs))] } },
+    select: { id: true, slug: true },
+  })
+  const productIds = new Map(products.map((p) => [p.slug, p.id]))
+  for (const combo of SEED_COMBOS) {
+    const items = combo.productSlugs.map((slug, index) => {
+      const productId = productIds.get(slug)
+      if (productId === undefined) {
+        throw new Error(`El combo ${combo.name} lleva ${slug}, que no existe`)
+      }
+      return { position: index + 1, productId }
+    })
+    const id = comboSeedId(combo)
+    const data = {
+      name: combo.name,
+      description: combo.description,
+      priceArs: combo.priceArs,
+      status: combo.status,
+      position: combo.position,
+    }
+    await tx.combo.upsert({ where: { id }, create: { id, ...data }, update: data })
+    await tx.comboItem.deleteMany({ where: { comboId: id } })
+    await tx.comboItem.createMany({ data: items.map((item) => ({ comboId: id, ...item })) })
+  }
+}
+
 /** Siembra los contenidos editables (por `key`), los ajustes (`id = 1`) y los envíos (`method`). */
 async function seedContentAndSettings(tx: Tx): Promise<void> {
   for (const block of SEED_CONTENT_BLOCKS) {
@@ -264,11 +329,12 @@ async function seedAdmin(tx: Tx): Promise<number> {
 
 /**
  * Carga en la base los datos del diseño: 6 líneas, 27 productos publicados con fotos y stock,
- * 18 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío y el admin
- * semilla del panel.
+ * 18 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío, los 5
+ * combos (4 publicados y un borrador) y el admin semilla del panel.
  *
  * Es idempotente (todo es `upsert` por `slug`, `(productId, position)`, `key`, `id = 1`,
- * `method` o el id determinístico de la reseña; el admin se crea solo si falta y nunca se pisa su
+ * `method` o el id determinístico de la reseña o del combo; las piezas de cada combo se
+ * reemplazan; el admin se crea solo si falta y nunca se pisa su
  * contraseña; el stock nunca baja de lo reservado) y corre en una sola transacción: o queda todo
  * o nada. Al final mueve la secuencia de `products.sequence` al máximo, porque el seed inserta los
  * correlativos a mano y el próximo alta no tiene que chocar. Las reseñas y los contenidos que crea quedan sin cliente ni editor
@@ -276,11 +342,11 @@ async function seedAdmin(tx: Tx): Promise<number> {
  *
  * @param prisma - Cliente de Prisma conectado a una base ya migrada.
  * @returns Cuántas filas de cada tipo dejó sembradas.
- * @throws {Error} Si un producto o una reseña apunta a algo que no está en el seed, o si la base
- *   rechaza una fila (la transacción se deshace entera).
+ * @throws {Error} Si un producto, una reseña o un combo apunta a algo que no está en el seed, o si
+ *   la base rechaza una fila (la transacción se deshace entera).
  * @example
  * const summary = await seed(prisma)
- * // { categories: 6, products: 27, reviews: 18, contentBlocks: 7, users: 1 }
+ * // { categories: 6, products: 27, reviews: 18, contentBlocks: 7, combos: 5, users: 1 }
  */
 export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
   return prisma.$transaction(
@@ -290,12 +356,14 @@ export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
       await tx.$queryRaw`SELECT setval(pg_get_serial_sequence('products', 'sequence'), (SELECT MAX(sequence) FROM products))`
       await seedReviews(tx)
       await seedContentAndSettings(tx)
+      await seedCombos(tx)
       const users = await seedAdmin(tx)
       return {
         categories: SEED_CATEGORIES.length,
         products: SEED_PRODUCTS.length,
         reviews: SEED_REVIEWS.length,
         contentBlocks: SEED_CONTENT_BLOCKS.length,
+        combos: SEED_COMBOS.length,
         users,
       }
     },
@@ -324,7 +392,8 @@ async function main(): Promise<void> {
     const summary = await seed(prisma)
     process.stdout.write(
       `Seed listo: ${String(summary.categories)} categorías, ${String(summary.products)} productos, ` +
-        `${String(summary.reviews)} reseñas, ${String(summary.contentBlocks)} contenidos y ` +
+        `${String(summary.reviews)} reseñas, ${String(summary.contentBlocks)} contenidos, ` +
+        `${String(summary.combos)} combos y ` +
         `${String(summary.users)} usuario admin (${SEED_ADMIN.email}).\n`,
     )
   } finally {

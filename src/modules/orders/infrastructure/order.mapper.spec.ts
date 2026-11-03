@@ -90,6 +90,7 @@ function row(overrides: Partial<OrderRow> = {}): OrderRow {
             slug: 'yerba',
             name: 'Yerba',
             unitPriceArs: 9999,
+            position: 3,
           },
           {
             orderItemId: 'i2',
@@ -98,6 +99,7 @@ function row(overrides: Partial<OrderRow> = {}): OrderRow {
             slug: 'mate',
             name: 'Mate',
             unitPriceArs: 39999,
+            position: 1,
           },
           {
             orderItemId: 'i2',
@@ -106,6 +108,7 @@ function row(overrides: Partial<OrderRow> = {}): OrderRow {
             slug: 'bombilla',
             name: 'Bombilla',
             unitPriceArs: 25999,
+            position: 2,
           },
         ],
       },
@@ -238,6 +241,14 @@ describe('order.mapper', () => {
     ).toThrow('La dirección de envío guardada en el pedido no es válida')
     expect(() => toShippingAddress({ ...HOME, number: 12 })).toThrow(TypeError)
     expect(() => toShippingAddress(['CABA'])).toThrow(TypeError)
+  })
+
+  it('rechaza una línea de combo mientras el pedido no guarde combos', () => {
+    const [product] = row().items
+    if (product === undefined) throw new Error('falta la línea de ejemplo')
+    expect(() => toOrder(row({ items: [{ ...product, lineType: 'combo' }] }))).toThrow(
+      'Una línea de combo todavía no se puede leer como línea de pedido',
+    )
   })
 
   it('lee y valida las opciones de una línea', () => {

@@ -127,6 +127,24 @@ export interface SeedSettings {
   seller: SeedJsonObject
 }
 
+/** Combo del diseño: 2 o 3 productos de grupos distintos con un precio final. */
+export interface SeedCombo {
+  /** Id del combo en el mock (`cmb-duo-imperial`): de él sale el id UUID v5 de la fila. */
+  key: string
+  /** Nombre visible. */
+  name: string
+  /** Descripción corta. */
+  description: string
+  /** Slugs de los productos, en el orden del combo (de 2 a 3). */
+  productSlugs: readonly string[]
+  /** Precio final del combo, en pesos enteros. */
+  priceArs: number
+  /** Borrador (la tienda no lo ve) o publicado. */
+  status: 'draft' | 'published'
+  /** Orden en la tienda, desde 1. */
+  position: number
+}
+
 /** Opción de envío del checkout. */
 export interface SeedShippingOption {
   /** Método de envío (clave de `shipping_options`). */

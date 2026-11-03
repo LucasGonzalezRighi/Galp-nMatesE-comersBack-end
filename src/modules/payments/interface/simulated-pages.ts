@@ -6,7 +6,7 @@
 
 import { createHash } from 'node:crypto'
 
-import { formatPesos } from '../../orders/domain/format-pesos'
+import { formatPesos } from '../../../shared/domain/format-pesos'
 
 /** Página lista para responder: estado HTTP, HTML y la CSP propia. */
 export interface SimulatorPage {

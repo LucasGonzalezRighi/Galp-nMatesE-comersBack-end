@@ -42,13 +42,51 @@ function toImage(image) {
 }
 
 /**
+ * Pasa los combos del mock a los del seed, por `position`, con las piezas como slugs en el orden
+ * del combo. Las fixtures sin `FIXTURE_COMBOS` (el front antes de los combos) dan `[]`.
+ *
+ * @param {unknown} fixtureCombos - `FIXTURE_COMBOS` de las fixtures, o `undefined`.
+ * @param {Map<string, string>} productSlugs - Id del mock → slug.
+ * @param {Map<string, string>} productGroups - Id del mock → grupo.
+ */
+function mapCombos(fixtureCombos, productSlugs, productGroups) {
+  if (fixtureCombos === undefined) return []
+  check(Array.isArray(fixtureCombos), 'FIXTURE_COMBOS no es una lista')
+  return [...fixtureCombos]
+    .sort((a, b) => a.position - b.position)
+    .map((c) => {
+      check(['draft', 'published'].includes(c.status), `el combo ${c.id} tiene estado ${c.status}`)
+      check(
+        c.productIds.length >= 2 && c.productIds.length <= 3,
+        `el combo ${c.id} no lleva de 2 a 3 productos`,
+      )
+      const comboProductSlugs = c.productIds.map((/** @type {string} */ id) => {
+        const slug = productSlugs.get(id)
+        check(slug !== undefined, `el combo ${c.id} apunta a ${id}`)
+        return slug
+      })
+      const groups = c.productIds.map((/** @type {string} */ id) => productGroups.get(id))
+      check(new Set(groups).size === groups.length, `el combo ${c.id} repite un grupo`)
+      return {
+        key: c.id,
+        name: c.name,
+        description: c.description,
+        productSlugs: comboProductSlugs,
+        priceArs: c.priceArs,
+        status: c.status,
+        position: c.position,
+      }
+    })
+}
+
+/**
  * Pasa las fixtures del mock a los datos del seed.
  *
  * @param {Record<string, any>} fixtures - Módulo `index.ts` de las fixtures del front.
  */
 function mapFixtures(fixtures) {
   const { FIXTURE_CATEGORIES, FIXTURE_PRODUCTS, FIXTURE_REVIEWS, FIXTURE_CONTENT } = fixtures
-  const { FIXTURE_SETTINGS } = fixtures
+  const { FIXTURE_SETTINGS, FIXTURE_COMBOS } = fixtures
   check(Array.isArray(FIXTURE_CATEGORIES), 'falta FIXTURE_CATEGORIES')
   check(Array.isArray(FIXTURE_PRODUCTS), 'falta FIXTURE_PRODUCTS')
   check(Array.isArray(FIXTURE_REVIEWS), 'falta FIXTURE_REVIEWS')
@@ -59,6 +97,12 @@ function mapFixtures(fixtures) {
   const categorySlugs = new Map(FIXTURE_CATEGORIES.map((c) => [c.id, c.slug]))
   /** @type {Map<string, string>} id del mock → slug */
   const productSlugs = new Map(FIXTURE_PRODUCTS.map((p) => [p.id, p.slug]))
+  /** @type {Map<string, string>} id del mock → grupo de su línea */
+  const categoryGroups = new Map(FIXTURE_CATEGORIES.map((c) => [c.id, c.group]))
+  /** @type {Map<string, string>} id del mock → grupo */
+  const productGroups = new Map(
+    FIXTURE_PRODUCTS.map((p) => [p.id, categoryGroups.get(p.categoryId) ?? '']),
+  )
 
   const categories = [...FIXTURE_CATEGORIES]
     .sort((a, b) => a.position - b.position)
@@ -138,7 +182,9 @@ function mapFixtures(fixtures) {
     enabled: o.enabled,
   }))
 
-  return { categories, products, reviews, content, settings, shippingOptions }
+  const combos = mapCombos(FIXTURE_COMBOS, productSlugs, productGroups)
+
+  return { categories, products, reviews, content, settings, shippingOptions, combos }
 }
 
 /**
@@ -216,17 +262,31 @@ async function main() {
         value: data.shippingOptions,
       },
     ]),
+    render('combos.ts', [
+      {
+        name: 'SEED_COMBOS',
+        type: 'readonly SeedCombo[]',
+        doc: 'Combos del diseño, por `position`, con sus piezas en el orden del combo.',
+        value: data.combos,
+      },
+    ]),
   ])
   for (const { filepath, code } of files) await writeFile(filepath, code)
 
   const featured = data.reviews.filter((r) => r.featured).length
   const soldOut = data.products.filter((p) => p.onHand === 0).length
+  const publishedCombos = data.combos.filter((c) => c.status === 'published').length
+  const combos =
+    fixtures.FIXTURE_COMBOS === undefined
+      ? '  Las fixtures no exportan FIXTURE_COMBOS: 0 combos (SEED_COMBOS = []).\n'
+      : `  ${String(data.combos.length)} combos (${String(publishedCombos)} publicados).\n`
   process.stdout.write(
     `Fixtures importadas desde ${fixturesPath}:\n` +
       `  ${String(data.categories.length)} categorías, ${String(data.products.length)} productos` +
       ` (${String(soldOut)} agotados), ${String(data.reviews.length)} reseñas` +
       ` (${String(featured)} destacadas), ${String(data.content.length)} contenidos,` +
-      ` ${String(data.shippingOptions.length)} opciones de envío.\n`,
+      ` ${String(data.shippingOptions.length)} opciones de envío.\n` +
+      combos,
   )
 }
 

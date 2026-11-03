@@ -2,7 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { argon2id, hash, verify } from 'argon2'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { seed } from '../../prisma/seed'
+import { comboSeedId, seed } from '../../prisma/seed'
 import { SEED_ADMIN } from '../../prisma/seed-data/admin'
 import { PrismaClient } from '../../src/generated/prisma/client'
 import { startContainers, type TestContainers } from '../support/containers'
@@ -19,11 +19,13 @@ async function countAll(db: PrismaClient): Promise<Record<string, number>> {
       db.inventory.count(),
       db.review.count(),
     ])
-  const [contentBlocks, settings, shippingOptions, users] = await Promise.all([
+  const [contentBlocks, settings, shippingOptions, users, combos, comboItems] = await Promise.all([
     db.contentBlock.count(),
     db.settings.count(),
     db.shippingOption.count(),
     db.user.count(),
+    db.combo.count(),
+    db.comboItem.count(),
   ])
   return {
     categories,
@@ -37,6 +39,8 @@ async function countAll(db: PrismaClient): Promise<Record<string, number>> {
     settings,
     shippingOptions,
     users,
+    combos,
+    comboItems,
   }
 }
 
@@ -80,6 +84,7 @@ describe('seed', () => {
       products: 27,
       reviews: 18,
       contentBlocks: 7,
+      combos: 5,
       users: 1,
     })
     expect(second).toEqual(first)
@@ -96,6 +101,8 @@ describe('seed', () => {
       settings: 1,
       shippingOptions: 3,
       users: 1,
+      combos: 5,
+      comboItems: 11,
     })
   })
 
@@ -182,6 +189,76 @@ describe('seed', () => {
       ['branch', 4900],
       ['pickup', 0],
     ])
+  })
+
+  it('guarda los combos del diseño por posición, con sus piezas en el orden del combo', async () => {
+    const combos = await db().combo.findMany({
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      include: { items: { orderBy: { position: 'asc' }, include: { product: true } } },
+    })
+    expect(combos.map((c) => [c.position, c.name, c.status, c.priceArs])).toEqual([
+      [1, 'Dúo Imperial', 'published', 61999],
+      [2, 'Camionero y Canarias', 'published', 31499],
+      [3, 'Torpedo completo', 'published', 67999],
+      [4, 'Bombilla y yerba', 'published', 34999],
+      [5, 'Galleta y Canarias', 'draft', 33999],
+    ])
+    expect(combos[0]?.id).toBe(comboSeedId({ key: 'cmb-duo-imperial' }))
+    expect(combos[4]?.id).toBe(comboSeedId({ key: 'cmb-galleta-y-canarias' }))
+
+    const torpedo = combos.find((c) => c.name === 'Torpedo completo')
+    expect(torpedo?.items.map((i) => [i.position, i.product.slug])).toEqual([
+      [1, 'mate-torpedo-virola-de-alpaca-cincelada'],
+      [2, 'bombillon-100-alpaca'],
+      [3, 'yerba-canarias-serena-1-kg'],
+    ])
+    const galleta = combos.find((c) => c.name === 'Galleta y Canarias')
+    expect(galleta?.items.map((i) => i.product.slug)).toEqual([
+      'mate-galleta',
+      'yerba-canarias-1-kg',
+    ])
+  })
+
+  it('una nueva corrida repone los combos del diseño y no toca los del dashboard', async () => {
+    const duoId = comboSeedId({ key: 'cmb-duo-imperial' })
+    const yerba = await db().product.findUniqueOrThrow({ where: { slug: 'yerba-canarias-1-kg' } })
+    const mate = await db().product.findUniqueOrThrow({ where: { slug: 'mate-galleta' } })
+    await db().combo.update({ where: { id: duoId }, data: { name: 'Otro nombre', position: 9 } })
+    await db().comboItem.deleteMany({ where: { comboId: duoId, position: 2 } })
+    const own = await db().combo.create({
+      data: {
+        name: 'Combo del dashboard',
+        description: 'Creado a mano',
+        priceArs: 30000,
+        status: 'published',
+        position: 6,
+        items: {
+          create: [
+            { position: 1, productId: yerba.id },
+            { position: 2, productId: mate.id },
+          ],
+        },
+      },
+    })
+
+    await expect(seed(db())).resolves.toMatchObject({ combos: 5 })
+
+    const duo = await db().combo.findUniqueOrThrow({
+      where: { id: duoId },
+      include: { items: { orderBy: { position: 'asc' }, include: { product: true } } },
+    })
+    expect(duo).toMatchObject({ name: 'Dúo Imperial', position: 1 })
+    expect(duo.items.map((i) => i.product.slug)).toEqual([
+      'mate-imperial-premium',
+      'bombillon-premium-curvo',
+    ])
+    const kept = await db().combo.findUniqueOrThrow({
+      where: { id: own.id },
+      include: { items: { orderBy: { position: 'asc' } } },
+    })
+    expect(kept).toMatchObject({ name: 'Combo del dashboard', position: 6 })
+    expect(kept.items.map((i) => i.productId)).toEqual([yerba.id, mate.id])
+    await db().combo.delete({ where: { id: own.id } })
   })
 
   it('siembra el admin con argon2id y deja en null los vínculos de reseñas y contenidos', async () => {

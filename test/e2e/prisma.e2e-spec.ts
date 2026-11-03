@@ -569,4 +569,117 @@ describe('prisma', () => {
     expect(saved.receivedAt).toBeInstanceOf(Date)
     await expect(db.webhookEvent.create({ data: event })).rejects.toMatchObject({ code: 'P2002' })
   })
+
+  it('la migración b5c crea combos y sus piezas, y suma combo a line_type', async () => {
+    const db = prisma()
+    const lineTypes = await db.$queryRaw<
+      { value: string }[]
+    >`SELECT unnest(enum_range(NULL::line_type))::text AS value`
+    expect(lineTypes.map((t) => t.value)).toEqual(['product', 'kit', 'combo'])
+    const comboStatuses = await db.$queryRaw<
+      { value: string }[]
+    >`SELECT unnest(enum_range(NULL::combo_status))::text AS value`
+    expect(comboStatuses.map((s) => s.value)).toEqual(['draft', 'published'])
+
+    const category = await db.category.create({
+      data: { slug: 'linea-combos', name: 'Línea combos', group: 'mate', blurb: 'B', position: 9 },
+    })
+    const product = await db.product.create({
+      data: { slug: 'mate-combo', categoryId: category.id, name: 'Mate combo', description: 'D' },
+    })
+    const order = await db.order.create({ data: orderData('GLP-10010') })
+    const line = await db.orderItem.create({
+      data: {
+        orderId: order.id,
+        lineType: 'combo',
+        productId: null,
+        productSlug: null,
+        name: 'Dúo Imperial',
+        detail: 'Mate combo + Bombillón',
+        quantity: 1,
+        unitPriceArs: 68998,
+        kitSavingsArs: 6999,
+        totalArs: 61999,
+        options: { leather: 'Negro', ferrule: 'Acero' },
+        position: 1,
+        components: {
+          create: [
+            {
+              role: 'mate',
+              productId: product.id,
+              slug: 'mate-combo',
+              name: 'Mate combo',
+              unitPriceArs: 39999,
+            },
+          ],
+        },
+      },
+      include: { components: true },
+    })
+    expect(line.lineType).toBe('combo')
+    // Sin `position` explícita una pieza queda en 0 (el pedido la escribe en el orden del combo).
+    expect(line.components.map((c) => c.position)).toEqual([0])
+    await db.order.delete({ where: { id: order.id } })
+  })
+
+  it('los CHECK de combos rechazan precio y posiciones fuera de rango', async () => {
+    const db = prisma()
+    const combo = { name: 'Combo', description: 'D', priceArs: 61999, position: 1 }
+
+    for (const priceArs of [0, 100_000_000]) {
+      await expect(db.combo.create({ data: { ...combo, priceArs } })).rejects.toThrow(
+        /combos_price_ars_check/,
+      )
+    }
+    await expect(db.combo.create({ data: { ...combo, position: 0 } })).rejects.toThrow(
+      /combos_position_check/,
+    )
+
+    const saved = await db.combo.create({ data: { ...combo, priceArs: 99_999_999 } })
+    expect(saved.status).toBe('draft')
+    const product = await db.product.findUniqueOrThrow({ where: { slug: 'mate-combo' } })
+    for (const position of [0, 4]) {
+      await expect(
+        db.comboItem.create({ data: { comboId: saved.id, position, productId: product.id } }),
+      ).rejects.toThrow(/combo_items_position_check/)
+    }
+    await db.comboItem.create({ data: { comboId: saved.id, position: 1, productId: product.id } })
+    // El mismo producto dos veces en un combo choca con el único (combo_id, product_id).
+    await expect(
+      db.comboItem.create({ data: { comboId: saved.id, position: 2, productId: product.id } }),
+    ).rejects.toMatchObject({ code: 'P2002' })
+    await db.combo.delete({ where: { id: saved.id } })
+  })
+
+  it('un producto que está en un combo no se borra; borrar el combo borra sus piezas', async () => {
+    const db = prisma()
+    const category = await db.category.findUniqueOrThrow({ where: { slug: 'linea-combos' } })
+    const yerba = await db.product.create({
+      data: { slug: 'yerba-combo', categoryId: category.id, name: 'Yerba combo', description: 'D' },
+    })
+    const mate = await db.product.findUniqueOrThrow({ where: { slug: 'mate-combo' } })
+    const combo = await db.combo.create({
+      data: {
+        name: 'Mate y yerba',
+        description: 'D',
+        priceArs: 45000,
+        status: 'published',
+        position: 1,
+        items: {
+          create: [
+            { position: 1, productId: yerba.id },
+            { position: 2, productId: mate.id },
+          ],
+        },
+      },
+    })
+
+    await expect(db.product.delete({ where: { id: yerba.id } })).rejects.toMatchObject({
+      code: 'P2003',
+    })
+
+    await db.combo.delete({ where: { id: combo.id } })
+    expect(await db.comboItem.count({ where: { comboId: combo.id } })).toBe(0)
+    await db.product.delete({ where: { id: yerba.id } })
+  })
 })
