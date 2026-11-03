@@ -443,4 +443,130 @@ describe('prisma', () => {
       orderItemId: null,
     })
   })
+
+  it('la migración b5 crea pagos, devoluciones y eventos de webhook con sus enums', async () => {
+    const db = prisma()
+    const tables = await db.$queryRaw<{ table_name: string }[]>`
+      SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name IN ('payments', 'refunds', 'webhook_events')`
+    expect(tables.map((t) => t.table_name).sort()).toEqual([
+      'payments',
+      'refunds',
+      'webhook_events',
+    ])
+
+    const enums = await db.$queryRaw<{ name: string; labels: string }[]>`
+      SELECT t.typname AS name, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS labels
+        FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid
+        WHERE t.typname IN ('payment_provider', 'refund_status', 'refund_reason')
+        GROUP BY t.typname ORDER BY t.typname`
+    expect(enums).toEqual([
+      { name: 'payment_provider', labels: 'mercadopago' },
+      { name: 'refund_reason', labels: 'duplicate_payment,late_approval,manual' },
+      { name: 'refund_status', labels: 'pending,approved,failed' },
+    ])
+
+    const indexes = await db.$queryRaw<{ indexname: string; indexdef: string }[]>`
+      SELECT indexname, indexdef FROM pg_indexes WHERE tablename IN ('payments', 'webhook_events')
+        ORDER BY indexname`
+    expect(indexes.map((i) => i.indexname)).toEqual([
+      'payments_active_per_order_idx',
+      'payments_idempotency_key_key',
+      'payments_order_id_created_at_idx',
+      'payments_pkey',
+      'payments_provider_preference_id_idx',
+      'payments_provider_provider_payment_id_key',
+      'webhook_events_pkey',
+      'webhook_events_processed_at_idx',
+      'webhook_events_provider_event_id_key',
+    ])
+    const active = indexes.find((i) => i.indexname === 'payments_active_per_order_idx')
+    expect(active?.indexdef).toContain('UNIQUE')
+    expect(active?.indexdef).toMatch(/\(order_id\) WHERE \(?is_active\)?$/)
+  })
+
+  it('un solo intento de pago activo por pedido; claves e ids de Mercado Pago únicos', async () => {
+    const db = prisma()
+    const order = await db.order.create({ data: orderData('GLP-10003') })
+    const attempt = { orderId: order.id, method: 'card', amountArs: order.totalArs } as const
+
+    const first = await db.payment.create({
+      data: { ...attempt, idempotencyKey: 'clave-1', providerPaymentId: '1234567890' },
+    })
+    expect(first).toMatchObject({
+      provider: 'mercadopago',
+      status: 'none',
+      isActive: true,
+      refundedArs: 0,
+      providerStatus: null,
+      initPoint: null,
+      challengeUrl: null,
+      approvedAt: null,
+    })
+
+    // Dos intentos activos del mismo pedido: lo frena el índice único parcial.
+    await expect(
+      db.payment.create({ data: { ...attempt, idempotencyKey: 'clave-2' } }),
+    ).rejects.toThrow(/payments_active_per_order_idx/)
+
+    // Los inactivos no cuentan: con el primero inactivo entra otro activo y cualquier inactivo.
+    await db.payment.update({
+      where: { id: first.id },
+      data: { isActive: false, status: 'rejected' },
+    })
+    const second = await db.payment.create({ data: { ...attempt, idempotencyKey: 'clave-2' } })
+    await db.payment.create({ data: { ...attempt, idempotencyKey: 'clave-3', isActive: false } })
+    expect(await db.payment.count({ where: { orderId: order.id } })).toBe(3)
+
+    // La clave idempotente y el par (proveedor, id del pago en MP) no se repiten; sin id de MP
+    // (varios null) sí.
+    await expect(
+      db.payment.create({ data: { ...attempt, idempotencyKey: 'clave-1', isActive: false } }),
+    ).rejects.toMatchObject({ code: 'P2002' })
+    await expect(
+      db.payment.update({ where: { id: second.id }, data: { providerPaymentId: '1234567890' } }),
+    ).rejects.toMatchObject({ code: 'P2002' })
+
+    const refund = await db.refund.create({
+      data: {
+        paymentId: first.id,
+        amountArs: first.amountArs,
+        reason: 'duplicate_payment',
+        idempotencyKey: 'devolucion-1',
+      },
+    })
+    expect(refund).toMatchObject({ status: 'pending', providerRefundId: null, lastError: null })
+    await expect(
+      db.refund.create({
+        data: {
+          paymentId: first.id,
+          amountArs: 1,
+          reason: 'manual',
+          idempotencyKey: 'devolucion-1',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' })
+
+    // Borrar el pedido arrastra sus intentos y las devoluciones de esos intentos.
+    await db.order.delete({ where: { id: order.id } })
+    expect(await db.payment.count({ where: { orderId: order.id } })).toBe(0)
+    expect(await db.refund.count({ where: { paymentId: first.id } })).toBe(0)
+  })
+
+  it('un evento de webhook se registra una sola vez por proveedor e id', async () => {
+    const db = prisma()
+    const event = {
+      provider: 'mercadopago',
+      eventId: '12345',
+      type: 'payment',
+      action: 'payment.updated',
+      resourceId: '1234567890',
+      signatureValid: true,
+      payload: { id: 12345, type: 'payment', data: { id: '1234567890' } },
+    } as const
+    const saved = await db.webhookEvent.create({ data: event })
+    expect(saved).toMatchObject({ attempts: 0, processedAt: null, lastError: null })
+    expect(saved.receivedAt).toBeInstanceOf(Date)
+    await expect(db.webhookEvent.create({ data: event })).rejects.toMatchObject({ code: 'P2002' })
+  })
 })

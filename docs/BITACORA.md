@@ -96,6 +96,7 @@ Todas las del plan, sin cambios salvo las anotadas.
 | `tsx` / `yaml`                                                                        | 4.23.15 / 2.9.1                                                   |
 | `@types/node` / `@types/express`                                                      | 22.20.5 / 5.0.6                                                   |
 | `argon2` / `cookie-parser` / `@types/cookie-parser` (B3, Task 1)                      | 0.45.1 / 1.4.7 / 1.4.10                                           |
+| `mercadopago` (B5, Task 1; sin dependencias, CommonJS con tipos propios)              | 3.6.1                                                             |
 | Imágenes Docker (compose y Testcontainers) / CI                                       | `postgres:17-alpine`, `redis:8-alpine` / `postgres:17`, `redis:8` |
 
 Fuera del plan: `ioredis`, el throttler y su storage entraron en la Task 1; `pg`, `tsx` y

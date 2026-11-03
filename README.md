@@ -258,6 +258,24 @@ fallo posterior sí, porque una secuencia no vuelve atrás. `npm run db:reset` l
 `GLP-09001…09012` quedan para la demo del admin (B6). El seed no siembra pedidos y nunca baja
 `on_hand` por debajo de lo reservado: deja la fila como está y lo avisa.
 
+## Pagos con Mercado Pago
+
+Desde B5 el módulo `payments` cobra con Mercado Pago. Sin credenciales todo corre con el
+simulador del back (`MP_MODE=simulated`, el valor por defecto): así corren los E2E, el contrato y
+el desarrollo local. Las variables (detalle en `.env.example`):
+
+| Variable                  | Por defecto    | Notas                                                                              |
+| ------------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| `MP_MODE`                 | `simulated`    | `simulated` o `live`. Con `NODE_ENV=production` tiene que ser `live`.              |
+| `MP_ACCESS_TOKEN`         | (sin valor)    | Access token de Mercado Pago. Obligatorio con `live`; nunca se loguea.             |
+| `MP_WEBHOOK_SECRET`       | (sin valor)    | Clave secreta de las notificaciones (firma `x-signature`). Obligatoria con `live`. |
+| `PUBLIC_API_ORIGIN`       | (sin valor)    | Origen público HTTPS del back, sin ruta. Obligatorio con `live`.                   |
+| `MP_STATEMENT_DESCRIPTOR` | `GALPON MATES` | Texto del resumen de la tarjeta (hasta 13 caracteres).                             |
+
+Si con `MP_MODE=live` falta alguna de las tres, la API no arranca y el error lo dice. Una
+variable definida pero vacía (`MP_ACCESS_TOKEN=`) también es un error: comentala en el `.env`.
+La clave pública (`NEXT_PUBLIC_MP_PUBLIC_KEY`) va en la tienda, no en el back.
+
 ## Scripts
 
 | Script                   | Qué hace                                                                          |

@@ -12,6 +12,8 @@ const BASE: Env = {
   ADMIN_ORIGIN: 'http://localhost:5173',
   STORE_ORIGIN: 'http://localhost:3000',
   LOG_LEVEL: 'warn',
+  MP_MODE: 'live',
+  MP_STATEMENT_DESCRIPTOR: 'GALPON MATES',
 }
 
 describe('buildPinoHttpOptions', () => {

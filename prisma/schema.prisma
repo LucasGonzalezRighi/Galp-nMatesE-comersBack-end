@@ -1,8 +1,8 @@
 // Esquema de Galpón Mates (spec del back §4). Tablas en snake_case con @map/@@map; ids uuid v7
 // generados por la app; montos enteros en pesos con sufijo _ars; fechas timestamptz.
 // Lo que Prisma no sabe expresar (extensión citext, CHECK, índices parciales y la secuencia de
-// números de pedido) está escrito a mano en las migraciones b2_catalogo_contenido, b3_identidad y
-// b4_pedidos.
+// números de pedido) está escrito a mano en las migraciones b2_catalogo_contenido, b3_identidad,
+// b4_pedidos y b5_pagos.
 
 generator client {
   provider     = "prisma-client"
@@ -172,6 +172,33 @@ enum ReservationStatus {
   released
 
   @@map("reservation_status")
+}
+
+/// Pasarela de un intento de pago o de un evento de webhook (por ahora solo Mercado Pago).
+enum PaymentProvider {
+  mercadopago
+
+  @@map("payment_provider")
+}
+
+/// Estado de una devolución: `pending` antes de pedirla a la pasarela, `approved` cuando la
+/// confirma y `failed` si la rechazó (queda la alerta "Devolvelo desde Mercado Pago" del admin).
+enum RefundStatus {
+  pending
+  approved
+  failed
+
+  @@map("refund_status")
+}
+
+/// Por qué se devuelve un pago: un segundo pago aprobado de un pedido ya pagado, un pago aprobado
+/// después de que el pedido venció o se canceló, o una devolución hecha a mano desde el admin.
+enum RefundReason {
+  duplicate_payment
+  late_approval
+  manual
+
+  @@map("refund_reason")
 }
 
 // ── Identidad (spec §4.1) ───────────────────────────────────────────────────────────────────
@@ -434,6 +461,7 @@ model Order {
   history      OrderStatusHistory[]
   shipment     Shipment?
   reservations StockReservation[]
+  payments     Payment[]
 
   @@index([customerId, placedAt])
   @@index([status, reservedUntil])
@@ -517,6 +545,105 @@ model Shipment {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@map("shipments")
+}
+
+// ── Pagos (spec §4.4) ───────────────────────────────────────────────────────────────────────
+
+/// Intento de pago de un pedido con la pasarela, uno por fila. `status` es el estado ya traducido
+/// (el mismo enum que `orders.payment_status`); `providerStatus` y `statusDetail`, los crudos de
+/// Mercado Pago. Solo un intento activo por pedido (`isActive`: `none`, `pending` o
+/// `action_required`): índice único parcial `payments_active_per_order_idx` en la migración.
+model Payment {
+  id                   String          @id @default(uuid(7)) @db.Uuid
+  orderId              String          @map("order_id") @db.Uuid
+  provider             PaymentProvider @default(mercadopago)
+  method               PaymentMethod
+  status               PaymentStatus   @default(none)
+  /// `status` de Mercado Pago (`approved`, `in_process`, `rejected`…).
+  providerStatus       String?         @map("provider_status")
+  /// `status_detail` de Mercado Pago (`accredited`, `pending_challenge`, `cc_rejected_…`).
+  statusDetail         String?         @map("status_detail")
+  /// Id del pago en Mercado Pago; `null` mientras una preferencia no tiene pago.
+  providerPaymentId    String?         @map("provider_payment_id")
+  /// Id de la preferencia de Checkout Pro (solo `mp_redirect`).
+  providerPreferenceId String?         @map("provider_preference_id")
+  /// URL de Checkout Pro a la que se manda al comprador (solo `mp_redirect`).
+  initPoint            String?         @map("init_point")
+  /// URL del desafío 3-D Secure, mientras el intento está `action_required`.
+  challengeUrl         String?         @map("challenge_url")
+  /// Monto del intento (el `totalArs` del pedido al crearlo).
+  amountArs            Int             @map("amount_ars")
+  /// Total devuelto de este pago.
+  refundedArs          Int             @default(0) @map("refunded_ars")
+  installments         Int?
+  /// `payment_type_id` de Mercado Pago (`credit_card`, `debit_card`, `account_money`…).
+  paymentTypeId        String?         @map("payment_type_id")
+  /// Marca de la tarjeta (`visa`, `master`…).
+  cardBrand            String?         @map("card_brand")
+  cardLastFour         String?         @map("card_last_four")
+  issuerId             String?         @map("issuer_id")
+  payerEmail           String?         @map("payer_email")
+  /// `Idempotency-Key` que mandó la tienda; se reenvía a Mercado Pago como `X-Idempotency-Key`.
+  idempotencyKey       String          @unique @map("idempotency_key")
+  isActive             Boolean         @default(true) @map("is_active")
+  approvedAt           DateTime?       @map("approved_at") @db.Timestamptz(3)
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@unique([provider, providerPaymentId])
+  @@index([orderId, createdAt])
+  @@index([providerPreferenceId])
+  @@map("payments")
+}
+
+/// Devolución de un pago. La fila se crea (`pending`, con su propia clave idempotente) antes de
+/// pedirla a la pasarela; si la pasarela falla queda `failed` con `lastError`.
+model Refund {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  paymentId        String       @map("payment_id") @db.Uuid
+  /// Id de la devolución en Mercado Pago, cuando la confirma.
+  providerRefundId String?      @unique @map("provider_refund_id")
+  amountArs        Int          @map("amount_ars")
+  status           RefundStatus @default(pending)
+  reason           RefundReason
+  /// `X-Idempotency-Key` de la devolución (distinta de la del pago).
+  idempotencyKey   String       @unique @map("idempotency_key")
+  lastError        String?      @map("last_error")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@map("refunds")
+}
+
+/// Notificación recibida de la pasarela, registrada una sola vez por `(provider, eventId)`
+/// (`eventId`: el `id` del cuerpo o, si no viene, el `x-request-id`) y procesada en la cola
+/// `payment-webhooks`.
+model WebhookEvent {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  provider       PaymentProvider
+  eventId        String          @map("event_id")
+  /// `type` de la notificación (`payment`, `merchant_order`…).
+  type           String
+  /// `action` de la notificación (`payment.created`, `payment.updated`…).
+  action         String?
+  /// `data.id`: el id del recurso avisado (para `payment`, el id del pago en Mercado Pago).
+  resourceId     String?         @map("resource_id")
+  signatureValid Boolean         @map("signature_valid")
+  /// Cuerpo de la notificación tal como llegó.
+  payload        Json
+  receivedAt     DateTime        @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt    DateTime?       @map("processed_at") @db.Timestamptz(3)
+  attempts       Int             @default(0)
+  lastError      String?         @map("last_error")
+
+  @@unique([provider, eventId])
+  @@index([processedAt])
+  @@map("webhook_events")
 }
 
 // ── Comunidad, soporte y plataforma (spec §4.5) ─────────────────────────────────────────────
