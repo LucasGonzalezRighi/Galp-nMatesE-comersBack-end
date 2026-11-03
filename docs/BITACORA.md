@@ -1068,7 +1068,10 @@ https://*.mercadopago.com https://*.mercadolibre.com https:` no admite
 | `38c6053` | Revisión de la Task 4: claves idempotentes propias para cancelar y vencer                    |
 | `2cea8fb` | Rutas de pago y webhook del contrato, simulador y E2E (Task 5)                               |
 | `16bb8b8` | Revisión de la Task 5: reintento tras un 502 o un 422 y validar antes de cancelar            |
-| Task 6    | Esta bitácora, el ADR 0005 y la guía de pagos y del sandbox del README                       |
+| `d4b5e72` | Esta bitácora, el ADR 0005 y la guía de pagos y del sandbox del README (Task 6)              |
+| `d558a69` | Revisión de la Task 6: `STORE_ORIGIN` HTTPS público para Checkout Pro                        |
+| `dd68f40` | Cierre: reseñas del seed al día con el front (18 y 10 destacadas) y menores de docs          |
+| `dc51361` | Cierre: reintento con la misma clave retoma el intento; pedido vencido devuelve aprobados    |
 
 ### Lo que queda para B6 en adelante
 
@@ -1087,6 +1090,10 @@ https://*.mercadopago.com https://*.mercadolibre.com https:` no admite
 
 **Casos raros anotados (sin arreglo, inofensivos):**
 
+- Un pedido `pending_payment` con un intento `approved` que no se pudo marcar pagado se retoma con
+  el reintento del job, el webhook repetido, el reproceso de notificaciones (de 5 min a 6 h) o un
+  reintento de la tienda con la misma clave; pasadas 6 h ningún barrido lo mira (la conciliación
+  solo lista `pending` y `action_required`).
 - Si el aviso de Mercado Pago llega antes que la respuesta del cobro con tarjeta, el intento de la
   tarjeta queda activo en `none` sobre un pedido ya pagado: un pago nuevo da 409 y
   `payment_status` sigue `approved`.
