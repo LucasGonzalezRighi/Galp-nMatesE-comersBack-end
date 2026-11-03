@@ -8,8 +8,9 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 - **Bitácora** (qué se hizo en cada pieza, decisiones y versiones): [`docs/BITACORA.md`](docs/BITACORA.md).
 - **Decisiones de arquitectura:** [ADR 0001 · monolito hexagonal](docs/adr/0001-nest-hexagonal-monolito.md),
   [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md),
-  [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md) y
-  [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md).
+  [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md),
+  [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md) y
+  [ADR 0005 · pagos con Mercado Pago](docs/adr/0005-pagos-con-mercado-pago.md).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -24,7 +25,7 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 
 | Qué                    | Dónde                   | Notas                                                                          |
 | ---------------------- | ----------------------- | ------------------------------------------------------------------------------ |
-| Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN`: arma el link de recuperación. Llega al back desde su servidor. |
+| Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN`: link de recuperación y vuelta del pago. Llega desde su server. |
 | Admin (Vite)           | `http://localhost:5173` | `ADMIN_ORIGIN`. El único origen con CORS.                                      |
 | Este back              | `http://localhost:3001` | `PORT`. Prefijo `/api/v1`; Swagger UI en `/api/docs`.                          |
 | Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`).                                            |
@@ -83,9 +84,10 @@ difiere del contrato o si Swagger expone una ruta que no está en `IMPLEMENTED_P
 (`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 41
 implementadas y 36 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
 `requestBody`. Además corre los casos compartidos de validación del front
-(`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad y del checkout,
-contacto y envío (`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan
-los mismos errores en los dos lados.
+(`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad, del checkout
+(contacto y envío) y del documento de quien paga con tarjeta
+(`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan los mismos errores
+en los dos lados.
 
 Para ver las diferencias de una ruta: `node scripts/openapi-diff.mjs products/{slug}` (en Git Bash,
 sin `/` inicial o entre comillas, para que no la convierta en una ruta de Windows).
@@ -94,19 +96,23 @@ sin `/` inicial o entre comillas, para que no la convierta en una ruta de Window
 
 Las 13 lecturas públicas del contrato (`/categories`, `/products…`, `/reviews/featured`,
 `/content/*`, `/settings/public`) están implementadas, sin límite de pedidos por IP (la tienda las
-pide desde un solo servidor). Desde B3 funcionan la cuenta y el admin, y desde B4 el carrito, el
-checkout hasta elegir el medio de pago y los pedidos (ver "Pedidos y stock"). Probadas contra
-Postgres y Redis reales: los E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada
-pieza en [`docs/BITACORA.md`](docs/BITACORA.md)).
+pide desde un solo servidor). Desde B3 funcionan la cuenta y el admin, desde B4 el carrito, el
+checkout y los pedidos (ver "Pedidos y stock"), y desde B5 el pago con Mercado Pago contra el
+simulador del back (ver "Pagos con Mercado Pago"). Probadas contra Postgres y Redis reales: los
+E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada pieza en
+[`docs/BITACORA.md`](docs/BITACORA.md)).
 
 1. Acá, con Docker Desktop abierto: `npm run db:up`, `npm run db:migrate`, `npm run db:seed` y
-   `npm run dev`. Si vas a probar la recuperación de contraseña desde la tienda compilada, arrancá
-   el back con `STORE_ORIGIN=http://localhost:4300 npm run dev`: así el link del log apunta ahí.
+   `STORE_ORIGIN=http://localhost:4300 npm run dev`. `STORE_ORIGIN` tiene que ser el origen de la
+   tienda compilada: ahí vuelve el comprador después del simulador de Mercado Pago, y ahí apunta
+   el link de recuperación de contraseña del log.
 
-2. Desde `../frontend`, compilar y servir la tienda en otro puerto, con el entorno exportado en
-   esa terminal. El 3000 queda para el `next dev` de siempre, pero lanzalo desde otra terminal:
-   los `export` quedan vivos en esta y un `next dev` lanzado acá también iría en modo `live`. No
-   uses un `apps/store/.env.local`: el `next dev` también lo leería y quedaría en modo `live`.
+2. Desde `../frontend`, con el back andando (el build lee el catálogo y falla con
+   `Failed to collect page data` si no lo encuentra), compilar y servir la tienda en otro puerto,
+   con el entorno exportado en esa terminal. El 3000 queda para el `next dev` de siempre, pero
+   lanzalo desde otra terminal: los `export` quedan vivos en esta y un `next dev` lanzado acá
+   también iría en modo `live`. No uses un `apps/store/.env.local`: el `next dev` también lo leería
+   y quedaría en modo `live`.
 
    ```bash
    export API_MODE=live NEXT_PUBLIC_API_MODE=live API_BASE_URL=http://localhost:3001 \
@@ -118,17 +124,19 @@ pieza en [`docs/BITACORA.md`](docs/BITACORA.md)).
 
    `http://localhost:4300/` y `/tienda` tienen que mostrar los 27 productos del seed. La cuenta
    (registro, ingreso, direcciones, recuperación) funciona contra el back, y también el carrito,
-   el checkout hasta elegir el medio de pago (que crea el pedido y reserva el stock), el resultado
-   sin pagar o vencido y "Mis pedidos". Al terminar, cerrá `next start` y `npm run dev`, y
-   `npm run db:down` si no vas a seguir.
+   el checkout (que crea el pedido y reserva el stock), el pago con Mercado Pago (la página del
+   simulador del back: Aprobar, Dejar pendiente o Rechazar), el resultado de cada caso y "Mis
+   pedidos". Al terminar, cerrá `next start` y `npm run dev`, y `npm run db:down` si no vas a
+   seguir.
 
 Qué falla todavía en modo `live`, y en qué pieza llega:
 
-- **Pagos (B5):** "Pagar $… con Mercado Pago" da 404 en
-  `POST /orders/{number}/payments/mercadopago/preference` y muestra "No pudimos iniciar el pago.
-  Probá de nuevo.". Las rutas de la tarjeta (`…/mercadopago/card` e `installments`) tampoco
-  existen todavía. El pedido queda en "Esperando el pago" hasta vencer.
 - **Contacto, arrepentimiento y reseñas nuevas (B7).**
+
+El pago con tarjeta dentro de la tienda no es una falla del back, pero en local no se completa. Con
+la clave pública de mentira, los Secure Fields reales cargan, pero Mercado Pago no reconoce la
+tarjeta y el pedido nunca llega al back (detalle en "Pagos con Mercado Pago"). Se prueba con el
+sandbox o por API.
 
 ## Cuenta y admin
 
@@ -223,7 +231,7 @@ Desde B4 el módulo `orders` implementa las 6 operaciones del carrito y los pedi
   caminos: el job `order.expire` de la cola `order-expiration` (corre en `reservedUntil`), el
   barrido de cada 60 s o la lectura (`GET /orders/{number}`, `GET /me/orders*`, y también
   `POST /cart/quote` y `POST /orders`). Los tres hacen lo mismo y liberan una sola vez. Un pago
-  `pending` o `action_required` no vence (B5).
+  `pending` o `action_required` no vence: lo concilia B5 (ver "Pagos con Mercado Pago").
 - **Leer un pedido:** `GET /orders/{number}` con `X-Order-Token` (`ot_` + 64 hex; la base guarda
   solo su SHA-256 y el log lo tapa) o con la sesión del dueño. Si no, 404 "No encontramos ese
   pedido.", sin distinguir por qué. `GET /me/orders` devuelve 10 por página, del más nuevo al más
@@ -274,7 +282,171 @@ el desarrollo local. Las variables (detalle en `.env.example`):
 
 Si con `MP_MODE=live` falta alguna de las tres, la API no arranca y el error lo dice. Una
 variable definida pero vacía (`MP_ACCESS_TOKEN=`) también es un error: comentala en el `.env`.
-La clave pública (`NEXT_PUBLIC_MP_PUBLIC_KEY`) va en la tienda, no en el back.
+La clave pública (`NEXT_PUBLIC_MP_PUBLIC_KEY`) va en la tienda, no en el back. El porqué del
+diseño está en el [ADR 0005](docs/adr/0005-pagos-con-mercado-pago.md).
+
+### Cómo cobra
+
+Son cinco operaciones del contrato (41 de 77 implementadas). Las cuatro rutas de pago aceptan
+solo el `X-Order-Token` del pedido: sin token, con un token ajeno o con un pedido inexistente
+responden el mismo 404, y no usan la sesión ni `X-CSRF-Token`.
+
+- **Checkout Pro:** `POST /orders/{number}/payments/mercadopago/preference` (con
+  `Idempotency-Key`) devuelve `initPoint`.
+  - La tienda manda al comprador ahí, y Mercado Pago lo devuelve a
+    `${STORE_ORIGIN}/checkout/resultado?pedido=<número>`.
+  - El pedido se paga recién cuando el back lee el pago aprobado: por la notificación, el
+    simulador o la conciliación. Nunca por los parámetros de la vuelta.
+- **Tarjeta:** `POST …/mercadopago/card` (con `Idempotency-Key`) cobra con el token de los Secure
+  Fields y aplica la respuesta en la misma llamada.
+  - Un pago aprobado deja el pedido pagado al instante.
+  - Con 3-D Secure responde `action_required` y `challenge.url`, y la tienda abre ese desafío en
+    un `iframe`.
+- **Cuotas:** `POST …/installments` con `bin` y `paymentTypeId`. Con débito, solo 1 pago.
+- **Cancelar:** `POST /orders/{number}/cancel-payment` cancela el intento en curso (también en
+  Mercado Pago) y responde 204 siempre. El pedido queda vencible y conserva su reserva.
+- **Webhook:** `POST /webhooks/mercadopago` valida `x-signature`, registra el aviso una sola vez,
+  lo procesa en la cola `payment-webhooks` y responde 200 (401 con la firma mal o sin
+  `MP_WEBHOOK_SECRET`).
+
+Hay un solo intento activo por pedido: empezar otro cancela el anterior. Cuando el pago se aprueba:
+
+- El pedido pasa a `paid`.
+- Las reservas pasan a `committed` e `inventory` descuenta `on_hand` y `reserved`.
+- El outbox suma `payment.approved` y `order.paid`.
+
+Un segundo pago aprobado sobre un pedido ya pagado, o uno que llega para un pedido vencido, se
+devuelve solo y queda en `refunds`. El barrido de cada 60 s concilia los pagos en curso: 10
+minutos después de `reserved_until` consulta el pago a Mercado Pago, y a las 48 h, si sigue
+pendiente, lo cancela y el pedido vence.
+
+Para ver los intentos y las devoluciones en el Postgres de compose:
+
+```bash
+docker compose exec -T postgres psql -U galpon -d galpon -c "SELECT o.number, o.status, o.payment_status, p.method, p.status, p.status_detail, p.is_active FROM payments p JOIN orders o ON o.id = p.order_id ORDER BY p.created_at DESC LIMIT 10"
+docker compose exec -T postgres psql -U galpon -d galpon -c "SELECT reason, status, amount_ars, last_error FROM refunds ORDER BY created_at DESC LIMIT 10"
+```
+
+### Modo simulado
+
+Con `MP_MODE=simulated` (y fuera de `production`), el back hace de Mercado Pago:
+
+- **Checkout Pro:** el `initPoint` es una página del back,
+  `http://localhost:3001/api/v1/__simulated/mercadopago/checkout?preference=sim-pref-…` (o la de
+  `PUBLIC_API_ORIGIN`), con el pedido, el total y tres botones:
+  - **Aprobar:** `approved`/`accredited`.
+  - **Dejar pendiente:** `pending`/`pending_waiting_payment`.
+  - **Rechazar:** `rejected`/`cc_rejected_other_reason`.
+
+  Cada botón aplica el resultado como si fuera la notificación y vuelve a la tienda con un 302 a
+  `STORE_ORIGIN`.
+
+- **Tarjeta:** el token simulado es `sim_<TITULAR>_<últimos 4|xxxx>_<32 hex>`, el mismo formato que
+  los campos simulados de la tienda en modo `mock`. Otro token da 422 en `token`.
+
+  | Titular | Resultado                                                                       |
+  | ------- | ------------------------------------------------------------------------------- |
+  | `APRO`  | `approved` / `accredited`: pedido pagado                                        |
+  | `CONT`  | `pending` / `pending_contingency`                                               |
+  | `OTHE`  | `rejected` / `cc_rejected_other_reason` (también cualquier titular desconocido) |
+  | `FUND`  | `rejected` / `cc_rejected_insufficient_amount`                                  |
+  | `SECU`  | `rejected` / `cc_rejected_bad_filled_security_code`                             |
+  | `EXPI`  | `rejected` / `cc_rejected_bad_filled_date`                                      |
+  | `CALL`  | `rejected` / `cc_rejected_call_for_authorize`                                   |
+  | `3DS`   | `action_required`, con el desafío del back en `challenge.url`                   |
+
+  El desafío (`…/__simulated/mercadopago/challenge?payment=…`) tiene **Confirmar** (aprueba) y
+  **Cancelar** (rechaza con `cc_rejected_3ds_challenge`).
+
+- **Cuotas:** de 1 a `installmentsMax` de los ajustes (3 en el seed) sin interés, y 6 y 12 con
+  CFT 45,90 % y TEA 38 %, sobre el total del pedido. Otra cantidad da 422 en `installments`.
+
+**La compra completa desde la tienda compilada** (ver "Probar la tienda contra este back"):
+carrito → checkout → "Mercado Pago" → "Pagar $… con Mercado Pago" → página del simulador → Aprobar
+→ "¡Gracias, …!" y el pedido "Pagado" en "Mis pedidos". Rechazar muestra "El pago no se aprobó",
+y Dejar pendiente muestra "Estamos esperando la confirmación del pago".
+
+Lo que en local no se ve desde la tienda:
+
+- **El formulario de tarjeta en modo `live` usa los Secure Fields reales.** Con la clave pública de
+  mentira, los campos cargan, pero `GET /v1/payment_methods/search` de Mercado Pago responde 404:
+  la tienda marca "Número incompleto", no muestra cuotas y no llama al back.
+- **El desafío 3DS simulado:** su URL es `http://`, y la tienda solo acepta un `challenge.url`
+  `https:` o una ruta propia (su CSP solo enmarca `https:`). Muestra "Falta verificar la compra con
+  tu banco" con "Pagar de nuevo". El desafío se puede abrir en otra pestaña: al confirmarlo, el
+  resultado pasa a aprobado.
+
+Para probar la tarjeta simulada por API, tomá el número y el `orderToken` de la pestaña de la
+compra (en la consola: `JSON.parse(sessionStorage['galpon.order'])`):
+
+```bash
+curl -s http://localhost:3001/api/v1/orders/<número>/payments/mercadopago/card \
+  -H "Content-Type: application/json" -H "X-Order-Token: <orderToken>" \
+  -H "Idempotency-Key: $(node -e "console.log(crypto.randomUUID())")" \
+  -d '{"token":"sim_APRO_3704_0123456789abcdef0123456789abcdef","paymentMethodId":"visa","issuerId":null,"installments":1,"payer":{"email":"<email del pedido>","identification":{"type":"DNI","number":"12345678"}}}'
+```
+
+En `simulated` el webhook responde 401 mientras no haya `MP_WEBHOOK_SECRET`. Para probar la firma
+a mano, definí uno en el `.env` y firmá como `signWebhook` de `test/support/payments.ts`.
+
+### Sandbox de Mercado Pago: qué tiene que pasar Lucas
+
+Todo lo de arriba corre sin credenciales. Para la prueba contra el sandbox real (spec §11: "B5
+listo cuando: compra completa con el sandbox de MP") hace falta, de la **misma aplicación** del
+panel de Mercado Pago (Tus integraciones → la aplicación → Credenciales de prueba):
+
+1. **Public key de prueba:** va en la tienda, `NEXT_PUBLIC_MP_PUBLIC_KEY`.
+2. **Access token de prueba:** va en el back, `MP_ACCESS_TOKEN`. Hoy empieza con `APP_USR-`, igual
+   que el productivo, así que no se distinguen por el prefijo.
+3. **Clave secreta de webhooks** (Webhooks → Configurar notificaciones → Guardar la genera): va en
+   `MP_WEBHOOK_SECRET`.
+4. **Un origen público HTTPS que llegue a este back** (un túnel como cloudflared, ngrok o
+   similar): va en `PUBLIC_API_ORIGIN`. En el panel, la URL de "Modo pruebas" es
+   `${PUBLIC_API_ORIGIN}/api/v1/webhooks/mercadopago`, con el evento "Pagos". El back además
+   manda esa `notification_url` en cada preferencia y pago, y esa tiene prioridad.
+5. **La cuenta compradora de prueba** (usuario, contraseña y el código de 6 dígitos): Checkout Pro
+   exige comprar logueado con ella, en una ventana de incógnito.
+6. Opcional: el User ID de la cuenta vendedora, que llega en cada notificación.
+
+Con eso, el `.env` del back lleva `MP_MODE=live`, las tres variables y `STORE_ORIGIN` (adonde
+vuelve el comprador). La tienda se compila con su public key. Las tarjetas de prueba de Argentina
+son la Visa `4509 9535 6623 3704` y la Mastercard `5031 7557 3453 0604`, con CVV `123`, vencimiento
+`11/30` y DNI `12345678`. El nombre del titular elige el resultado (`APRO`, `OTHE`, `CONT`, `FUND`,
+…). Para 3DS: `5483 9281 6457 4623` (desafío exitoso) y `5361 9568 0611 7557` (no autorizado).
+
+**E2E del sandbox** (`test/e2e/mercadopago.sandbox.e2e-spec.ts`): se omite sin `MP_ACCESS_TOKEN`
+y no necesita Docker. Crea una preferencia real y la vence, cobra la Visa `APRO` y la vuelve a
+leer, y pide cuotas:
+
+```bash
+MP_ACCESS_TOKEN=APP_USR-… MP_PUBLIC_KEY=APP_USR-… MP_TEST_PAYER_EMAIL=test_user_…@testuser.com \
+  npx vitest run -c vitest.e2e.config.mts test/e2e/mercadopago.sandbox.e2e-spec.ts
+```
+
+`MP_PUBLIC_KEY` (la misma public key de la tienda) se usa para tokenizar la Visa: pasala siempre,
+porque sin ella el test pide el token con el access token y Mercado Pago probablemente lo rechace.
+`MP_TEST_PAYER_EMAIL` es opcional: tiene que ser distinto del email de la cuenta vendedora.
+
+**La trampa de las notificaciones de prueba:** la documentación de Mercado Pago avisa que **los
+pagos hechos con credenciales de prueba pueden no mandar notificaciones**. Si no llegan:
+
+- **Tarjeta:** no depende del aviso. La respuesta inmediata ya deja el pedido pagado o rechazado, y
+  un pago pendiente lo consulta la conciliación a los 10 minutos de `reserved_until`.
+- **Checkout Pro:** sí depende del aviso. Sin ninguna notificación, el intento queda en `none` (no
+  tiene id de pago que consultar) y el pedido vence a los 30 minutos. Para probarlo, usá el
+  **simulador de notificaciones del panel** (Webhooks → Simular, tipo "Pagos", con el id del pago
+  real que muestra la actividad de la cuenta de prueba). El aviso llega firmado con la clave, el
+  back lo consulta y lo aplica.
+- Un aviso del panel con un id que no existe responde 200 igual: el evento queda procesado, con el
+  error en `webhook_events.last_error`.
+
+Qué falta confirmar con el sandbox:
+
+- El `status_detail` real de cada titular (el simulador sigue la tabla que se infiere de la
+  documentación).
+- Si Mercado Pago acepta `back_urls` con `http://localhost` junto con `auto_return`.
+- El desafío 3DS real: Mercado Pago pide un `POST` del `creq` a `external_resource_url`, y el
+  contrato solo lleva `challenge.url`.
 
 ## Scripts
 
@@ -308,8 +480,12 @@ La clave pública (`NEXT_PUBLIC_MP_PUBLIC_KEY`) va en la tienda, no en el back.
   suman sesiones en Redis, los adaptadores de identidad y la autenticación completa por HTTP
   (cookies, CSRF, rotación, bloqueo, recuperación y admin). Desde B4, el repositorio de pedidos
   con la reserva atómica, la cola y el barrido de vencimiento, y los pedidos por HTTP (doble envío,
-  10 compras simultáneas sobre 5 unidades, vencimiento al leer y dueño correcto). Incluyen también
-  el contrato y los casos compartidos de validación. Corren de a un archivo.
+  10 compras simultáneas sobre 5 unidades, vencimiento al leer y dueño correcto). Desde B5, el
+  repositorio de pagos (un solo intento activo, `FOR UPDATE`, `payment_status` en la misma
+  transacción) y las rutas de pago, el simulador y el webhook firmado por HTTP, con la pasarela
+  simulada (cobro doble, avisos repetidos o desordenados, stock confirmado una vez). El E2E del
+  sandbox se omite sin `MP_ACCESS_TOKEN`. Incluyen también el contrato y los casos compartidos de
+  validación. Corren de a un archivo.
 - **Verificación completa**, la misma que corre la CI:
 
   ```bash

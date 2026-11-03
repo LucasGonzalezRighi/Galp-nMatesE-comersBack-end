@@ -735,3 +735,446 @@ Para la prueba en vivo se usó lo que ya tenía instalado el front: Next.js 16.4
     (los cubren las Tasks 3 y 4 por debajo del HTTP).
   - `prisma.e2e-spec.ts`: el tercer test nuevo usa el producto que crea el segundo (falla con
     `-t`).
+
+## B5 · Pagos con Mercado Pago (2026-11-03)
+
+Plan: [`docs/superpowers/plans/2026-11-03-b5-pagos.md`](superpowers/plans/2026-11-03-b5-pagos.md)
+(6 tareas en 5 olas). Decisiones de arquitectura en
+[ADR 0005 · pagos con Mercado Pago](adr/0005-pagos-con-mercado-pago.md). Todavía no hay
+credenciales de Mercado Pago, así que todo se construyó y se probó en `MP_MODE=simulated`. La
+prueba contra el sandbox real queda armada: el E2E omitido y la guía del README ("Pagos con
+Mercado Pago").
+
+### Qué quedó
+
+- **Esquema, SDK y entorno** (Task 1):
+  - Migración `20261103154326_b5_pagos`, con tres enums (`payment_provider`, `refund_status` y
+    `refund_reason`).
+  - `payments`: un intento por fila, con montos aprobado y devuelto, ids de Mercado Pago,
+    `init_point`, `challenge_url`, cuotas, tarjeta y pagador. El único parcial
+    `payments_active_per_order_idx` (`(order_id) WHERE is_active`) está escrito a mano. También son
+    únicos `idempotency_key` y `(provider, provider_payment_id)`.
+  - `refunds`, con su propia `idempotency_key`, y `webhook_events`, único por
+    `(provider, event_id)`.
+  - SDK `mercadopago` 3.6.1, sin dependencias.
+  - Variables `MP_MODE`, `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `PUBLIC_API_ORIGIN` y
+    `MP_STATEMENT_DESCRIPTOR`. La API no arranca con `live` y alguna de las tres primeras faltante,
+    ni con `production` + `simulated`.
+  - El puerto `OrderPaymentsPort` (solo la interfaz).
+- **Pedidos** (Task 2):
+  - `Order.payment` (`OrderPaymentInfo`) se lee del último intento. `GET /orders/{number}` devuelve
+    `challenge` solo mientras el pago está `action_required`.
+  - `markPaid`, `markRefunded`, `isRefundable` y `orderPaidEvent`.
+  - `PrismaOrderPaymentsAdapter`. `markPaid` corre en una transacción:
+    `UPDATE orders … WHERE status = 'pending_payment'`, reservas a `committed`, `inventory` con
+    `on_hand − q` y `reserved − q` ordenado por producto, historial `paid` (actor `provider`) y
+    `order.paid`. Después borra la caché del catálogo.
+  - El doble `InMemoryOrderPayments`.
+- **Dominio y casos de uso** (Task 3, `src/modules/payments/{domain,application}`):
+  - Puertos: pasarela, repositorio de pagos, eventos de webhook, cola, ajustes y logger.
+  - `ApplyProviderPaymentCommand`, la máquina de estados única.
+  - Los comandos de preferencia, tarjeta, cancelación, recepción y procesado del webhook,
+    conciliación, reproceso de webhooks, `order.expired` y simulador, y `GetInstallmentsQuery`.
+  - `PaymentOrderAccess` resuelve el 404 idéntico y el `409 order_not_payable`.
+  - Todo sin Nest, con dobles en `test/support/payments.ts`.
+- **Adaptadores y módulo** (Task 4):
+  - `PrismaPaymentRepository`: `startAttempt` en una transacción, y `update` con
+    `SELECT … FOR UPDATE`, que escribe `orders.payment_status` con el mismo `tx`. También
+    `PrismaWebhookEventRepository`.
+  - `MercadoPagoGateway` y su mapper (cuerpos del Ruling B-35, traducción de errores y cuotas por
+    `fetch`), `SimulatedGateway`, el HMAC con `node:crypto` y `EnvPaymentsSettings`.
+  - La cola `payment-webhooks` (`BullWebhookQueue` y `PaymentWebhooksProcessor`) y el consumidor
+    del outbox `OutboxEventsProcessor` (`order.expired`).
+  - `PaymentsSweep` cada 60 s: vencer, conciliar y retomar webhooks.
+  - `PaymentsModule` con `useFactory`, y `createApp({ gateway })` para los E2E.
+- **Rutas** (Task 5):
+  - `PaymentsController`, con las cuatro rutas de pago (`@SkipThrottle()`, e
+    `@Idempotent('payments')` en preferencia y tarjeta), y `WebhooksController`, con sus DTOs.
+  - El simulador: `SimulatedMercadoPagoController`, `SimulatedModeGuard` y `simulated-pages.ts`,
+    con su propia CSP.
+  - El contrato pasa a **41 operaciones implementadas de 77**. Los casos 7 a 16 de
+    `cardholderSchema` (documento de quien paga) se suman a los casos compartidos.
+- **Docs** (Task 6):
+  - Este apartado y el ADR 0005.
+  - La guía del README ("Pagos con Mercado Pago"): cómo cobra, modo simulado, qué pasar para el
+    sandbox, E2E del sandbox y la trampa de las notificaciones de prueba.
+  - `.env.example` quedó como lo dejó la Task 1.
+
+### Decisiones
+
+Rulings de la planificación (ledger del flujo, B-34 a B-58; B-48 y B-49 no se usaron):
+
+- **B-34 · API:**
+  - Checkout Pro por preferencias y Checkout API por `/v1/payments`, detrás de
+    `PaymentGatewayPort`. La API Orders queda para más adelante.
+  - SDK 3.6.1, y `fetch` para las cuotas.
+  - `X-Idempotency-Key` = la clave del intento.
+  - Errores de token (`2006`, `2062`, `3003`, `3006`, `3008` y `4000`) → 422. El resto → 502
+    `payment_gateway_error`.
+- **B-35 · Datos que van a Mercado Pago:**
+  - Preferencia:
+    - Ítems por línea más `Envío`, `payer` y `external_reference` = número.
+    - `notification_url` (solo en `live`) y las tres `back_urls` a `/checkout/resultado`, con
+      `auto_return`.
+    - Vencimiento en `reservedUntil` (`-03:00`), `GALPON MATES` y `metadata`.
+    - Sin ticket ni cajero, hasta 12 cuotas y `binary_mode: false`.
+  - Tarjeta: `capture: true`, `three_d_secure_mode: 'optional'` y `additional_info.items`.
+- **B-36 · Modelo:** `payments`, `refunds` y `webhook_events`, sin `payment_methods`.
+  `Order.payment` se lee de `payments`.
+- **B-37 / B-38 · Webhook:**
+  - Deduplica por el `id` del cuerpo o por `x-request-id`. Firma inválida → 401; sin secreto, 401
+    siempre.
+  - Registra, encola (con procesado en línea si Redis no responde) y responde 200.
+  - El formato IPN responde 200 y se ignora. Nunca 404, 409 ni 422.
+- **B-39 · Estados:**
+  - Traducción completa de los estados de Mercado Pago.
+  - Efectos sobre el pedido: pagado si la suma de los aprobados alcanza el total; devolución si el
+    pedido ya estaba pagado, vencido o cancelado; `refunded` total → pedido `refunded` (el stock no
+    vuelve).
+  - Un estado final no retrocede.
+- **B-40 · Respuesta inmediata:** `POST …/card` aplica el resultado en la misma llamada.
+- **B-41 · Devolución automática** de duplicados y tardíos, con la fila de `refunds` creada antes
+  de llamar a Mercado Pago. Si falla, queda `failed` (alerta de B6).
+- **B-42 · Vencimiento con pago en curso:** conciliación 10 minutos después de `reserved_until` y
+  cancelación a las 48 h. Una preferencia sin pagar no frena el vencimiento.
+- **B-43 · Consumidor del outbox** en `payments`: `order.expired` → cancelar el intento y vencer la
+  preferencia.
+- **B-44 · Un intento activo:** un intento nuevo o `cancel-payment` cancela el anterior (y, como
+  mejor esfuerzo, también en Mercado Pago). `cancel-payment` responde 204 siempre.
+- **B-45 · `orders.payment_status`** es la fuente de `Order.paymentStatus` y se sincroniza en la
+  misma transacción que el intento.
+- **B-46 · Escrituras sobre pedidos en `orders`** (`OrderPaymentsPort`, exportado por
+  `OrdersModule`, sin ciclo).
+- **B-47 · Entorno:** `MP_*` y `PUBLIC_API_ORIGIN`. La public key va solo en la tienda.
+- **B-50 · Cuotas:** en `live`, las de Mercado Pago (CFT y TEA salen de `labels`); en `simulated`,
+  la tabla del mock. Unas cuotas no ofrecidas dan 422 en el simulador y `rejected` en Mercado Pago.
+- **B-51 · Documento de quien paga:**
+  - `DNI`: 7 u 8 dígitos, sin puntos ("DNI inválido").
+  - Otro tipo: de 5 a 20 alfanuméricos ("Documento inválido").
+  - El tipo es obligatorio.
+  - Los casos 1 a 6 (`cardholderName`) se omiten: el nombre viaja dentro del token.
+- **B-52 · `@SkipThrottle()`** en las cuatro rutas y el webhook.
+- **B-53 · Historial:** `paid` y `refunded` con actor `provider`. `cancel-payment` no agrega filas.
+- **B-54 · Eventos:** `payment.approved`, `payment.rejected`, `payment.refunded` y `order.paid`.
+- **B-55 · Simulador del back:** tokens `sim_…`, titulares, páginas de checkout y desafío, y
+  `resolve` (409 `intent_not_active` si el intento ya no está activo).
+- **B-56 · Cola `payment-webhooks`** con `enableOfflineQueue: false` y cierre forzado de los
+  workers.
+- **B-57 · Sandbox:** E2E con `describe.skipIf(!MP_ACCESS_TOKEN)` y la guía del README.
+- **B-58 · Olas:**
+  - W1: Task 1. W2: Tasks 2 y 3 en paralelo.
+  - W3: Task 4. W4: Task 5. W5: Task 6.
+
+Decisiones tomadas en el camino:
+
+- **`payment_status` desde el repositorio de pagos, con el mismo `tx`** (opción b de la revisión
+  de la ola 2-3):
+  - Es una excepción acotada al ADR 0001, asentada en el ADR 0005.
+  - Solo sincroniza si el intento es el **vigente** (estaba activo, o el pedido no tiene otro
+    activo). Así, un rechazo tardío de un intento ya reemplazado no pisa el del activo (Task 3,
+    RED → GREEN).
+- **`locate` busca primero por `providerPaymentId`** y después por el intento (Task 3). Si el
+  webhook llega antes que la respuesta de la tarjeta, el pago queda registrado una sola vez y no se
+  devuelve.
+- **Un `approved` repetido retoma el efecto** (`resumeApproved`, revisión de la ola 2-3):
+  - Si `markPaid` o la devolución tardía fallaron después de guardar el intento, el reintento los
+    completa.
+  - La rama del duplicado no se repite: devolvería al que sí pagó.
+- **Webhooks sin procesar** (revisión de la ola 2-3):
+  - Un duplicado de un evento que no se procesó se vuelve a encolar.
+  - `ReprocessWebhookEventsCommand` retoma en línea los eventos recibidos entre hace 6 h y hace
+    5 min.
+- **Checkout Pro dividido con aprobados por menos del total:** a las 48 h se devuelven
+  (`late_approval`, sin agregar un valor al enum) y el pedido vence.
+- **`FOR UPDATE` en `update`** (Task 4): la respuesta de la tarjeta y el webhook del mismo pago en
+  paralelo no repiten `payment.approved` ni confirman el stock dos veces. La mutación de control
+  (sin el bloqueo) hace fallar el test.
+- **Ítems de la preferencia** (Task 4):
+  - Una línea cuyo total no se divide en pesos enteros va como `"<nombre> ×N"` con cantidad 1.
+  - Si los ítems no suman el total, se cobra un solo ítem, `Pedido <número> · Galpón Mates`.
+  - Así Mercado Pago nunca cobra otro monto que el del pedido.
+- **Claves propias para cancelar y vencer** (revisión de la Task 4):
+  - El SDK 3.6.1 guarda la `idempotencyKey` de la última llamada en el `MercadoPagoConfig`
+    compartido, y los `PUT` de cancelar y vencer la heredaban.
+  - Ahora llevan un UUID propio.
+  - Lo prueba un spec con el SDK real y un `fetch` falso.
+- **Decoradores propios** para `Idempotency-Key`, `x-signature`, `x-request-id`, `data.id` y
+  `topic` (Task 5): con `@Headers()` y `@Query()`, Swagger publicaba parámetros que el contrato no
+  tiene.
+- **CSP propia en las páginas del simulador** (Task 5):
+  - `default-src 'none'`, y el único script, permitido por su hash.
+  - `form-action 'self' <tienda>`, porque el 302 vuelve a la tienda.
+  - `frame-ancestors 'self' <tienda>`, sin `X-Frame-Options`.
+- **Clave suelta y validar antes de cancelar** (revisión de la Task 5):
+  - Tras un 502 o un 422 de la pasarela, la clave del intento cancelado pasa a
+    `<clave>:released:<id>`. El reintento de la tienda con la misma clave ya no da 500.
+  - `validateCardCharge` revisa token y cuotas (en el simulador) antes de tocar el intento activo.
+- **Textos que el contrato no fija:**
+  - "La marca de la tarjeta no es válida.".
+  - "El banco emisor no es válido.".
+  - "Completá los datos de quien paga.".
+  - "Elegí si la tarjeta es de crédito o de débito.".
+- **La migración se creó contra un Postgres descartable** (Task 1), no contra el de compose.
+
+### Versiones reales instaladas
+
+B5 instaló una sola dependencia: `mercadopago` 3.6.1 (Task 1; CommonJS con tipos propios y sin
+dependencias transitivas). Ya figura en la tabla de versiones de B1 y en
+`scripts/dependency-versions.json`.
+
+Para la prueba en vivo se usó lo que ya tenía el front: Next.js 16.4.2 y Playwright 1.64.1
+(Chromium headless). Docker Engine 28.4.0.
+
+### Verificación
+
+- **Suite completa en verde** (Task 6, sobre `16bb8b8` más estas docs):
+  - `npm run typecheck`, `npm run lint` (versiones y fronteras) y `npm run format:check`.
+  - `npm test`: 74 archivos, 741 tests.
+  - `npm run test:e2e`: 17 archivos y 1 omitido (el del sandbox), 386 tests y 4 omitidos: los 3
+    del sandbox y el que ya se omitía (235 s).
+  - `npm run contract:check`: 3 archivos, 216 tests y 1 omitido. **41 operaciones implementadas y
+    36 pendientes de 77**, sin diferencias.
+- **Review Focus del plan, cubierto con tests:**
+  1. **Nunca dos cobros válidos:**
+     - Un segundo `APRO` con otra clave → 409 "El pedido ya está pagado.".
+     - Un segundo aprobado que entra igual crea una sola devolución `duplicate_payment` y llama una
+       vez a `refundPayment`. El stock se confirma una sola vez (unitarios y HTTP).
+  2. **Avisos repetidos y desordenados:**
+     - Una sola fila en `webhook_events` y un solo procesado.
+     - Un `pending` después del `approved` no cambia nada.
+     - Un `approved` tras `expired` → `late_approval`, y el pedido sigue `expired`.
+  3. **Stock exacto al pagar:**
+     - Mate ×2 y un kit → `on_hand` −3/−1/−1 y `reserved` −3/−1/−1, reservas `committed` y caché
+       borrada.
+     - Dos `markPaid` en paralelo → uno paga y el otro devuelve `null`.
+  4. **Token y estado en las cuatro rutas:**
+     - 404 idéntico, y 409 por `expired` y por `paid`.
+     - `cancel-payment` repetido → 204, y con débito una sola cuota.
+  5. **Firma del webhook:**
+     - HMAC correcto → 200.
+     - `v1` cambiado, sin `ts`, sin cabecera o sin secreto → 401, sin filas ni jobs.
+     - `data.id` en mayúsculas y espacios en `x-signature` se aceptan.
+- **Prueba en vivo de la tienda (Task 6):**
+  - Back compilado (`node dist/main`) en el 3001 con `MP_MODE=simulated` y
+    `STORE_ORIGIN=http://localhost:4300`, sobre el Postgres y el Redis de compose, migrado
+    (`20261103154326_b5_pagos`) y sembrado.
+  - Tienda compilada en modo `live` (`npm run build -w @galpon/store` y `next start --port 4300`):
+    - Con el entorno en la misma línea (sin `.env.local`) y
+      `NEXT_PUBLIC_MP_PUBLIC_KEY=TEST-00000000-0000-0000-0000-000000000000`.
+    - El primer build falló con `Failed to collect page data for /tienda/[linea]` porque el back
+      todavía no estaba arriba. Con el back andando, compiló.
+  - Script de Playwright `live-store.mjs` en el workspace: **17 de 17 pasos en verde**. Capturas
+    locales en `.superpowers/sdd/2026-11-03-b5-pagos/captures/` (git ignora esa carpeta):
+    - **Aprobar** (cuenta de Lucía):
+      - Registro, Mate Imperial Premium al carrito, retiro y "Mercado Pago" → `GLP-10015`
+        (`b5-01-checkout-pagar-con-mercado-pago.png`).
+      - "Pagar $39.999 con Mercado Pago" → preferencia 200 con el `initPoint` del simulador del
+        back, y el intento `mp_redirect` activo en `none` (`b5-02-simulador-checkout-del-back.png`).
+      - Aprobar → `/checkout/resultado`: "¡Gracias, Lucía!" y "Tu pedido GLP-10015 está
+        confirmado.", con el carrito vacío ("Abrir carrito, 0 productos")
+        (`b5-03-resultado-aprobado-gracias-lucia.png`).
+      - En la base:
+        - Pedido `paid`/`approved` e intento `approved`/`accredited` inactivo.
+        - Reserva `committed`.
+        - Historial `pending_payment` (cliente) → `paid` (`provider`).
+        - Outbox `order.created`, `payment.approved` y `order.paid`.
+      - **Stock del mate:** `inventory` 8/0 antes del pedido, 8/1 con la reserva (`maxQuantity` 7) y 7/0 después de pagar.
+      - `/cuenta/pedidos` muestra "Pagado" (`b5-04-cuenta-pedidos-pagado.png`). El detalle
+        muestra "Pago Aprobado · Mercado Pago" y el historial "Esperando el pago" → "Pagado"
+        (`b5-05-cuenta-detalle-pagado.png`).
+      - Una segunda preferencia sobre el pedido pagado → `409 order_not_payable` "El pedido ya
+        está pagado.".
+    - **Rechazar** (invitado, `GLP-10016`):
+      - "El pago no se aprobó" y "La tarjeta no aprobó el pago."
+        (`b5-06-resultado-rechazado.png`).
+      - En la base: intento `rejected`/`cc_rejected_other_reason` inactivo y `payment.rejected` en
+        el outbox.
+      - "Probar con otro medio" → `cancel-payment` 204 y vuelta al paso de pago
+        (`b5-07-probar-con-otro-medio.png`).
+    - **Dejar pendiente** (`GLP-10017`):
+      - "Estamos esperando la confirmación del pago" (`b5-08-resultado-pendiente.png`), con el
+        intento `pending`/`pending_waiting_payment`.
+      - Con `reserved_until` movido al pasado, la lectura **no** lo vence.
+      - `cancel-payment` → 204, y la lectura siguiente lo vence (`expired`/`cancelled`, reserva
+        `released`) (`b5-09-pendiente-cancelado-y-vencido.png`).
+    - **Tarjeta con la public key de mentira** (`GLP-10018`):
+      - Los Secure Fields reales **cargan**: tres `iframe` de `secure-fields.mercadopago.com`
+        (`b5-10-tarjeta-secure-fields-sin-public-key.png`).
+      - Con la Visa de prueba, el SDK hace `POST /v1/devices/widgets` (200) y
+        `GET /v1/payment_methods/search` (404).
+      - La tienda marca "Número incompleto", no habilita vencimiento, CVC ni cuotas, y "Pagar
+        $39.999" no llama al back (`b5-11-tarjeta-pagar-sin-public-key.png`).
+      - El pago con tarjeta desde la tienda se prueba con el sandbox.
+    - **3DS simulado por API**, sobre ese mismo pedido (token `sim_3DS_3704_…`):
+      - 200 `action_required`, con `challenge.url` =
+        `http://localhost:3001/api/v1/__simulated/mercadopago/challenge?…`.
+      - El resultado muestra "Falta verificar la compra con tu banco" con "Pagar de nuevo", y sin
+        "Verificar con mi banco" (`b5-12-resultado-3ds-sin-url.png`).
+      - **Diagnóstico de la CSP:**
+        - Aun con esa URL escrita a mano en `galpon.order`, la tienda no abre el diálogo:
+          `readOrderSession` solo acepta `https:` o una ruta propia.
+        - Un `iframe` agregado a mano lo bloquea la CSP de la tienda: "Framing
+          'http://localhost:3001/' violates … frame-src 'self' https://_.mercadopago.com
+          https://_.mercadolibre.com https:" (`b5-13-csp-bloquea-desafio-http.png`).
+        - No se tocó el front.
+      - El desafío del back en su propia pestaña (`b5-14-desafio-3ds-del-back.png`) → Confirmar →
+        "Listo. Ya podés cerrar esta ventana." (`b5-15-desafio-listo.png`).
+      - El resultado pasa a "¡Gracias, Lucía!" con "Tarjeta terminada en 3704"
+        (`b5-16-resultado-3ds-aprobado-tarjeta-3704.png`): pedido `paid`, reserva `committed` e
+        historial `paid` (`provider`).
+  - **Barrido y consumidor de `order.expired` en vivo:**
+    - Tres pedidos de una corrida anterior del script, que se cortó, quedaron con una preferencia
+      sin pagar (intento `none`).
+    - Con `reserved_until` movido al pasado, el barrido los venció a los 52 s, sin ninguna lectura.
+    - El consumidor del outbox dejó cada intento `cancelled` e inactivo.
+    - El catálogo quedó con `reserved` en 0.
+  - **Logs del back:**
+    - Ningún `warn` ni `error` en toda la prueba.
+    - Las 41 apariciones de `x-order-token` salen como `[Redacted]`.
+    - No hay ningún `ot_…` en claro ni ningún token `sim_…`.
+  - **Consola de la tienda** (nota para el front): el SDK de Mercado Pago intenta cargar imágenes
+    de `www.mercadolibre.com` y `www.mercadolivre.com` (huella del dispositivo), y la CSP
+    (`img-src`) las bloquea.
+  - **Corridas anteriores:**
+    - Las dos primeras corridas se cortaron por errores del propio script: leía el cuerpo de la
+      preferencia después de que la tienda navegara al simulador, y buscaba un `main` que la
+      pantalla del resultado no tiene.
+    - Una tercera corrida, lanzada por error en segundo plano, se cortó a mano después de pagar
+      `GLP-10014`.
+    - No hubo nada que corregir en el back ni en la tienda. Por eso la corrida final arranca en
+      `GLP-10015`.
+  - **Al cierre:**
+    - No quedan procesos en el 3001, el 4300 ni el 5273, ni contenedores de compose.
+    - El front no tiene cambios. El build de `apps/store/.next` queda en modo `live`, ignorado por
+      git.
+- **Base de desarrollo de compose al cierre:**
+  - Pedidos `GLP-10006…10018`: pagados `10009`, `10010`, `10013`, `10014`, `10015` y `10018`, y el
+    resto vencidos.
+  - Cuentas `lucia.b5.*@example.com` e invitados `lucia.*@ejemplo.com`.
+  - El Mate Imperial Premium quedó con `on_hand` 6, por los seis pagados.
+  - `docker compose down -v` la vacía.
+
+### Commits
+
+| Commit    | Qué                                                                                          |
+| --------- | -------------------------------------------------------------------------------------------- |
+| `8f403c1` | Plan de B5                                                                                   |
+| `3c8a6bd` | Intentos de pago, devoluciones y eventos de webhook; SDK y variables `MP_*` (Task 1)         |
+| `4475430` | Puerto de pagos en pedidos: pagar con reservas confirmadas, devolver, `Order.payment` (T2)   |
+| `39a81b0` | Dominio y casos de uso de pagos (Task 3)                                                     |
+| `305d3b4` | Revisión de la ola 2-3: `resumeApproved`, webhooks sin procesar, aprobado parcial a las 48 h |
+| `fa0d80e` | Repositorios Prisma, pasarelas real y simulada, firma, colas y módulo (Task 4)               |
+| `38c6053` | Revisión de la Task 4: claves idempotentes propias para cancelar y vencer                    |
+| `2cea8fb` | Rutas de pago y webhook del contrato, simulador y E2E (Task 5)                               |
+| `16bb8b8` | Revisión de la Task 5: reintento tras un 502 o un 422 y validar antes de cancelar            |
+| Task 6    | Esta bitácora, el ADR 0005 y la guía de pagos y del sandbox del README                       |
+
+### Lo que queda para B6 en adelante
+
+**Con las credenciales del sandbox (Lucas):**
+
+- Correr `mercadopago.sandbox.e2e-spec.ts` con `MP_PUBLIC_KEY`.
+- Hacer la compra completa desde la tienda (spec §11):
+  - con la public key de prueba;
+  - Checkout Pro con la cuenta compradora, en incógnito;
+  - el webhook por un túnel HTTPS.
+- Confirmar:
+  - el `status_detail` real de cada titular;
+  - si Mercado Pago acepta `back_urls` de `localhost` con `auto_return`;
+  - el 3DS real: Mercado Pago pide un `POST` del `creq` a `external_resource_url`, y el contrato
+    solo lleva `challenge.url`.
+- Corregir `.env.example`: dice que el access token de prueba empieza con `TEST-…`, pero hoy
+  empieza con `APP_USR-`, como el productivo (el README ya lo dice).
+
+**Para B6 (admin):**
+
+- Alertas del dashboard:
+  - desde `refunds` con `status = failed` ("Devolvelo desde Mercado Pago");
+  - desde `payment_status` `in_dispute` y `charged_back`.
+- Devolución manual (`reason = manual`).
+- Los pedidos de la demo `GLP-09001…09012`.
+
+**Para B7 (emails):**
+
+- Consumir `order.paid`.
+- Con un segundo consumidor del outbox, extraer a `shared` un despachador por tipo. Hoy
+  `OutboxEventsProcessor` (de `payments`) acepta y descarta todo lo que no es `order.expired`.
+
+**Para B8 (producción):**
+
+- `trust proxy` y límites por sesión: las rutas de pago y el webhook no tienen límite.
+- Que el interceptor de idempotencia espere al pedido en curso. Hoy, un
+  `409 idempotency_in_progress` en una ruta de pago la tienda lo muestra como "Tu pedido venció o
+  ya no se puede pagar".
+- Purgar las `idempotency_keys` vencidas.
+
+**Más adelante:**
+
+- La API Orders de Mercado Pago (migración detrás de `PaymentGatewayPort`).
+- `payment_methods` (tarjetas guardadas).
+- Conciliar un Checkout Pro del que nunca llegó ningún aviso:
+  - hoy el intento queda en `none` y el pedido vence;
+  - habría que buscar el pago por `external_reference` (`GET /v1/payments/search`).
+
+**Para el front** (no se tocó; lo vieron la prueba en vivo y la revisión de la Task 5):
+
+- `isChallengeUrl` solo acepta `https:`, así que el 3DS simulado (`http://localhost:3001`) no se
+  ve en la tienda compilada local.
+- El listener del `postMessage` filtra por el origen de la tienda, así que el diálogo no se cierra
+  solo con el desafío del back: queda el botón "Ya terminé".
+- La CSP (`img-src`) bloquea las imágenes de huella del SDK en `mercadolibre.com` y
+  `mercadolivre.com`.
+
+**Abiertos de los reportes de las tareas:**
+
+- Devoluciones que no se retoman:
+  - Un corte entre guardar un segundo aprobado y crear su devolución (duplicado) no se retoma.
+  - Un `markRefunded` que falla deja el pedido `paid` con `payment_status = refunded`.
+- Un pedido `pending_payment` con `payment_status = approved` (corte entre el intento y
+  `markPaid`) se retoma solo mientras el evento esté dentro de la ventana de 6 h.
+- Webhook y respuesta de la tarjeta **en paralelo**, en intentos distintos:
+  - el segundo choca con el único `(provider, provider_payment_id)`;
+  - la tarjeta respondería 500 aunque el pago entró;
+  - el webhook se reintenta y cae bien.
+- Con Mercado Pago real:
+  - Un token o unas cuotas inválidas se saben recién al cobrar, cuando el intento activo anterior
+    ya quedó cancelado.
+  - Una caída entre `createCardPayment` y el `update` del `catch` deja la clave tomada.
+
+**Menores anotados en las revisiones:**
+
+- **Código:**
+  - `refunds` sin índice en `payment_id` (Postgres no indexa las FK).
+  - `refundPayment` usa `PaymentRefund.create` sin cuerpo. El método del SDK para una devolución
+    total es `PaymentRefund.total` (manda `{}`). Confirmarlo con el sandbox.
+  - El SDK reintenta 3 veces los 429, los 5xx y los errores de red (a los 1, 2 y 4 s): un cobro
+    puede tardar unos 47 s antes del 502. Considerar `maxRetries: 1`.
+  - `update` no vuelve a chequear "un estado final no retrocede" dentro del `FOR UPDATE` (la
+    ventana es muy corta).
+  - La conciliación consulta a Mercado Pago cada 60 s por cada pedido pendiente, sin backoff. Con
+    el tope de 50, los más viejos pueden dejar sin atender a los nuevos.
+  - `payment-webhooks` no tiene `removeOnFail`: los jobs que agotan los 5 intentos quedan en Redis.
+  - Helpers de `orders/infrastructure` importados desde `payments` (`UUID_PATTERN`,
+    `TRANSACTION_OPTIONS`, `assertDate`, `assertBatchLimit`, `WORKER_SHUTDOWN_PROBE_MS` y
+    `closeWorker`): moverlos a `src/shared/infrastructure`.
+  - `ORDER_PAID_EVENT` y `orderPaidEvent` están repetidos en `payments/domain/payment-events.ts`
+    y `orders/domain/order-events.ts`.
+  - `InMemoryOrderPaymentsStub` sigue al lado del doble oficial.
+  - El `fromStatus` del historial de `markRefunded` y el `payment` que devuelve `markPaid` se leen
+    antes de la transacción.
+  - El replay idempotente responde antes de mirar el token: repetir clave y cuerpo sin
+    `X-Order-Token` devuelve el 200 guardado (hay que conocer la UUID).
+  - El controlador del simulador:
+    - inyecta `PAYMENT_REPOSITORY` y `ORDER_PAYMENTS_PORT` (mejor una query chica en
+      `application`);
+    - sus errores salen como JSON en el navegador (el mock muestra una página);
+    - los botones (`#009ee3` sobre blanco) dan un contraste de unos 3:1.
+  - `SimulatedGateway.payments` crece sin límite (solo en dev y test).
+  - El TSDoc de `env.schema.ts` dice que las reglas entre variables solo se revisan si cada una es
+    válida, pero Zod 4 las corre igual.
+- **Tests:**
+  - `webhooks.controller.spec.ts` ata los jobs a las filas: solo vale por ser el primer test.
+  - Dos descripciones de `payments.e2e-spec.ts` prometen más de lo que comprueban ("ni encolar",
+    "concilia").
+  - `createApp({ gateway })` levanta una segunda app, con sus workers, sobre las mismas colas
+    (posible fuente de flakiness).
