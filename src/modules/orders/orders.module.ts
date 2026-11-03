@@ -16,6 +16,7 @@ import {
   ORDER_EXPIRATION_SCHEDULER,
   type OrderExpirationSchedulerPort,
 } from './application/ports/order-expiration.port'
+import { ORDER_PAYMENTS_PORT } from './application/ports/order-payments.port'
 import { ORDER_REPOSITORY, type OrderRepository } from './application/ports/order.repository.port'
 import {
   PRODUCT_CATALOG_PORT,
@@ -36,6 +37,7 @@ import { IdentityCustomersAdapter } from './infrastructure/identity-customers.ad
 import { ORDER_EXPIRATION_QUEUE } from './infrastructure/order-expiration.queue'
 import { OrderExpirationProcessor } from './infrastructure/order-expiration.processor'
 import { OrderExpirationSweep } from './infrastructure/order-expiration.sweep'
+import { PrismaOrderPaymentsAdapter } from './infrastructure/prisma-order-payments.adapter'
 import { PrismaOrderRepository } from './infrastructure/prisma-order.repository'
 import { SettingsStoreAdapter } from './infrastructure/settings-store.adapter'
 import { CartController } from './interface/cart.controller'
@@ -54,8 +56,10 @@ import { OrdersController } from './interface/orders.controller'
  * de la app no lo espera), el barrido cada 60 s y la lectura. El reloj y los secretos vienen de
  * los módulos globales.
  *
- * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Exporta
- * {@link GetOrderQuery} (lo usa B5).
+ * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Exporta a `payments`
+ * {@link GetOrderQuery}, {@link ExpireOrdersCommand} (la conciliación vence lo que cancela) y el
+ * `ORDER_PAYMENTS_PORT` ({@link PrismaOrderPaymentsAdapter}: marcar pagado con las reservas
+ * confirmadas, devuelto y el estado del pago), así `payments` importa `orders` sin ciclo.
  */
 @Module({
   imports: [
@@ -72,6 +76,7 @@ import { OrdersController } from './interface/orders.controller'
   controllers: [CartController, OrdersController, MyOrdersController],
   providers: [
     { provide: ORDER_REPOSITORY, useClass: PrismaOrderRepository },
+    { provide: ORDER_PAYMENTS_PORT, useClass: PrismaOrderPaymentsAdapter },
     { provide: PRODUCT_CATALOG_PORT, useClass: CatalogProductsAdapter },
     { provide: STORE_SETTINGS_PORT, useClass: SettingsStoreAdapter },
     { provide: CUSTOMER_DIRECTORY_PORT, useClass: IdentityCustomersAdapter },
@@ -149,6 +154,6 @@ import { OrdersController } from './interface/orders.controller'
     OrderExpirationProcessor,
     OrderExpirationSweep,
   ],
-  exports: [GetOrderQuery],
+  exports: [GetOrderQuery, ExpireOrdersCommand, ORDER_PAYMENTS_PORT],
 })
 export class OrdersModule {}

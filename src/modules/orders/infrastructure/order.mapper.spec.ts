@@ -131,6 +131,7 @@ function row(overrides: Partial<OrderRow> = {}): OrderRow {
       },
     ],
     shipment: null,
+    payments: [],
     ...overrides,
   }
 }
@@ -152,6 +153,7 @@ describe('order.mapper', () => {
       createdAt: CREATED_AT,
       reservedUntil: RESERVED_UNTIL,
       tracking: null,
+      payment: null,
     })
     expect(order.history).toEqual([
       { status: 'pending_payment', at: CREATED_AT, note: null },
@@ -186,6 +188,36 @@ describe('order.mapper', () => {
     const order = toOrder(row({ shipment: { carrier: 'Andreani', trackingNumber: 'AND123' } }))
 
     expect(order.tracking).toEqual({ carrier: 'Andreani', number: 'AND123' })
+  })
+
+  it('arma el pago con el último intento de payments', () => {
+    const order = toOrder(
+      row({
+        payments: [
+          {
+            method: 'card',
+            status: 'action_required',
+            installments: 3,
+            paymentTypeId: 'credit_card',
+            cardLastFour: '3704',
+            statusDetail: 'pending_challenge',
+            providerPaymentId: '1234567890',
+            challengeUrl: 'https://www.mercadopago.com.ar/3ds/challenge?id=abc123',
+          },
+        ],
+      }),
+    )
+
+    expect(order.payment).toEqual({
+      method: 'card',
+      status: 'action_required',
+      installments: 3,
+      paymentTypeId: 'credit_card',
+      lastFour: '3704',
+      statusDetail: 'pending_challenge',
+      providerPaymentId: '1234567890',
+      challengeUrl: 'https://www.mercadopago.com.ar/3ds/challenge?id=abc123',
+    })
   })
 
   it('lee los destinos de domicilio, de sucursal y el retiro', () => {

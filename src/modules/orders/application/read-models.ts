@@ -68,7 +68,7 @@ export interface PaymentChallengeView {
   url: string
 }
 
-/** Pago de un pedido (`OrderPayment` del contrato): todo `null` salvo `method` hasta B5. */
+/** Pago de un pedido (`OrderPayment` del contrato): `null` en lo que el intento no informó. */
 export interface OrderPaymentView {
   /** Forma de pago. */
   method: PaymentMethod

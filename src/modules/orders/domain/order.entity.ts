@@ -5,6 +5,7 @@ import {
   type OrderStatus,
   type PaymentMethod,
   type PaymentStatus,
+  REFUNDABLE_ORDER_STATUSES,
 } from './order-status'
 import type { OrderLineDraft, ReservationLine } from './pricing'
 import type { ShippingAddress } from './shipping'
@@ -92,6 +93,29 @@ export interface OrderTracking {
   number: string
 }
 
+/**
+ * Pago del pedido según su último intento (tabla `payments`); lo que Mercado Pago todavía no
+ * informó va en `null`.
+ */
+export interface OrderPaymentInfo {
+  /** Forma de pago del intento. */
+  method: PaymentMethod
+  /** Estado del intento. */
+  status: PaymentStatus
+  /** Cuotas, o `null`. */
+  installments: number | null
+  /** Tipo de medio de pago de Mercado Pago (`credit_card`…), o `null`. */
+  paymentTypeId: string | null
+  /** Últimos cuatro dígitos de la tarjeta, o `null`. */
+  lastFour: string | null
+  /** `status_detail` de Mercado Pago, o `null`. */
+  statusDetail: string | null
+  /** Id del pago en Mercado Pago, o `null`. */
+  providerPaymentId: string | null
+  /** Dirección de la verificación 3-D Secure, o `null`. */
+  challengeUrl: string | null
+}
+
 /** Pedido guardado. */
 export interface Order extends Omit<OrderDraft, 'number' | 'accessTokenHash' | 'reservation'> {
   /** Número `GLP-` + cinco dígitos. */
@@ -106,6 +130,8 @@ export interface Order extends Omit<OrderDraft, 'number' | 'accessTokenHash' | '
   history: OrderHistoryEntry[]
   /** Despacho, o `null` mientras no se envió. */
   tracking: OrderTracking | null
+  /** Último intento de pago, o `null` si todavía no hubo ninguno. */
+  payment: OrderPaymentInfo | null
 }
 
 /** Valida que sea una fecha real. */
@@ -162,6 +188,7 @@ export function placeOrder(draft: OrderDraft, number: string): Order {
     paymentStatus: 'none',
     history: [{ status: 'pending_payment', at: draft.createdAt, note: null }],
     tracking: null,
+    payment: null,
   }
 }
 
@@ -198,5 +225,61 @@ export function markExpired(order: Order, now: Date): Order {
     ...order,
     status: 'expired',
     history: [...order.history, { status: 'expired', at: order.reservedUntil, note: null }],
+  }
+}
+
+/**
+ * Pedido pagado: `paid` con el pago `approved` y una fila más en el historial en `paidAt`.
+ *
+ * @param order - Pedido `pending_payment`.
+ * @param paidAt - Momento del pago.
+ * @returns El pedido pagado.
+ * @throws {TypeError} En español, si la fecha no es válida o el pedido no espera el pago.
+ */
+export function markPaid(order: Order, paidAt: Date): Order {
+  assertDate(paidAt, 'El momento del pago')
+  if (order.status !== 'pending_payment') {
+    throw new TypeError(
+      `El pedido ${order.number} no se puede marcar pagado (está ${order.status})`,
+    )
+  }
+  return {
+    ...order,
+    status: 'paid',
+    paymentStatus: 'approved',
+    history: [...order.history, { status: 'paid', at: paidAt, note: null }],
+  }
+}
+
+/**
+ * Indica si un pedido ya cobrado se puede devolver (`paid`, `preparing`, `shipped` o
+ * `delivered`).
+ *
+ * @param order - Pedido.
+ * @returns `true` si se puede marcar `refunded`.
+ */
+export function isRefundable(order: Order): boolean {
+  return (REFUNDABLE_ORDER_STATUSES as readonly OrderStatus[]).includes(order.status)
+}
+
+/**
+ * Pedido devuelto: `refunded` con el pago `refunded` y una fila más en el historial en `at` (el
+ * stock no vuelve).
+ *
+ * @param order - Pedido ya cobrado.
+ * @param at - Momento de la devolución.
+ * @returns El pedido devuelto.
+ * @throws {TypeError} En español, si la fecha no es válida o el pedido no se puede devolver.
+ */
+export function markRefunded(order: Order, at: Date): Order {
+  assertDate(at, 'El momento de la devolución')
+  if (!isRefundable(order)) {
+    throw new TypeError(`El pedido ${order.number} no se puede devolver (está ${order.status})`)
+  }
+  return {
+    ...order,
+    status: 'refunded',
+    paymentStatus: 'refunded',
+    history: [...order.history, { status: 'refunded', at, note: null }],
   }
 }

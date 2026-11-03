@@ -3,7 +3,7 @@ import { PRODUCT_GROUPS } from '../../catalog/domain/category.entity'
 import { FERRULES, LEATHERS } from '../../catalog/domain/product.entity'
 import { isProvince } from '../../identity/domain/province'
 import type { CartItemOptions, Ferrule, Leather } from '../domain/cart-line'
-import type { Order } from '../domain/order.entity'
+import type { Order, OrderPaymentInfo } from '../domain/order.entity'
 import type { OrderKitItemDraft, OrderLineDraft } from '../domain/pricing'
 import type { ShippingAddress } from '../domain/shipping'
 
@@ -12,12 +12,27 @@ export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 
 /**
  * Relaciones que se leen con cada pedido: líneas por posición con sus piezas, el historial del
- * más viejo al más nuevo y el despacho.
+ * más viejo al más nuevo, el despacho y el último intento de pago (lectura cruzada de
+ * `payments`, que escribe el módulo de pagos; ADR 0001).
  */
 export const ORDER_INCLUDE = {
   items: { orderBy: { position: 'asc' }, include: { components: true } },
   history: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
   shipment: { select: { carrier: true, trackingNumber: true } },
+  payments: {
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 1,
+    select: {
+      method: true,
+      status: true,
+      installments: true,
+      paymentTypeId: true,
+      cardLastFour: true,
+      statusDetail: true,
+      providerPaymentId: true,
+      challengeUrl: true,
+    },
+  },
 } satisfies Prisma.OrderInclude
 
 /** Fila de `orders` con las relaciones de {@link ORDER_INCLUDE}. */
@@ -147,11 +162,27 @@ function toLine(item: OrderRow['items'][number]): OrderLineDraft {
   }
 }
 
+/** Último intento guardado → pago del pedido, o `null` si no hubo ninguno. */
+function toPaymentInfo(payment: OrderRow['payments'][number] | undefined): OrderPaymentInfo | null {
+  if (payment === undefined) return null
+  return {
+    method: payment.method,
+    status: payment.status,
+    installments: payment.installments,
+    paymentTypeId: payment.paymentTypeId,
+    lastFour: payment.cardLastFour,
+    statusDetail: payment.statusDetail,
+    providerPaymentId: payment.providerPaymentId,
+    challengeUrl: payment.challengeUrl,
+  }
+}
+
 /**
  * Convierte una fila de `orders` (con {@link ORDER_INCLUDE}) en el pedido del dominio.
  *
  * @param row - Fila leída con Prisma.
- * @returns El pedido, con las líneas por posición y el historial del más viejo al más nuevo.
+ * @returns El pedido, con las líneas por posición, el historial del más viejo al más nuevo y
+ *   el pago del último intento.
  * @throws {TypeError} En español, si la dirección o las opciones guardadas no son válidas.
  */
 export function toOrder(row: OrderRow): Order {
@@ -192,5 +223,6 @@ export function toOrder(row: OrderRow): Order {
       row.shipment === null
         ? null
         : { carrier: row.shipment.carrier, number: row.shipment.trackingNumber },
+    payment: toPaymentInfo(row.payments[0]),
   }
 }

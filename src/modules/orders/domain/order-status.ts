@@ -40,6 +40,33 @@ export const EXPIRABLE_PAYMENT_STATUSES = [
   'cancelled',
 ] as const satisfies readonly PaymentStatus[]
 
+/**
+ * Estados del pago que esperan una respuesta de Mercado Pago: el pedido no vence y la
+ * conciliación los consulta.
+ */
+export const AWAITING_PAYMENT_STATUSES = [
+  'pending',
+  'action_required',
+] as const satisfies readonly PaymentStatus[]
+
+/** Estados del pedido que ya se cobraron y se pueden devolver. */
+export const REFUNDABLE_ORDER_STATUSES = [
+  'paid',
+  'preparing',
+  'shipped',
+  'delivered',
+] as const satisfies readonly OrderStatus[]
+
+/**
+ * Indica si un texto es un estado del pago.
+ *
+ * @param value - Lo que se quiere comprobar.
+ * @returns `true` si es un {@link PaymentStatus}.
+ */
+export function isPaymentStatus(value: unknown): value is PaymentStatus {
+  return typeof value === 'string' && (PAYMENT_STATUSES as readonly string[]).includes(value)
+}
+
 /** Formas de pago del checkout (`PaymentMethod` del contrato). */
 export const PAYMENT_METHODS = ['mp_redirect', 'card'] as const
 

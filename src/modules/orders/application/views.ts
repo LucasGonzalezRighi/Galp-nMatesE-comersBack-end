@@ -1,9 +1,49 @@
 import type { Order } from '../domain/order.entity'
-import type { CreateOrderResultView, OrderSummaryView, OrderView } from './read-models'
+import type {
+  CreateOrderResultView,
+  OrderPaymentView,
+  OrderSummaryView,
+  OrderView,
+} from './read-models'
 
 /**
- * Pasa un pedido a la forma pública `Order`: fechas en ISO 8601 con `Z` y el pago con `null` en
- * todo salvo `method` (los intentos de pago llegan en B5).
+ * Pasa el pago del pedido a la forma pública `OrderPayment`: los datos del último intento (o la
+ * forma de pago del checkout y `null` en el resto si todavía no hubo ninguno) y el desafío 3-D
+ * Secure solo mientras el intento está en `action_required`.
+ *
+ * @param order - Pedido.
+ * @returns El pago como lo devuelve la API.
+ */
+function toOrderPaymentView(order: Order): OrderPaymentView {
+  const payment = order.payment
+  if (payment === null) {
+    return {
+      method: order.paymentMethod,
+      installments: null,
+      paymentTypeId: null,
+      lastFour: null,
+      statusDetail: null,
+      mpPaymentId: null,
+      challenge: null,
+    }
+  }
+  return {
+    method: payment.method,
+    installments: payment.installments,
+    paymentTypeId: payment.paymentTypeId,
+    lastFour: payment.lastFour,
+    statusDetail: payment.statusDetail,
+    mpPaymentId: payment.providerPaymentId,
+    challenge:
+      payment.status === 'action_required' && payment.challengeUrl !== null
+        ? { url: payment.challengeUrl }
+        : null,
+  }
+}
+
+/**
+ * Pasa un pedido a la forma pública `Order`: fechas en ISO 8601 con `Z` y el pago con los datos
+ * del último intento.
  *
  * @param order - Pedido.
  * @returns El pedido como lo devuelve la API.
@@ -39,15 +79,7 @@ export function toOrderView(order: Order): OrderView {
     subtotalArs: order.subtotalArs,
     shippingArs: order.shipping.costArs,
     totalArs: order.totalArs,
-    payment: {
-      method: order.paymentMethod,
-      installments: null,
-      paymentTypeId: null,
-      lastFour: null,
-      statusDetail: null,
-      mpPaymentId: null,
-      challenge: null,
-    },
+    payment: toOrderPaymentView(order),
     tracking: order.tracking === null ? null : { ...order.tracking },
     history: order.history.map((entry) => ({
       status: entry.status,

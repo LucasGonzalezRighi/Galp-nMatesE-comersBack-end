@@ -1,7 +1,7 @@
 import { getQueueToken } from '@nestjs/bullmq'
 import type { INestApplication } from '@nestjs/common'
 import type { Queue } from 'bullmq'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +20,10 @@ import {
   type CustomerDirectoryPort,
 } from '../../src/modules/orders/application/ports/customer-directory.port'
 import {
+  ORDER_PAYMENTS_PORT,
+  type OrderPaymentsPort,
+} from '../../src/modules/orders/application/ports/order-payments.port'
+import {
   ORDER_REPOSITORY,
   type OrderRepository,
 } from '../../src/modules/orders/application/ports/order.repository.port'
@@ -30,7 +34,11 @@ import {
 import { GetOrderQuery } from '../../src/modules/orders/application/queries/get-order.query'
 import { QuoteCartQuery } from '../../src/modules/orders/application/queries/quote-cart.query'
 import type { CartItem, CartItemOptions } from '../../src/modules/orders/domain/cart-line'
-import { orderCreatedEvent, orderExpiredEvent } from '../../src/modules/orders/domain/order-events'
+import {
+  orderCreatedEvent,
+  orderExpiredEvent,
+  orderPaidEvent,
+} from '../../src/modules/orders/domain/order-events'
 import {
   type Order,
   type OrderDraft,
@@ -646,6 +654,323 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         await prisma().customer.findUniqueOrThrow({ where: { email: 'carrera@example.com' } }),
       ).toMatchObject({ firstName: 'Rita María', phone: '1144443333' })
       expect(await directory().findByEmail('nadie@example.com')).toBeNull()
+    })
+  })
+
+  describe('pagos (PrismaOrderPaymentsAdapter)', () => {
+    const payments = () => get<OrderPaymentsPort>(ORDER_PAYMENTS_PORT)
+    /** Eventos del pago confirmado, como los arma el caso de uso de pagos. */
+    const paidEvents = (paidAt: Date) => (order: Order) => [orderPaidEvent(order, paidAt)]
+
+    /** `on_hand` y `reserved` de un producto. */
+    async function stockOf(productId: string): Promise<{ onHand: number; reserved: number }> {
+      const row = await prisma().inventory.findUniqueOrThrow({ where: { productId } })
+      return { onHand: row.onHand, reserved: row.reserved }
+    }
+
+    it('pagar un mate ×2 y un kit confirma las reservas una sola vez aunque se pague dos veces a la vez', async () => {
+      const mate = await product('mate-imperial-premium')
+      const bombilla = await product('bombillon-100-alpaca')
+      const yerba = await product('yerba-canarias-1-kg')
+      const items: CartItem[] = [
+        { type: 'product', productId: mate.id, quantity: 2, options: MATE_OPTIONS },
+        {
+          type: 'kit',
+          mateId: mate.id,
+          bombillaId: bombilla.id,
+          yerbaId: yerba.id,
+          leather: 'Negro',
+          quantity: 1,
+        },
+      ]
+      const quote = await get(QuoteCartQuery).execute(items)
+      const created = await get(CreateOrderCommand).execute(
+        {
+          customer: { email: 'paga@example.com', firstName: 'Paz', lastName: 'Gil', phone: null },
+          shipping: { method: 'pickup', address: null },
+          items,
+          paymentMethod: 'card',
+          expectedTotalArs: quote.subtotalArs,
+          website: null,
+        },
+        { customerId: null },
+      )
+      const order = await orders().findByNumber(created.order.number)
+      if (order === null) throw new Error('No se guardó el pedido')
+      const before = {
+        mate: await stockOf(mate.id),
+        bombilla: await stockOf(bombilla.id),
+        yerba: await stockOf(yerba.id),
+      }
+      const keys = [
+        productSlugCacheKey(mate.slug),
+        productSlugCacheKey(bombilla.slug),
+        productSlugCacheKey(yerba.slug),
+        productGroupCacheKey('mate'),
+        productGroupCacheKey('bombilla'),
+        productGroupCacheKey('yerba'),
+      ]
+      for (const key of keys) await cache().set(key, { viejo: true }, 60)
+      const paidAt = new Date()
+
+      // La respuesta inmediata de la tarjeta y el webhook del mismo pago, a la vez.
+      const results = await Promise.all([
+        payments().markPaid(order.id, paidAt, paidEvents(paidAt)),
+        payments().markPaid(order.id, paidAt, paidEvents(paidAt)),
+      ])
+
+      const paid = results.filter((result) => result !== null)
+      expect(paid).toHaveLength(1)
+      expect(paid[0]).toMatchObject({ id: order.id, status: 'paid', paymentStatus: 'approved' })
+      expect(paid[0]?.history).toEqual([
+        { status: 'pending_payment', at: order.createdAt, note: null },
+        { status: 'paid', at: paidAt, note: null },
+      ])
+      const after = {
+        mate: { onHand: before.mate.onHand - 3, reserved: before.mate.reserved - 3 },
+        bombilla: { onHand: before.bombilla.onHand - 1, reserved: before.bombilla.reserved - 1 },
+        yerba: { onHand: before.yerba.onHand - 1, reserved: before.yerba.reserved - 1 },
+      }
+      expect(await stockOf(mate.id)).toEqual(after.mate)
+      expect(await stockOf(bombilla.id)).toEqual(after.bombilla)
+      expect(await stockOf(yerba.id)).toEqual(after.yerba)
+      for (const key of keys) expect(await cache().get(key)).toBeNull()
+      const row = await prisma().order.findUniqueOrThrow({
+        where: { id: order.id },
+        include: { reservations: true, history: { where: { toStatus: 'paid' } } },
+      })
+      expect(row).toMatchObject({ status: 'paid', paymentStatus: 'approved', paidAt })
+      expect(row.reservations.map((reservation) => reservation.status)).toEqual([
+        'committed',
+        'committed',
+        'committed',
+      ])
+      expect(row.history).toEqual([
+        expect.objectContaining({
+          fromStatus: 'pending_payment',
+          toStatus: 'paid',
+          actor: 'provider',
+          note: null,
+          createdAt: paidAt,
+        }),
+      ])
+      const events = await prisma().outboxEvent.findMany({
+        where: { type: 'order.paid', aggregateId: order.number },
+      })
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        aggregateType: 'order',
+        occurredAt: paidAt,
+        payload: { orderId: order.id, number: order.number, paidAt: paidAt.toISOString() },
+      })
+
+      // Ni el vencimiento ni otro pago lo tocan después.
+      const later = new Date(order.reservedUntil.getTime() + MINUTE)
+      expect(await orders().expire(order.id, later, expiredEvents)).toBeNull()
+      expect((await orders().findDue(later, 1_000)).map((due) => due.id)).not.toContain(order.id)
+      expect(await payments().markPaid(order.id, later, paidEvents(later))).toBeNull()
+      expect(await stockOf(mate.id)).toEqual(after.mate)
+      expect(await stockOf(bombilla.id)).toEqual(after.bombilla)
+      expect(await stockOf(yerba.id)).toEqual(after.yerba)
+      expect((await orders().findByNumber(order.number))?.status).toBe('paid')
+    })
+
+    it('markPaid no paga un pedido vencido ni uno que no existe', async () => {
+      const yerba = await product('yerba-canarias-1-kg')
+      const order = await place(
+        draftOf([[yerba, 1]], { createdAt: new Date(Date.now() - 31 * MINUTE) }),
+      )
+      // Lo vence este expire o, si se adelantó, el barrido de la app.
+      await orders().expire(order.id, new Date(), expiredEvents)
+      expect((await orders().findByNumber(order.number))?.status).toBe('expired')
+      const before = await stockOf(yerba.id)
+      const paidAt = new Date()
+
+      expect(await payments().markPaid(order.id, paidAt, paidEvents(paidAt))).toBeNull()
+      expect(await payments().markPaid(newId(), paidAt, paidEvents(paidAt))).toBeNull()
+
+      expect(await stockOf(yerba.id)).toEqual(before)
+      const row = await prisma().order.findUniqueOrThrow({
+        where: { id: order.id },
+        include: { reservations: true, history: true },
+      })
+      expect(row).toMatchObject({ status: 'expired', paymentStatus: 'none', paidAt: null })
+      expect(row.history.map((entry) => entry.toStatus)).not.toContain('paid')
+      expect(row.reservations.map((reservation) => reservation.status)).toEqual(['released'])
+      expect(
+        await prisma().outboxEvent.count({
+          where: { type: 'order.paid', aggregateId: order.number },
+        }),
+      ).toBe(0)
+    })
+
+    it('markRefunded devuelve un pedido pagado con historial provider y el stock no vuelve', async () => {
+      const yerba = await product('yerba-canarias-1-kg')
+      const order = await place(draftOf([[yerba, 2]]))
+      const refundedEvents = (refunded: Order) => [
+        {
+          type: 'payment.refunded',
+          aggregateType: 'order',
+          aggregateId: refunded.number,
+          payload: { orderId: refunded.id },
+        },
+      ]
+      expect(await payments().markRefunded(order.id, new Date(), refundedEvents)).toBeNull()
+      const paidAt = new Date()
+      expect(await payments().markPaid(order.id, paidAt, paidEvents(paidAt))).not.toBeNull()
+      const afterPaid = await stockOf(yerba.id)
+      const at = new Date(paidAt.getTime() + MINUTE)
+
+      const refunded = await payments().markRefunded(order.id, at, refundedEvents)
+
+      expect(refunded).toMatchObject({ status: 'refunded', paymentStatus: 'refunded' })
+      expect(refunded?.history.map((entry) => [entry.status, entry.at])).toEqual([
+        ['pending_payment', order.createdAt],
+        ['paid', paidAt],
+        ['refunded', at],
+      ])
+      expect(await stockOf(yerba.id)).toEqual(afterPaid)
+      const row = await prisma().order.findUniqueOrThrow({
+        where: { id: order.id },
+        include: { history: { where: { toStatus: 'refunded' } } },
+      })
+      expect(row).toMatchObject({ status: 'refunded', paymentStatus: 'refunded', paidAt })
+      expect(row.history).toEqual([
+        expect.objectContaining({
+          fromStatus: 'paid',
+          actor: 'provider',
+          note: null,
+          createdAt: at,
+        }),
+      ])
+      expect(
+        await prisma().outboxEvent.count({
+          where: { type: 'payment.refunded', aggregateId: order.number },
+        }),
+      ).toBe(1)
+      expect(await payments().markRefunded(order.id, new Date(), refundedEvents)).toBeNull()
+      expect((await orders().findByNumber(order.number))?.status).toBe('refunded')
+    })
+
+    it('listAwaitingPayment trae pending y action_required vencidos al cutoff, del más viejo al más nuevo', async () => {
+      const bombilla = await product('bombillon-100-alpaca')
+      const ago = (minutes: number) => new Date(Date.now() - minutes * MINUTE)
+      const challenged = await place(draftOf([[bombilla, 1]], { createdAt: ago(130) }))
+      await payments().setPaymentStatus(challenged.id, 'action_required')
+      const pending = await place(draftOf([[bombilla, 1]], { createdAt: ago(120) }))
+      await payments().setPaymentStatus(pending.id, 'pending')
+      const recent = await place(draftOf([[bombilla, 1]], { createdAt: ago(35) }))
+      await payments().setPaymentStatus(recent.id, 'pending')
+      const withoutPayment = await place(draftOf([[bombilla, 1]], { createdAt: ago(125) }))
+      const cutoff = ago(10)
+
+      const first = await payments().listAwaitingPayment(cutoff, 1)
+      const all = await payments().listAwaitingPayment(cutoff, 1_000)
+
+      expect(first.map((order) => order.number)).toEqual([challenged.number])
+      const numbers = all.map((order) => order.number)
+      expect(numbers.indexOf(challenged.number)).toBeGreaterThanOrEqual(0)
+      expect(numbers.indexOf(challenged.number)).toBeLessThan(numbers.indexOf(pending.number))
+      expect(numbers).not.toContain(recent.number)
+      expect(numbers).not.toContain(withoutPayment.number)
+      for (const order of all) {
+        expect(order.status).toBe('pending_payment')
+        expect(['pending', 'action_required']).toContain(order.paymentStatus)
+        expect(order.reservedUntil.getTime()).toBeLessThanOrEqual(cutoff.getTime())
+      }
+      expect(all.find((order) => order.id === pending.id)?.paymentStatus).toBe('pending')
+      expect((await orders().findByNumber(challenged.number))?.paymentStatus).toBe(
+        'action_required',
+      )
+    })
+
+    it('findForPayment y findForPaymentById traen las líneas, el contacto y el hash del token', async () => {
+      const mate = await product('mate-imperial-premium')
+      const yerba = await product('yerba-canarias-1-kg')
+      const draft = draftOf([
+        [mate, 1],
+        [yerba, 2],
+      ])
+      const order = await place(draft)
+      const items = await prisma().orderItem.findMany({
+        where: { orderId: order.id },
+        orderBy: { position: 'asc' },
+        select: { id: true },
+      })
+
+      const found = await payments().findForPayment(order.number)
+
+      expect(found).toEqual({
+        id: order.id,
+        number: order.number,
+        status: 'pending_payment',
+        paymentStatus: 'none',
+        paymentMethod: 'mp_redirect',
+        totalArs: draft.totalArs,
+        shippingCostArs: 0,
+        accessTokenHash: draft.accessTokenHash,
+        reservedUntil: draft.reservedUntil,
+        createdAt: draft.createdAt,
+        customerId: null,
+        contact: draft.contact,
+        lines: [
+          { id: items[0]?.id, name: mate.name, quantity: 1, totalArs: mate.priceArs },
+          { id: items[1]?.id, name: yerba.name, quantity: 2, totalArs: yerba.priceArs * 2 },
+        ],
+      })
+      expect(await payments().findForPaymentById(order.id)).toEqual(found)
+      expect(await payments().findForPayment('GLP-99999')).toBeNull()
+      expect(await payments().findForPaymentById(newId())).toBeNull()
+    })
+
+    it('el pedido trae el último intento de payments', async () => {
+      const yerba = await product('yerba-canarias-1-kg')
+      const order = await place(draftOf([[yerba, 1]]))
+      expect((await orders().findByNumber(order.number))?.payment).toBeNull()
+      const now = Date.now()
+      await prisma().payment.create({
+        data: {
+          orderId: order.id,
+          method: 'card',
+          status: 'rejected',
+          statusDetail: 'cc_rejected_other_reason',
+          providerPaymentId: '7000000001',
+          amountArs: order.totalArs,
+          idempotencyKey: randomUUID(),
+          isActive: false,
+          createdAt: new Date(now - MINUTE),
+        },
+      })
+      await prisma().payment.create({
+        data: {
+          orderId: order.id,
+          method: 'card',
+          status: 'action_required',
+          providerStatus: 'pending',
+          statusDetail: 'pending_challenge',
+          providerPaymentId: '7000000002',
+          challengeUrl: 'https://www.mercadopago.com.ar/3ds/challenge?id=abc123',
+          amountArs: order.totalArs,
+          installments: 3,
+          paymentTypeId: 'credit_card',
+          cardLastFour: '3704',
+          idempotencyKey: randomUUID(),
+          createdAt: new Date(now),
+        },
+      })
+
+      const saved = await orders().findByNumber(order.number)
+
+      expect(saved?.payment).toEqual({
+        method: 'card',
+        status: 'action_required',
+        installments: 3,
+        paymentTypeId: 'credit_card',
+        lastFour: '3704',
+        statusDetail: 'pending_challenge',
+        providerPaymentId: '7000000002',
+        challengeUrl: 'https://www.mercadopago.com.ar/3ds/challenge?id=abc123',
+      })
     })
   })
 })

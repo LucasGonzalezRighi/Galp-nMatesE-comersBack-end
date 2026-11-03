@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ShippingOption } from '../../settings/domain/store-settings.entity'
-import { orderCreatedEvent, orderExpiredEvent } from './order-events'
+import { orderCreatedEvent, orderExpiredEvent, orderPaidEvent } from './order-events'
 import {
   isExpirable,
+  isRefundable,
   markExpired,
+  markPaid,
+  markRefunded,
   type Order,
   type OrderDraft,
   placeOrder,
@@ -54,6 +57,7 @@ describe('pedido', () => {
       number: 'GLP-10001',
       status: 'pending_payment',
       paymentStatus: 'none',
+      payment: null,
       tracking: null,
       history: [{ status: 'pending_payment', at: CREATED_AT, note: null }],
     })
@@ -87,6 +91,39 @@ describe('pedido', () => {
     expect(() => markExpired(expired, now)).toThrow(TypeError)
   })
 
+  it('al pagarse pasa a paid con el pago aprobado y suma la fila paid en paidAt', () => {
+    const paidAt = new Date(CREATED_AT.getTime() + 10 * MINUTE)
+    const paid = markPaid(placed({ paymentStatus: 'pending' }), paidAt)
+
+    expect(paid.status).toBe('paid')
+    expect(paid.paymentStatus).toBe('approved')
+    expect(paid.history).toEqual([
+      { status: 'pending_payment', at: CREATED_AT, note: null },
+      { status: 'paid', at: paidAt, note: null },
+    ])
+    expect(() => markPaid(paid, paidAt)).toThrow('El pedido GLP-10001 no se puede marcar pagado')
+    expect(() => markPaid(placed({ status: 'expired' }), paidAt)).toThrow(TypeError)
+    expect(() => markPaid(placed(), new Date('x'))).toThrow('El momento del pago')
+  })
+
+  it('se devuelve solo si está paid, preparing, shipped o delivered; el pago queda refunded', () => {
+    const at = new Date(CREATED_AT.getTime() + 60 * MINUTE)
+    const paid = markPaid(placed(), new Date(CREATED_AT.getTime() + 10 * MINUTE))
+    const refunded = markRefunded(paid, at)
+
+    expect(refunded.status).toBe('refunded')
+    expect(refunded.paymentStatus).toBe('refunded')
+    expect(refunded.history.at(-1)).toEqual({ status: 'refunded', at, note: null })
+    for (const status of ['paid', 'preparing', 'shipped', 'delivered'] as const) {
+      expect(isRefundable(placed({ status }))).toBe(true)
+    }
+    for (const status of ['pending_payment', 'cancelled', 'expired', 'refunded'] as const) {
+      expect(isRefundable(placed({ status }))).toBe(false)
+    }
+    expect(() => markRefunded(placed(), at)).toThrow('El pedido GLP-10001 no se puede devolver')
+    expect(() => markRefunded(paid, new Date('x'))).toThrow('El momento de la devolución')
+  })
+
   it('arma los eventos order.created y order.expired con el número como agregado', () => {
     const order = placed({ customerId: 'cus-1' })
 
@@ -107,6 +144,12 @@ describe('pedido', () => {
       aggregateType: 'order',
       aggregateId: 'GLP-10001',
       payload: { orderId: 'ord-1', number: 'GLP-10001' },
+    })
+    expect(orderPaidEvent(order, new Date('2026-11-02T12:10:00.000Z'))).toEqual({
+      type: 'order.paid',
+      aggregateType: 'order',
+      aggregateId: 'GLP-10001',
+      payload: { orderId: 'ord-1', number: 'GLP-10001', paidAt: '2026-11-02T12:10:00.000Z' },
     })
   })
 })

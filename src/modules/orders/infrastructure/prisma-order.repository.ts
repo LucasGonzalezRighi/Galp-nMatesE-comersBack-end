@@ -40,9 +40,9 @@ import {
  * Opciones de las transacciones de pedidos: hasta 5 s para conseguir conexión (con muchos
  * pedidos a la vez el pool se llena) y 15 s para terminar.
  */
-const TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const
+export const TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const
 
-/** Máximo de pedidos que devuelve {@link PrismaOrderRepository.findDue}. */
+/** Máximo de pedidos de un barrido (vencimiento y conciliación de pagos). */
 const MAX_DUE_LIMIT = 1_000
 
 /** Error interno: algún producto no alcanzó y la transacción se deshace. */
@@ -52,15 +52,27 @@ class StockShortageError extends Error {
   }
 }
 
-/** Ordena por id de producto: todas las transacciones bloquean el inventario en el mismo orden. */
-function byProductId<T extends { productId: string }>(lines: readonly T[]): T[] {
+/**
+ * Ordena por id de producto: todas las transacciones bloquean el inventario en el mismo orden
+ * (así dos transacciones sobre los mismos productos no se bloquean entre sí: `40P01`).
+ *
+ * @param lines - Líneas con `productId`.
+ * @returns Una copia ordenada por `productId` ascendente.
+ */
+export function byProductId<T extends { productId: string }>(lines: readonly T[]): T[] {
   return [...lines].sort((a, b) =>
     a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
   )
 }
 
-/** Valida una fecha recibida. */
-function assertDate(value: Date, label: string): void {
+/**
+ * Valida una fecha recibida.
+ *
+ * @param value - Fecha.
+ * @param label - Qué es, para el mensaje.
+ * @throws {TypeError} En español, si no es una fecha válida.
+ */
+export function assertDate(value: Date, label: string): void {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     throw new TypeError(`${label} no es una fecha válida`)
   }
@@ -121,8 +133,15 @@ async function nextOrderSequence(tx: Prisma.TransactionClient): Promise<number> 
   return value
 }
 
-/** Claves de la caché del catálogo (slug y grupo) de los productos cuyo stock cambió. */
-async function catalogCacheKeys(
+/**
+ * Claves de la caché del catálogo (slug y grupo) de los productos cuyo stock cambió; se borran
+ * después de la transacción.
+ *
+ * @param tx - Transacción abierta.
+ * @param productIds - Productos tocados.
+ * @returns Las claves a borrar.
+ */
+export async function catalogCacheKeys(
   tx: Prisma.TransactionClient,
   productIds: readonly string[],
 ): Promise<string[]> {
@@ -225,6 +244,61 @@ async function insertOrder(
   })
 }
 
+/** Reservas activas de un pedido, ordenadas por id de producto (el orden de los bloqueos). */
+async function activeReservations(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<ReservationLine[]> {
+  return byProductId(
+    await tx.stockReservation.findMany({
+      where: { orderId, status: 'active' },
+      select: { productId: true, quantity: true },
+    }),
+  )
+}
+
+/**
+ * Confirma las reservas activas de un pedido pagado: baja `on_hand` y `reserved` de cada producto
+ * (por id de producto, como al reservar) y las marca `committed`.
+ *
+ * @param tx - Transacción abierta (la misma que pasa el pedido a pagado).
+ * @param orderId - Pedido.
+ * @returns Los productos cuyo stock bajó.
+ */
+export async function commitReservations(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<string[]> {
+  const active = await activeReservations(tx, orderId)
+  for (const reservation of active) {
+    await tx.$executeRaw`
+      UPDATE inventory
+      SET on_hand = on_hand - ${reservation.quantity}, reserved = reserved - ${reservation.quantity},
+        version = version + 1, updated_at = now()
+      WHERE product_id = ${reservation.productId}::uuid`
+  }
+  await tx.stockReservation.updateMany({
+    where: { orderId, status: 'active' },
+    data: { status: 'committed' },
+  })
+  return active.map((reservation) => reservation.productId)
+}
+
+/**
+ * Valida el máximo de pedidos de un barrido.
+ *
+ * @param limit - Máximo pedido.
+ * @param label - Qué se limita, para el mensaje.
+ * @throws {RangeError} En español, si no es un entero de 1 a 1000.
+ */
+export function assertBatchLimit(limit: number, label: string): void {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_DUE_LIMIT) {
+    throw new RangeError(
+      `${label} tiene que ser un entero de 1 a ${String(MAX_DUE_LIMIT)} (llegó ${String(limit)})`,
+    )
+  }
+}
+
 /**
  * Libera las reservas activas de un pedido: devuelve las unidades a `inventory` (por id de
  * producto, como al reservar) y las marca `released`.
@@ -235,12 +309,7 @@ async function releaseReservations(
   tx: Prisma.TransactionClient,
   orderId: string,
 ): Promise<string[]> {
-  const active = byProductId(
-    await tx.stockReservation.findMany({
-      where: { orderId, status: 'active' },
-      select: { productId: true, quantity: true },
-    }),
-  )
+  const active = await activeReservations(tx, orderId)
   for (const reservation of active) {
     await tx.$executeRaw`
       UPDATE inventory
@@ -390,11 +459,7 @@ export class PrismaOrderRepository implements OrderRepository {
    */
   async findDue(now: Date, limit: number): Promise<Order[]> {
     assertDate(now, 'El momento del vencimiento')
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_DUE_LIMIT) {
-      throw new RangeError(
-        `El máximo de pedidos a vencer tiene que ser un entero de 1 a ${String(MAX_DUE_LIMIT)} (llegó ${String(limit)})`,
-      )
-    }
+    assertBatchLimit(limit, 'El máximo de pedidos a vencer')
     const rows = await this.prisma.order.findMany({
       where: {
         status: 'pending_payment',

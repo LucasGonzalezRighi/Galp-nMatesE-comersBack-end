@@ -1,6 +1,10 @@
 import type { CustomerDirectoryPort } from '../../src/modules/orders/application/ports/customer-directory.port'
 import type { OrderExpirationSchedulerPort } from '../../src/modules/orders/application/ports/order-expiration.port'
 import type {
+  OrderForPayment,
+  OrderPaymentsPort,
+} from '../../src/modules/orders/application/ports/order-payments.port'
+import type {
   OrderEvents,
   OrderPage,
   OrderRepository,
@@ -16,8 +20,15 @@ import {
   ORDER_NUMBER_SEQUENCE_START,
 } from '../../src/modules/orders/domain/order-number'
 import {
+  AWAITING_PAYMENT_STATUSES,
+  type PaymentStatus,
+} from '../../src/modules/orders/domain/order-status'
+import {
   isExpirable,
+  isRefundable,
   markExpired,
+  markPaid,
+  markRefunded,
   type Order,
   type OrderContact,
   type OrderDraft,
@@ -175,6 +186,11 @@ export class InMemoryStock {
     return this.rows.get(productId)?.reserved ?? 0
   }
 
+  /** @returns Las unidades físicas del producto (`on_hand`). */
+  onHand(productId: string): number {
+    return this.rows.get(productId)?.onHand ?? 0
+  }
+
   /**
    * Reserva todo o nada, como el `UPDATE … WHERE on_hand − reserved >= q` en una transacción.
    *
@@ -206,6 +222,21 @@ export class InMemoryStock {
     for (const line of lines) {
       const row = this.rows.get(line.productId)
       if (row !== undefined) row.reserved = Math.max(0, row.reserved - line.quantity)
+    }
+  }
+
+  /**
+   * Confirma lo reservado al pagar: baja `on_hand` y `reserved`.
+   *
+   * @param lines - Unidades por producto.
+   */
+  commit(lines: readonly ReservationLine[]): void {
+    for (const line of lines) {
+      const row = this.rows.get(line.productId)
+      if (row !== undefined) {
+        row.onHand -= line.quantity
+        row.reserved = Math.max(0, row.reserved - line.quantity)
+      }
     }
   }
 }
@@ -300,7 +331,8 @@ export class InMemoryOrderRepository implements OrderRepository {
   readonly drafts: OrderDraft[] = []
   /** Cuántas veces `expire` venció de verdad un pedido. */
   expirations = 0
-  private readonly reservations = new Map<string, ReservationLine[]>()
+  /** Reservas activas por id de pedido (vacías una vez liberadas o confirmadas). */
+  readonly reservations = new Map<string, ReservationLine[]>()
   private sequence = ORDER_NUMBER_SEQUENCE_START
 
   /** @param stock - Stock compartido con el catálogo. */
@@ -377,6 +409,117 @@ export class InMemoryOrderRepository implements OrderRepository {
         .sort((a, b) => a.reservedUntil.getTime() - b.reservedUntil.getTime())
         .slice(0, limit)
         .map((order) => structuredClone(order)),
+    )
+  }
+}
+
+/** Pedido → lo que `payments` necesita para cobrarlo (las líneas no tienen id: se arma uno). */
+function toOrderForPayment(order: Order): OrderForPayment {
+  return {
+    id: order.id,
+    number: order.number,
+    status: order.status,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.paymentMethod,
+    totalArs: order.totalArs,
+    shippingCostArs: order.shipping.costArs,
+    accessTokenHash: order.accessTokenHash,
+    reservedUntil: order.reservedUntil,
+    createdAt: order.createdAt,
+    customerId: order.customerId,
+    contact: { ...order.contact },
+    lines: order.lines.map((line, position) => ({
+      id: `${order.id}-line-${String(position + 1)}`,
+      name: line.name,
+      quantity: line.quantity,
+      totalArs: line.totalArs,
+    })),
+  }
+}
+
+/**
+ * {@link OrderPaymentsPort} en memoria sobre el mismo almacén que {@link InMemoryOrderRepository}
+ * (pedidos, reservas y eventos) y el mismo {@link InMemoryStock}, con las reglas del adaptador
+ * Prisma: paga solo un pedido `pending_payment` (una vez) confirmando sus reservas
+ * (`on_hand − q`, `reserved − q`) y devuelve solo un pedido cobrado (el stock no vuelve).
+ */
+export class InMemoryOrderPayments implements OrderPaymentsPort {
+  /** Cuántas veces `markPaid` pagó de verdad un pedido. */
+  paidCount = 0
+  /** Cuántas veces `markRefunded` devolvió de verdad un pedido. */
+  refundedCount = 0
+  /** Cambios de `payment_status` pedidos con `setPaymentStatus`, en orden. */
+  readonly paymentStatusChanges: { orderId: string; status: PaymentStatus }[] = []
+
+  /**
+   * @param repository - Repositorio de pedidos en memoria (el mismo almacén).
+   * @param stock - Stock compartido con el repositorio y el catálogo.
+   */
+  constructor(
+    private readonly repository: InMemoryOrderRepository,
+    private readonly stock: InMemoryStock,
+  ) {}
+
+  /** {@inheritDoc OrderPaymentsPort.findForPayment} */
+  findForPayment(number: string): Promise<OrderForPayment | null> {
+    const order = this.repository.orders.find((candidate) => candidate.number === number)
+    return Promise.resolve(order === undefined ? null : toOrderForPayment(structuredClone(order)))
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.findForPaymentById} */
+  findForPaymentById(orderId: string): Promise<OrderForPayment | null> {
+    const order = this.repository.orders.find((candidate) => candidate.id === orderId)
+    return Promise.resolve(order === undefined ? null : toOrderForPayment(structuredClone(order)))
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.markPaid} */
+  markPaid(orderId: string, paidAt: Date, events: OrderEvents): Promise<Order | null> {
+    const index = this.repository.orders.findIndex((order) => order.id === orderId)
+    const order = this.repository.orders[index]
+    if (order?.status !== 'pending_payment') return Promise.resolve(null)
+    const paid = markPaid(order, paidAt)
+    this.repository.orders[index] = paid
+    this.stock.commit(this.repository.reservations.get(orderId) ?? [])
+    this.repository.reservations.set(orderId, [])
+    this.paidCount += 1
+    this.repository.events.push(...events(structuredClone(paid)))
+    return Promise.resolve(structuredClone(paid))
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.setPaymentStatus} */
+  setPaymentStatus(orderId: string, status: PaymentStatus): Promise<void> {
+    this.paymentStatusChanges.push({ orderId, status })
+    const index = this.repository.orders.findIndex((order) => order.id === orderId)
+    const order = this.repository.orders[index]
+    if (order !== undefined) this.repository.orders[index] = { ...order, paymentStatus: status }
+    return Promise.resolve()
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.markRefunded} */
+  markRefunded(orderId: string, at: Date, events: OrderEvents): Promise<Order | null> {
+    const index = this.repository.orders.findIndex((order) => order.id === orderId)
+    const order = this.repository.orders[index]
+    if (order === undefined || !isRefundable(order)) return Promise.resolve(null)
+    const refunded = markRefunded(order, at)
+    this.repository.orders[index] = refunded
+    this.refundedCount += 1
+    this.repository.events.push(...events(structuredClone(refunded)))
+    return Promise.resolve(structuredClone(refunded))
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.listAwaitingPayment} */
+  listAwaitingPayment(cutoff: Date, limit: number): Promise<OrderForPayment[]> {
+    return Promise.resolve(
+      this.repository.orders
+        .filter(
+          (order) =>
+            order.status === 'pending_payment' &&
+            (AWAITING_PAYMENT_STATUSES as readonly PaymentStatus[]).includes(order.paymentStatus) &&
+            order.reservedUntil.getTime() <= cutoff.getTime(),
+        )
+        .sort((a, b) => a.reservedUntil.getTime() - b.reservedUntil.getTime())
+        .slice(0, limit)
+        .map((order) => toOrderForPayment(structuredClone(order))),
     )
   }
 }

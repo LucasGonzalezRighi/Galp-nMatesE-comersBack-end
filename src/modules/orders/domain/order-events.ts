@@ -10,6 +10,9 @@ export const ORDER_CREATED_EVENT = 'order.created'
 /** Evento de pedido vencido (B5 lo usa para cancelar la preferencia de Mercado Pago). */
 export const ORDER_EXPIRED_EVENT = 'order.expired'
 
+/** Evento de pedido pagado (B7 manda el mail de la compra con él). */
+export const ORDER_PAID_EVENT = 'order.paid'
+
 /**
  * Evento `order.created` para el outbox.
  *
@@ -43,5 +46,21 @@ export function orderExpiredEvent(order: Order): NewDomainEvent {
     aggregateType: ORDER_AGGREGATE,
     aggregateId: order.number,
     payload: { orderId: order.id, number: order.number },
+  }
+}
+
+/**
+ * Evento `order.paid` para el outbox.
+ *
+ * @param order - Pedido pagado.
+ * @param paidAt - Momento del pago.
+ * @returns El evento con `{ orderId, number, paidAt }`.
+ */
+export function orderPaidEvent(order: Order, paidAt: Date): NewDomainEvent {
+  return {
+    type: ORDER_PAID_EVENT,
+    aggregateType: ORDER_AGGREGATE,
+    aggregateId: order.number,
+    payload: { orderId: order.id, number: order.number, paidAt: paidAt.toISOString() },
   }
 }
