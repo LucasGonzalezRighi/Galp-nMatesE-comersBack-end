@@ -244,6 +244,12 @@ describe('PayWithCardCommand', () => {
         aggregateId: order.number,
         payload: { orderId: order.id, number: order.number, paidAt: h.clock.now().toISOString() },
       },
+      {
+        type: 'storefront.stale',
+        aggregateType: 'storefront',
+        aggregateId: 'order.paid',
+        payload: { reason: 'order.paid', tags: ['products', 'combos'] },
+      },
     ])
     expect(only(h.gateway.callsTo('createCardPayment'))).toEqual([
       {

@@ -9,9 +9,10 @@ import { OutboxRepository } from '../../../shared/infrastructure/outbox/outbox.r
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
 import { isProductGroup } from '../../catalog/domain/category.entity'
 import {
+  catalogCacheVersion,
   productGroupCacheKey,
   productSlugCacheKey,
-} from '../../catalog/infrastructure/cached-product.repository'
+} from '../../catalog/infrastructure/catalog-cache'
 import type {
   OrderEvents,
   OrderPage,
@@ -134,28 +135,30 @@ async function nextOrderSequence(tx: Prisma.TransactionClient): Promise<number> 
 }
 
 /**
- * Claves de la caché del catálogo (slug y grupo) de los productos cuyo stock cambió; se borran
- * después de la transacción.
+ * Claves de la caché del catálogo (slug y grupo) de los productos cuyo stock cambió. Los slugs y
+ * los grupos se leen en la transacción; la versión, **después** del commit y justo antes de
+ * borrar: `await this.cache.del(...keys(await catalogCacheVersion(this.cache)))` (si se leyera
+ * antes, un bump en el medio dejaría la versión nueva con el stock viejo hasta que venza).
  *
  * @param tx - Transacción abierta.
  * @param productIds - Productos tocados.
- * @returns Las claves a borrar.
+ * @returns Las claves a borrar en una versión de la caché.
  */
 export async function catalogCacheKeys(
   tx: Prisma.TransactionClient,
   productIds: readonly string[],
-): Promise<string[]> {
-  if (productIds.length === 0) return []
+): Promise<(version: number) => string[]> {
+  if (productIds.length === 0) return () => []
   // SQL directo: un `include` dentro de la transacción manda consultas en paralelo por la misma
   // conexión (pg lo marca como obsoleto).
   const products = await tx.$queryRaw<{ slug: string; group: string }[]>`
     SELECT p.slug, c."group"::text AS "group"
     FROM products p JOIN categories c ON c.id = p.category_id
     WHERE p.id = ANY(${[...productIds]}::uuid[])`
-  const groups = new Set(products.map((product) => product.group).filter(isProductGroup))
-  return [
-    ...products.map((product) => productSlugCacheKey(product.slug)),
-    ...[...groups].map((group) => productGroupCacheKey(group)),
+  const groups = [...new Set(products.map((product) => product.group).filter(isProductGroup))]
+  return (version) => [
+    ...products.map((product) => productSlugCacheKey(product.slug, version)),
+    ...groups.map((group) => productGroupCacheKey(group, version)),
   ]
 }
 
@@ -359,7 +362,7 @@ export class PrismaOrderRepository implements OrderRepository {
         const touched = reservation.map((line) => line.productId)
         return { order: placed, keys: await catalogCacheKeys(tx, touched) }
       }, TRANSACTION_OPTIONS)
-      await this.cache.del(...keys)
+      await this.cache.del(...keys(await catalogCacheVersion(this.cache)))
       return ok(order)
     } catch (error) {
       if (error instanceof StockShortageError) return err(error.shortages)
@@ -448,7 +451,7 @@ export class PrismaOrderRepository implements OrderRepository {
       return { order, keys: await catalogCacheKeys(tx, released) }
     }, TRANSACTION_OPTIONS)
     if (outcome === null) return null
-    await this.cache.del(...outcome.keys)
+    await this.cache.del(...outcome.keys(await catalogCacheVersion(this.cache)))
     return outcome.order
   }
 

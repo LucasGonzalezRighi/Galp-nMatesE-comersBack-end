@@ -3,12 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CachePort } from '../../../shared/application/ports/cache.port'
 import { Product } from '../domain/product.entity'
 import type { ProductFilter, ProductRepository } from '../application/ports/product.repository.port'
-import {
-  CATALOG_CACHE_TTL_SECONDS,
-  CachedProductRepository,
-  productGroupCacheKey,
-  productSlugCacheKey,
-} from './cached-product.repository'
+import { CachedProductRepository } from './cached-product.repository'
+import { CATALOG_CACHE_TTL_SECONDS, bumpCatalogCacheVersion } from './catalog-cache'
 
 const PRODUCT = Product.create({
   id: 'p1',
@@ -38,6 +34,11 @@ function memoryCache() {
     get: <T>(key: string) => Promise.resolve(get(key) as T | null),
     set,
     del: () => Promise.resolve(),
+    incr: (key) => {
+      const next = Number(store.get(key) ?? 0) + 1
+      store.set(key, next)
+      return Promise.resolve(next)
+    },
   }
   return { cache, get, set }
 }
@@ -47,6 +48,7 @@ const downCache: CachePort = {
   get: () => Promise.resolve(null),
   set: () => Promise.resolve(),
   del: () => Promise.resolve(),
+  incr: () => Promise.resolve(null),
 }
 
 function innerRepository() {
@@ -77,7 +79,7 @@ describe('CachedProductRepository', () => {
     expect(second.items[0]?.toProps()).toEqual(first.items[0]?.toProps())
     expect(second.items[0]?.code()).toBe('N°01')
     const [key, , ttl] = set.mock.calls[0] ?? []
-    expect(key).toMatch(/^catalog:products:list:/)
+    expect(key).toMatch(/^catalog:v0:products:list:/)
     expect(key).toContain('"menor"')
     expect(ttl).toBe(CATALOG_CACHE_TTL_SECONDS)
     expect(CATALOG_CACHE_TTL_SECONDS).toBe(60)
@@ -99,13 +101,6 @@ describe('CachedProductRepository', () => {
     expect(set).not.toHaveBeenCalled()
   })
 
-  it('expone las claves de la ficha y del grupo para invalidarlas', () => {
-    expect(productSlugCacheKey('mate-imperial-premium')).toBe(
-      'catalog:products:slug:mate-imperial-premium',
-    )
-    expect(productGroupCacheKey('bombilla')).toBe('catalog:products:group:bombilla')
-  })
-
   it('cachea la ficha por slug y no guarda los que no existen', async () => {
     const inner = innerRepository()
     const { cache, set } = memoryCache()
@@ -118,7 +113,28 @@ describe('CachedProductRepository', () => {
     expect(again?.id).toBe('p1')
     expect(inner.findBySlug).toHaveBeenCalledTimes(2)
     expect(set.mock.calls.map(([key]) => key)).toEqual([
-      'catalog:products:slug:mate-imperial-premium',
+      'catalog:v0:products:slug:mate-imperial-premium',
+    ])
+  })
+
+  it('lee la versión en cada lectura: después de un bump la misma ficha vuelve a Postgres', async () => {
+    const inner = innerRepository()
+    const { cache, set } = memoryCache()
+    const repository = new CachedProductRepository(inner, cache)
+
+    await repository.findBySlug(PRODUCT.slug)
+    await repository.findBySlug(PRODUCT.slug)
+    expect(inner.findBySlug).toHaveBeenCalledTimes(1)
+
+    await bumpCatalogCacheVersion(cache)
+    await repository.findBySlug(PRODUCT.slug)
+    await repository.listPublishedByGroup('mate')
+
+    expect(inner.findBySlug).toHaveBeenCalledTimes(2)
+    expect(set.mock.calls.map(([key]) => key)).toEqual([
+      'catalog:v0:products:slug:mate-imperial-premium',
+      'catalog:v1:products:slug:mate-imperial-premium',
+      'catalog:v1:products:group:mate',
     ])
   })
 

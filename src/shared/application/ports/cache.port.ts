@@ -1,7 +1,7 @@
 /**
  * Caché de lecturas (catálogo, contenidos, ajustes) que **falla abierta**: si el almacenamiento
- * no responde, `get` devuelve `null` (como si no hubiera nada guardado) y `set`/`del` no hacen
- * nada, así la lectura sigue desde Postgres. Solo lanza ante argumentos inválidos (errores de
+ * no responde, `get` devuelve `null` (como si no hubiera nada guardado), `set`/`del` no hacen
+ * nada e `incr` devuelve `null`, así la lectura sigue desde Postgres. Solo lanza ante argumentos inválidos (errores de
  * programación), nunca porque el almacenamiento esté caído.
  */
 export interface CachePort {
@@ -28,6 +28,16 @@ export interface CachePort {
    * @param keys - Claves no vacías.
    */
   del(...keys: string[]): Promise<void>
+
+  /**
+   * Suma 1 a un contador entero (sin vencimiento; si no existía, arranca en 0). Lo usa la versión
+   * de la caché del catálogo (`catalog:version`).
+   *
+   * @param key - Clave no vacía.
+   * @returns El valor nuevo, o `null` si el almacenamiento no responde (falla abierta: avisa y
+   *   sigue).
+   */
+  incr(key: string): Promise<number | null>
 }
 
 /** Token de inyección del {@link CachePort}: `@Inject(CACHE_PORT) cache: CachePort`. */

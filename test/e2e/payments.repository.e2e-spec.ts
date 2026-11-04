@@ -7,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { seed } from '../../prisma/seed'
 import {
+  catalogCacheVersion,
   productGroupCacheKey,
   productSlugCacheKey,
-} from '../../src/modules/catalog/infrastructure/cached-product.repository'
+} from '../../src/modules/catalog/infrastructure/catalog-cache'
 import { CreateOrderCommand } from '../../src/modules/orders/application/commands/create-order.command'
 import { ExpireOrdersCommand } from '../../src/modules/orders/application/commands/expire-orders.command'
 import {
@@ -468,13 +469,14 @@ describe('adaptadores de pagos (Postgres + Redis + BullMQ)', () => {
         bombilla: await stockOf(bombilla),
         yerba: await stockOf(yerba),
       }
+      const version = await catalogCacheVersion(cache())
       const keys = [
-        productSlugCacheKey('mate-imperial-premium'),
-        productSlugCacheKey('bombillon-100-alpaca'),
-        productSlugCacheKey('yerba-canarias-1-kg'),
-        productGroupCacheKey('mate'),
-        productGroupCacheKey('bombilla'),
-        productGroupCacheKey('yerba'),
+        productSlugCacheKey('mate-imperial-premium', version),
+        productSlugCacheKey('bombillon-100-alpaca', version),
+        productSlugCacheKey('yerba-canarias-1-kg', version),
+        productGroupCacheKey('mate', version),
+        productGroupCacheKey('bombilla', version),
+        productGroupCacheKey('yerba', version),
       ]
       for (const key of keys) await cache().set(key, { viejo: true }, 60)
       const { attempt } = await payments().startAttempt(attemptFor(order))

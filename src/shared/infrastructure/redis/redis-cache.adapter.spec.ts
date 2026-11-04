@@ -16,6 +16,11 @@ function workingRedis() {
     get: (key) => Promise.resolve(store.get(key) ?? null),
     set,
     del,
+    incr: (key) => {
+      const next = Number(store.get(key) ?? '0') + 1
+      store.set(key, String(next))
+      return Promise.resolve(next)
+    },
   }
   return { client, store, set, del }
 }
@@ -24,7 +29,7 @@ function workingRedis() {
 function failingRedis(): RedisCacheClient {
   const fail = (): Promise<never> =>
     Promise.reject(new Error('connect ECONNREFUSED 127.0.0.1:6379'))
-  return { get: fail, set: fail, del: fail }
+  return { get: fail, set: fail, del: fail, incr: fail }
 }
 
 function fakeLogger() {
@@ -39,6 +44,15 @@ describe('RedisCacheAdapter', () => {
       await expect(cache.get('catalog:products')).resolves.toBeNull()
       await expect(cache.set('catalog:products', { a: 1 }, 60)).resolves.toBeUndefined()
       await expect(cache.del('catalog:products')).resolves.toBeUndefined()
+    })
+
+    it('incr devuelve null y avisa por warn', async () => {
+      const logger = fakeLogger()
+      const cache = new RedisCacheAdapter(failingRedis(), logger)
+
+      await expect(cache.incr('catalog:version')).resolves.toBeNull()
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+      expect(logger.warn.mock.calls[0]?.[0]).toContain('catalog:version')
     })
 
     it('loguea un warn como mucho una vez por minuto', async () => {
@@ -95,6 +109,14 @@ describe('RedisCacheAdapter', () => {
       await expect(cache.get('b')).resolves.toBeNull()
     })
 
+    it('incr suma 1 al contador y devuelve el valor nuevo (1 si no existía)', async () => {
+      const cache = new RedisCacheAdapter(workingRedis().client, fakeLogger())
+
+      await expect(cache.incr('catalog:version')).resolves.toBe(1)
+      await expect(cache.incr('catalog:version')).resolves.toBe(2)
+      await expect(cache.get('catalog:version')).resolves.toBe(2)
+    })
+
     it('un valor guardado que no es JSON válido cuenta como ausente', async () => {
       const redis = workingRedis()
       redis.store.set('roto', '{no es json')
@@ -113,6 +135,7 @@ describe('RedisCacheAdapter', () => {
       await expect(cache.get('')).rejects.toThrow('La clave de caché no puede estar vacía')
       await expect(cache.set(' ', 1, 60)).rejects.toThrow('La clave de caché no puede estar vacía')
       await expect(cache.del('a', '')).rejects.toThrow('La clave de caché no puede estar vacía')
+      await expect(cache.incr('')).rejects.toThrow('La clave de caché no puede estar vacía')
     })
 
     it('rechaza un TTL que no es un entero positivo', async () => {

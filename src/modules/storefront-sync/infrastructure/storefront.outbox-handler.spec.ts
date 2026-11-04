@@ -40,11 +40,30 @@ describe('StorefrontOutboxHandler', () => {
     vi.restoreAllMocks()
   })
 
-  it('se registra para combo.changed al crearse', () => {
+  it('se registra para combo.changed y storefront.stale al crearse', () => {
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     const { handler, registry } = handlerWith(SECRET)
 
     expect(registry.handlersFor('combo.changed')).toEqual([handler])
+    expect(registry.handlersFor('storefront.stale')).toEqual([handler])
+  })
+
+  it('storefront.stale encola las etiquetas del evento', async () => {
+    const { handler, queue } = handlerWith(SECRET)
+
+    await handler.handle({
+      ...comboChanged('e3'),
+      type: 'storefront.stale',
+      aggregateType: 'storefront',
+      aggregateId: 'order.created',
+      payload: { reason: 'order.created', tags: ['products', 'combos'] },
+    })
+
+    expect(queue.add).toHaveBeenCalledWith(
+      STOREFRONT_REVALIDATE_JOB,
+      { eventId: 'e3', eventType: 'storefront.stale', tags: ['products', 'combos'] },
+      { ...STOREFRONT_REVALIDATE_JOB_OPTIONS, jobId: 'e3' },
+    )
   })
 
   it('con secreto encola el aviso con jobId = id del evento y las opciones de la cola', async () => {

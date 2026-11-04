@@ -122,7 +122,7 @@ describe('ApplyProviderPaymentCommand · Review Focus 2: notificaciones repetida
     expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
     expect(h.orders.paidCount).toBe(1)
     expect(h.payments.events.map((event) => event.type)).toEqual(['payment.approved'])
-    expect(h.orders.events.map((event) => event.type)).toEqual(['order.paid'])
+    expect(h.orders.events.map((event) => event.type)).toEqual(['order.paid', 'storefront.stale'])
     expect(h.payments.refunds.size).toBe(0)
   })
 

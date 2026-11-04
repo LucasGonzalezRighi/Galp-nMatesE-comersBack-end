@@ -93,12 +93,12 @@ describe('lecturas del catálogo, contenidos, reseñas y ajustes (Postgres + Red
     const keys = await cache().keys('*')
     expect(keys).toEqual(
       expect.arrayContaining([
-        'catalog:products:slug:mate-imperial-premium',
+        'catalog:v0:products:slug:mate-imperial-premium',
         'settings:store',
         'content:product-tabs',
       ]),
     )
-    const listKey = keys.find((key) => key.startsWith('catalog:products:list:'))
+    const listKey = keys.find((key) => key.startsWith('catalog:v0:products:list:'))
     expect(listKey).toContain('"menor"')
     expect(await cache().ttl(listKey ?? '')).toBeLessThanOrEqual(60)
     expect(await cache().ttl('settings:store')).toBeGreaterThan(60)

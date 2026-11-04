@@ -9,33 +9,14 @@ import type {
   ProductList,
   ProductRepository,
 } from '../application/ports/product.repository.port'
+import {
+  CATALOG_CACHE_TTL_SECONDS,
+  catalogCacheVersion,
+  productGroupCacheKey,
+  productListCacheKey,
+  productSlugCacheKey,
+} from './catalog-cache'
 import { PrismaProductRepository } from './prisma-product.repository'
-
-/** Vida de las lecturas del catálogo en la caché (claves `catalog:*`). */
-export const CATALOG_CACHE_TTL_SECONDS = 60
-
-/** Prefijo de las claves de productos en la caché. */
-export const PRODUCT_CACHE_PREFIX = 'catalog:products'
-
-/**
- * Clave de la ficha de un producto en la caché.
- *
- * @param slug - Slug del producto.
- * @returns `catalog:products:slug:<slug>` (la borra quien cambia su stock, como `orders`).
- */
-export function productSlugCacheKey(slug: string): string {
-  return `${PRODUCT_CACHE_PREFIX}:slug:${slug}`
-}
-
-/**
- * Clave de los productos publicados de un grupo (piezas del armador de kits) en la caché.
- *
- * @param group - Grupo del producto.
- * @returns `catalog:products:group:<group>` (la borra quien cambia el stock de uno de ellos).
- */
-export function productGroupCacheKey(group: ProductGroup): string {
-  return `${PRODUCT_CACHE_PREFIX}:group:${group}`
-}
 
 /** Página cacheada: los productos van como datos planos y se vuelven a crear al leer. */
 interface CachedProductList {
@@ -44,26 +25,9 @@ interface CachedProductList {
 }
 
 /**
- * Clave del listado: el filtro serializado con un orden de campos fijo, para que dos filtros
- * iguales den la misma clave.
- */
-function listKey(filter: ProductFilter): string {
-  const parts = [
-    filter.category ?? null,
-    filter.group ?? null,
-    filter.ids ?? null,
-    filter.q ?? null,
-    filter.sort,
-    filter.featured ?? false,
-    filter.page,
-    filter.pageSize,
-  ]
-  return `${PRODUCT_CACHE_PREFIX}:list:${JSON.stringify(parts)}`
-}
-
-/**
- * Decora el repositorio de productos con la caché (60 s, claves `catalog:products:*`). La caché
- * falla abierta: con Redis caído cada lectura va a Postgres.
+ * Decora el repositorio de productos con la caché (60 s, claves `catalog:v{n}:products:*`). Cada
+ * lectura lee la versión vigente (`catalog:version`): después de un bump, todo vuelve a Postgres.
+ * La caché falla abierta: con Redis caído cada lectura va a Postgres.
  *
  * Los listados filtrados por `ids` no se cachean: la tienda los usa para conciliar las cantidades
  * del carrito con el stock, que cambia con cada reserva (y sus claves no se pueden borrar sin
@@ -85,7 +49,7 @@ export class CachedProductRepository implements ProductRepository {
     if (filter.ids !== undefined) return this.inner.list(filter)
     const cached = await readThrough<CachedProductList>(
       this.cache,
-      listKey(filter),
+      productListCacheKey(filter, await catalogCacheVersion(this.cache)),
       CATALOG_CACHE_TTL_SECONDS,
       async () => {
         const list = await this.inner.list(filter)
@@ -99,7 +63,7 @@ export class CachedProductRepository implements ProductRepository {
   async findBySlug(slug: string): Promise<Product | null> {
     const props = await readThrough<ProductProps | null>(
       this.cache,
-      productSlugCacheKey(slug),
+      productSlugCacheKey(slug, await catalogCacheVersion(this.cache)),
       CATALOG_CACHE_TTL_SECONDS,
       async () => (await this.inner.findBySlug(slug))?.toProps() ?? null,
     )
@@ -110,7 +74,7 @@ export class CachedProductRepository implements ProductRepository {
   async listPublishedByGroup(group: ProductGroup): Promise<Product[]> {
     const items = await readThrough<ProductProps[]>(
       this.cache,
-      productGroupCacheKey(group),
+      productGroupCacheKey(group, await catalogCacheVersion(this.cache)),
       CATALOG_CACHE_TTL_SECONDS,
       async () =>
         (await this.inner.listPublishedByGroup(group)).map((product) => product.toProps()),

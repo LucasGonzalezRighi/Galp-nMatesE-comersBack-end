@@ -7,13 +7,13 @@ import type {
   CategoryListing,
   CategoryRepository,
 } from '../application/ports/category.repository.port'
-import { CATALOG_CACHE_TTL_SECONDS } from './cached-product.repository'
+import { CATALOG_CACHE_TTL_SECONDS, catalogCacheVersion, categoriesCacheKey } from './catalog-cache'
 import { PrismaCategoryRepository } from './prisma-category.repository'
 
-/** Clave de las líneas en la caché. */
-export const CATEGORIES_CACHE_KEY = 'catalog:categories'
-
-/** Decora el repositorio de líneas con la caché (60 s, clave `catalog:categories`). */
+/**
+ * Decora el repositorio de líneas con la caché (60 s, clave `catalog:v{n}:categories`, con la
+ * versión vigente leída en cada lectura).
+ */
 @Injectable()
 export class CachedCategoryRepository implements CategoryRepository {
   /**
@@ -29,7 +29,7 @@ export class CachedCategoryRepository implements CategoryRepository {
   async list(): Promise<CategoryListing[]> {
     const listings = await readThrough(
       this.cache,
-      CATEGORIES_CACHE_KEY,
+      categoriesCacheKey(await catalogCacheVersion(this.cache)),
       CATALOG_CACHE_TTL_SECONDS,
       () => this.inner.list(),
     )

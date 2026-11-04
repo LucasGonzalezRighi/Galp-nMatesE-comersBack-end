@@ -1,19 +1,32 @@
-import { COMBO_CHANGED_EVENT } from '../../catalog/domain/combo-events'
+import {
+  STOREFRONT_STALE_EVENT,
+  STOREFRONT_TAG_PATTERN,
+} from '../../../shared/domain/storefront-tags'
 
 /**
- * Etiquetas de caché que acepta `POST /api/revalidate` de la tienda: igual a
- * `REVALIDATE_TAG_PATTERN` de `apps/store/src/lib/revalidate.ts` del front, con `combos`. Si la
- * tienda cambia su patrón, este también.
+ * Evento de combos del catálogo (`COMBO_CHANGED_EVENT`), como texto: este módulo no importa nada
+ * de `catalog`. Sigue avisando `combos`, también para los eventos que queden sin publicar al
+ * desplegar.
  */
-export const STOREFRONT_TAG_PATTERN =
-  /^(products|categories|settings|combos|product:[a-z0-9-]+|reviews:[a-z0-9-]+|content:[a-z-]+)$/
+const COMBO_CHANGED_EVENT = 'combo.changed'
 
-/** Máximo de etiquetas por pedido a la tienda (`MAX_TAGS` de su ruta). */
-export const STOREFRONT_MAX_TAGS = 50
+/**
+ * Etiquetas de un `storefront.stale`: las de `payload.tags`, solo las que son texto.
+ *
+ * @param payload - Datos del evento (`{ reason, tags }`).
+ * @returns Las etiquetas, o vacío si el evento no trae la lista.
+ */
+function staleTags(payload: unknown): readonly string[] {
+  if (typeof payload !== 'object' || payload === null || !('tags' in payload)) return []
+  const { tags } = payload
+  if (!Array.isArray(tags)) return []
+  return tags.filter((tag): tag is string => typeof tag === 'string')
+}
 
-/** Qué etiquetas regenera cada tipo de evento (B6 suma productos, categorías, contenidos…). */
+/** Qué etiquetas regenera cada tipo de evento. */
 const TAGS_BY_EVENT = new Map<string, (payload: unknown) => readonly string[]>([
   [COMBO_CHANGED_EVENT, () => ['combos']],
+  [STOREFRONT_STALE_EVENT, staleTags],
 ])
 
 /** Tipos de evento del outbox que le avisan algo a la tienda. */
@@ -22,8 +35,8 @@ export const STOREFRONT_EVENT_TYPES: readonly string[] = [...TAGS_BY_EVENT.keys(
 /**
  * Etiquetas que la tienda tiene que regenerar por un evento del outbox.
  *
- * @param type - Tipo del evento, por ejemplo `combo.changed`.
- * @param payload - Datos del evento (B6 los usa para `product:{slug}`).
+ * @param type - Tipo del evento, por ejemplo `storefront.stale` o `combo.changed`.
+ * @param payload - Datos del evento (`storefront.stale` trae sus etiquetas en `tags`).
  * @returns Las etiquetas, sin repetidas y solo las que cumplen {@link STOREFRONT_TAG_PATTERN}
  *   (nunca algo que la tienda rechace con 422); vacío si el tipo no le importa a la tienda.
  */

@@ -7,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { comboSeedId, seed } from '../../prisma/seed'
 import {
+  catalogCacheVersion,
   productGroupCacheKey,
   productSlugCacheKey,
-} from '../../src/modules/catalog/infrastructure/cached-product.repository'
+} from '../../src/modules/catalog/infrastructure/catalog-cache'
 import {
   CUSTOMER_REPOSITORY,
   type CustomerRepository,
@@ -188,13 +189,14 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
           quantity: 1,
         },
       ]
+      const version = await catalogCacheVersion(cache())
       const keys = [
-        productSlugCacheKey(mate.slug),
-        productSlugCacheKey(bombilla.slug),
-        productSlugCacheKey(yerba.slug),
-        productGroupCacheKey('mate'),
-        productGroupCacheKey('bombilla'),
-        productGroupCacheKey('yerba'),
+        productSlugCacheKey(mate.slug, version),
+        productSlugCacheKey(bombilla.slug, version),
+        productSlugCacheKey(yerba.slug, version),
+        productGroupCacheKey('mate', version),
+        productGroupCacheKey('bombilla', version),
+        productGroupCacheKey('yerba', version),
       ]
       for (const key of keys) await cache().set(key, { viejo: true }, 60)
       expect(await cache().get(keys[0] ?? '')).toEqual({ viejo: true })
@@ -536,7 +538,8 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         draftOf([[yerba, 2]], { createdAt: new Date(Date.now() - 31 * MINUTE) }),
       )
       expect(await reservedOf(yerba.id)).toBe(before + 2)
-      await cache().set(productSlugCacheKey(yerba.slug), { viejo: true }, 60)
+      const version = await catalogCacheVersion(cache())
+      await cache().set(productSlugCacheKey(yerba.slug, version), { viejo: true }, 60)
 
       const now = new Date()
       const results = await Promise.all(
@@ -551,7 +554,7 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         { status: 'expired', at: order.reservedUntil, note: null },
       ])
       expect(await reservedOf(yerba.id)).toBe(before)
-      expect(await cache().get(productSlugCacheKey(yerba.slug))).toBeNull()
+      expect(await cache().get(productSlugCacheKey(yerba.slug, version))).toBeNull()
       const history = await prisma().orderStatusHistory.findMany({
         where: { orderId: order.id, toStatus: 'expired' },
       })
@@ -736,13 +739,14 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         bombilla: await stockOf(bombilla.id),
         yerba: await stockOf(yerba.id),
       }
+      const version = await catalogCacheVersion(cache())
       const keys = [
-        productSlugCacheKey(mate.slug),
-        productSlugCacheKey(bombilla.slug),
-        productSlugCacheKey(yerba.slug),
-        productGroupCacheKey('mate'),
-        productGroupCacheKey('bombilla'),
-        productGroupCacheKey('yerba'),
+        productSlugCacheKey(mate.slug, version),
+        productSlugCacheKey(bombilla.slug, version),
+        productSlugCacheKey(yerba.slug, version),
+        productGroupCacheKey('mate', version),
+        productGroupCacheKey('bombilla', version),
+        productGroupCacheKey('yerba', version),
       ]
       for (const key of keys) await cache().set(key, { viejo: true }, 60)
       const paidAt = new Date()

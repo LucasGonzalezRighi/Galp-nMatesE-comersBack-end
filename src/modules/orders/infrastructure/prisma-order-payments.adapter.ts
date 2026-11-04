@@ -15,6 +15,7 @@ import {
   REFUNDABLE_ORDER_STATUSES,
 } from '../domain/order-status'
 import { isRefundable, markPaid, markRefunded, type Order } from '../domain/order.entity'
+import { catalogCacheVersion } from '../../catalog/infrastructure/catalog-cache'
 import { ORDER_INCLUDE, toOrder, UUID_PATTERN } from './order.mapper'
 import {
   assertBatchLimit,
@@ -154,7 +155,7 @@ export class PrismaOrderPaymentsAdapter implements OrderPaymentsPort {
       return { keys: await catalogCacheKeys(tx, committed) }
     }, TRANSACTION_OPTIONS)
     if (outcome === null) return null
-    await this.cache.del(...outcome.keys)
+    await this.cache.del(...outcome.keys(await catalogCacheVersion(this.cache)))
     return paid
   }
 

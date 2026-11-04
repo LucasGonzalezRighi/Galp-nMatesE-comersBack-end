@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ShippingOption } from '../../settings/domain/store-settings.entity'
-import { orderCreatedEvent, orderExpiredEvent, orderPaidEvent } from './order-events'
+import {
+  type OrderStockChange,
+  orderCreatedEvent,
+  orderExpiredEvent,
+  orderPaidEvent,
+  orderStorefrontEvent,
+} from './order-events'
 import {
   isExpirable,
   isRefundable,
@@ -151,6 +157,22 @@ describe('pedido', () => {
       aggregateId: 'GLP-10001',
       payload: { orderId: 'ord-1', number: 'GLP-10001', paidAt: '2026-11-02T12:10:00.000Z' },
     })
+  })
+
+  it.each(['order.created', 'order.paid', 'order.expired', 'order.cancelled'] as const)(
+    'el aviso a la tienda de %s regenera products y combos',
+    (reason) => {
+      expect(orderStorefrontEvent(reason)).toEqual({
+        type: 'storefront.stale',
+        aggregateType: 'storefront',
+        aggregateId: reason,
+        payload: { reason, tags: ['products', 'combos'] },
+      })
+    },
+  )
+
+  it('el aviso a la tienda rechaza un cambio que no mueve stock', () => {
+    expect(() => orderStorefrontEvent('order.shipped' as OrderStockChange)).toThrow(RangeError)
   })
 })
 

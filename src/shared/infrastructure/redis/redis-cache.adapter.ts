@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common'
 import type { CachePort } from '../../application/ports/cache.port'
 import { createRateLimitedWarn, errorMessage, type WarnLogger } from './rate-limited-warn'
 
-/** Los tres comandos de ioredis que usa la caché (un `Redis` de ioredis lo cumple). */
+/** Los cuatro comandos de ioredis que usa la caché (un `Redis` de ioredis lo cumple). */
 export interface RedisCacheClient {
   /** `GET key`: el texto guardado o `null`. */
   get(key: string): Promise<string | null>
@@ -11,12 +11,15 @@ export interface RedisCacheClient {
   set(key: string, value: string, secondsToken: 'EX', seconds: number): Promise<unknown>
   /** `DEL key [key ...]`: cuántas claves borró. */
   del(...keys: string[]): Promise<number>
+  /** `INCR key`: el valor nuevo del contador. */
+  incr(key: string): Promise<number>
 }
 
 /**
  * {@link CachePort} sobre Redis que **nunca lanza por fallas de Redis**: si un comando falla,
- * `get` devuelve `null`, `set`/`del` no hacen nada y se avisa por `warn` como mucho una vez por
- * minuto. Los valores se guardan como JSON.
+ * `get` e `incr` devuelven `null`, `set`/`del` no hacen nada y se avisa por `warn` como mucho una
+ * vez por minuto. Los valores se guardan como JSON (un contador de `incr` se lee con `get` como
+ * número).
  */
 export class RedisCacheAdapter implements CachePort {
   private readonly warn: (message: string) => void
@@ -78,6 +81,17 @@ export class RedisCacheAdapter implements CachePort {
       this.warn(
         `Caché sin Redis (no se borran ${String(keys.length)} claves): ${errorMessage(error)}`,
       )
+    }
+  }
+
+  /** {@inheritDoc CachePort.incr} */
+  async incr(key: string): Promise<number | null> {
+    assertKey(key)
+    try {
+      return await this.redis.incr(key)
+    } catch (error) {
+      this.warn(`Caché sin Redis (no se incrementa "${key}"): ${errorMessage(error)}`)
+      return null
     }
   }
 }

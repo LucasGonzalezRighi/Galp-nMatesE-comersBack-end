@@ -5,6 +5,7 @@ import type {
   OrderForPayment,
   OrderPaymentsPort,
 } from '../../../orders/application/ports/order-payments.port'
+import { orderStorefrontEvent } from '../../../orders/domain/order-events'
 import type { OrderStatus, PaymentStatus } from '../../../orders/domain/order-status'
 import {
   isActiveStatus,
@@ -266,6 +267,7 @@ export class ApplyProviderPaymentCommand {
       }
       const paid = await this.orders.markPaid(order.id, now, (paidOrder) => [
         orderPaidEvent(paidOrder, now),
+        orderStorefrontEvent('order.paid'),
       ])
       if (paid !== null) return
       // Otro proceso lo cambió en el medio (otro pago lo pagó o venció): se decide con lo actual.

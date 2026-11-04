@@ -5,7 +5,7 @@ import { newId } from '../../../../shared/domain/id'
 import { normalizeEmail } from '../../../identity/domain/email'
 import type { ShippingMethod } from '../../../settings/domain/store-settings.entity'
 import { type CartItem, cartComboIds, cartProductIds } from '../../domain/cart-line'
-import { orderCreatedEvent } from '../../domain/order-events'
+import { orderCreatedEvent, orderStorefrontEvent } from '../../domain/order-events'
 import { HONEYPOT_ORDER_NUMBER } from '../../domain/order-number'
 import { isPaymentMethod, type PaymentMethod } from '../../domain/order-status'
 import {
@@ -195,7 +195,10 @@ export class CreateOrderCommand {
     }
 
     draft.customerId = await this.ownerOf(contact, context.customerId)
-    const created = await this.orders.create(draft, (order) => [orderCreatedEvent(order)])
+    const created = await this.orders.create(draft, (order) => [
+      orderCreatedEvent(order),
+      orderStorefrontEvent('order.created'),
+    ])
     if (!created.ok) {
       throw new OrderConflictError(
         'stock_changed',

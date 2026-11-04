@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CachePort } from '../../../shared/application/ports/cache.port'
 import type { OutboxRepository } from '../../../shared/infrastructure/outbox/outbox.repository'
 import type { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
+import type { Prisma } from '../../../generated/prisma/client'
 import type { PaymentStatus } from '../domain/order-status'
 import { PrismaOrderPaymentsAdapter } from './prisma-order-payments.adapter'
+import { catalogCacheKeys } from './prisma-order.repository'
 
 /** Adaptador con una base que no se puede tocar: cada consulta es un `vi.fn()` que falla. */
 function setup() {
@@ -13,7 +15,7 @@ function setup() {
     $transaction: vi.fn(fail),
     order: { findUnique: vi.fn(fail), findMany: vi.fn(fail), updateMany: vi.fn(fail) },
   }
-  const cache = { del: vi.fn(fail) }
+  const cache = { get: vi.fn(fail), del: vi.fn(fail) }
   const adapter = new PrismaOrderPaymentsAdapter(
     prisma as unknown as PrismaService,
     {} as OutboxRepository,
@@ -24,6 +26,7 @@ function setup() {
     expect(prisma.order.findUnique).not.toHaveBeenCalled()
     expect(prisma.order.findMany).not.toHaveBeenCalled()
     expect(prisma.order.updateMany).not.toHaveBeenCalled()
+    expect(cache.get).not.toHaveBeenCalled()
     expect(cache.del).not.toHaveBeenCalled()
   }
   return { adapter, untouched }
@@ -64,5 +67,40 @@ describe('PrismaOrderPaymentsAdapter (validaciones, sin base)', () => {
       'El estado del pago "paid" no existe',
     )
     untouched()
+  })
+})
+
+describe('catalogCacheKeys', () => {
+  it('lee slugs y grupos en la transacción y arma las claves con la versión que recibe', async () => {
+    const $queryRaw = vi.fn(() =>
+      Promise.resolve([
+        { slug: 'mate-imperial-premium', group: 'mate' },
+        { slug: 'mate-camionero', group: 'mate' },
+        { slug: 'bombillon-100-alpaca', group: 'bombilla' },
+        { slug: 'raro', group: 'otro' },
+      ]),
+    )
+    const tx = { $queryRaw } as unknown as Prisma.TransactionClient
+
+    const keys = await catalogCacheKeys(tx, ['p1', 'p2', 'p3', 'p4'])
+
+    expect($queryRaw).toHaveBeenCalledTimes(1)
+    expect(keys(3)).toEqual([
+      'catalog:v3:products:slug:mate-imperial-premium',
+      'catalog:v3:products:slug:mate-camionero',
+      'catalog:v3:products:slug:bombillon-100-alpaca',
+      'catalog:v3:products:slug:raro',
+      'catalog:v3:products:group:mate',
+      'catalog:v3:products:group:bombilla',
+    ])
+    expect(keys(4)[0]).toBe('catalog:v4:products:slug:mate-imperial-premium')
+  })
+
+  it('sin productos no consulta y no borra nada', async () => {
+    const $queryRaw = vi.fn()
+    const tx = { $queryRaw } as unknown as Prisma.TransactionClient
+
+    expect((await catalogCacheKeys(tx, []))(0)).toEqual([])
+    expect($queryRaw).not.toHaveBeenCalled()
   })
 })

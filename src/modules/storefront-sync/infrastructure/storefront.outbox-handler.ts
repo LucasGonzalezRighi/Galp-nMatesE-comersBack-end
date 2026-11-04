@@ -21,8 +21,8 @@ export const NO_STORE_SECRET_WARNING =
   'Sin STORE_REVALIDATE_SECRET la tienda no se entera de los cambios: se regenera por tiempo'
 
 /**
- * Handler del outbox que le avisa a la tienda: por cada evento que le importa (hoy
- * `combo.changed`) encola un job `storefront.revalidate` con las etiquetas a regenerar y
+ * Handler del outbox que le avisa a la tienda: por cada evento que le importa
+ * (`storefront.stale` y `combo.changed`) encola un job `storefront.revalidate` con las etiquetas a regenerar y
  * `jobId` = id del evento (un reintento del outbox no duplica el aviso). Solo encola: el HTTP va
  * en la cola `storefront-revalidate`, así una tienda caída no hace reintentar a los demás
  * handlers del evento. Sin `STORE_REVALIDATE_SECRET` no encola nada (lo avisa una vez al

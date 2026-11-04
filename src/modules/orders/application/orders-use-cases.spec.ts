@@ -210,6 +210,12 @@ describe('CreateOrderCommand', () => {
           reservedUntil: reservedUntil.toISOString(),
         },
       },
+      {
+        type: 'storefront.stale',
+        aggregateType: 'storefront',
+        aggregateId: 'order.created',
+        payload: { reason: 'order.created', tags: ['products', 'combos'] },
+      },
     ])
     expect(t.scheduler.scheduled).toEqual([{ orderId: saved?.id, at: reservedUntil }])
   })
@@ -654,7 +660,12 @@ describe('GetOrderQuery', () => {
       { status: 'expired', at: result.order.reservedUntil, note: null },
     ])
     expect(t.stock.reserved(imperialPremium.id)).toBe(0)
-    expect(t.orders.events.map((event) => event.type)).toEqual(['order.created', 'order.expired'])
+    expect(t.orders.events.map((event) => [event.type, event.aggregateId])).toEqual([
+      ['order.created', 'GLP-10001'],
+      ['storefront.stale', 'order.created'],
+      ['order.expired', 'GLP-10001'],
+      ['storefront.stale', 'order.expired'],
+    ])
   })
 })
 
@@ -747,12 +758,20 @@ describe('ExpireOrdersCommand', () => {
     expect(await t.expire.expireDue()).toEqual({ expired: 0, failed: [] })
     expect(t.orders.expirations).toBe(1)
     expect(t.stock.reserved(imperialPremium.id)).toBe(0)
-    expect(t.orders.events.at(-1)).toEqual({
-      type: 'order.expired',
-      aggregateType: 'order',
-      aggregateId: 'GLP-10001',
-      payload: { orderId: id, number: 'GLP-10001' },
-    })
+    expect(t.orders.events.slice(-2)).toEqual([
+      {
+        type: 'order.expired',
+        aggregateType: 'order',
+        aggregateId: 'GLP-10001',
+        payload: { orderId: id, number: 'GLP-10001' },
+      },
+      {
+        type: 'storefront.stale',
+        aggregateType: 'storefront',
+        aggregateId: 'order.expired',
+        payload: { reason: 'order.expired', tags: ['products', 'combos'] },
+      },
+    ])
   })
 
   it('vence los atrasados de a tandas y devuelve cuántos venció', async () => {

@@ -1,5 +1,5 @@
 import type { Clock } from '../../../../shared/domain/clock'
-import { orderExpiredEvent } from '../../domain/order-events'
+import { orderExpiredEvent, orderStorefrontEvent } from '../../domain/order-events'
 import { isExpirable, type Order } from '../../domain/order.entity'
 import type { OrderRepository } from '../ports/order.repository.port'
 
@@ -24,9 +24,9 @@ export interface ExpireDueResult {
   failed: ExpireFailure[]
 }
 
-/** Eventos del vencimiento: `order.expired`, en la misma transacción. */
+/** Eventos del vencimiento, en la misma transacción: `order.expired` y el aviso a la tienda. */
 function expiredEvents(order: Order) {
-  return [orderExpiredEvent(order)]
+  return [orderExpiredEvent(order), orderStorefrontEvent('order.expired')]
 }
 
 /**

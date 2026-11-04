@@ -1,5 +1,5 @@
 import type { StorefrontPort, StorefrontRevalidation } from '../application/ports/storefront.port'
-import { STOREFRONT_MAX_TAGS, STOREFRONT_TAG_PATTERN } from '../domain/storefront-tags'
+import { STOREFRONT_MAX_TAGS, STOREFRONT_TAG_PATTERN } from '../../../shared/domain/storefront-tags'
 
 /** Tiempo máximo de cada pedido a la tienda. */
 export const STOREFRONT_TIMEOUT_MS = 5_000

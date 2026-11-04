@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  STOREFRONT_EVENT_TYPES,
-  STOREFRONT_MAX_TAGS,
-  STOREFRONT_TAG_PATTERN,
-  storefrontTagsFor,
-} from './storefront-tags'
+import { STOREFRONT_EVENT_TYPES, storefrontTagsFor } from './storefront-tags'
 
 describe('storefrontTagsFor', () => {
   it('combo.changed regenera la etiqueta combos', () => {
@@ -14,29 +9,33 @@ describe('storefrontTagsFor', () => {
     ])
   })
 
+  it('storefront.stale regenera las etiquetas que trae, en su orden', () => {
+    expect(
+      storefrontTagsFor('storefront.stale', { reason: 'x', tags: ['products', 'combos'] }),
+    ).toEqual(['products', 'combos'])
+  })
+
+  it('storefront.stale sin lista de etiquetas no regenera nada', () => {
+    expect(storefrontTagsFor('storefront.stale', { reason: 'x' })).toEqual([])
+    expect(storefrontTagsFor('storefront.stale', { reason: 'x', tags: 'products' })).toEqual([])
+    expect(storefrontTagsFor('storefront.stale', null)).toEqual([])
+  })
+
+  it('storefront.stale descarta repetidas y lo que la tienda rechazaría', () => {
+    expect(
+      storefrontTagsFor('storefront.stale', {
+        reason: 'x',
+        tags: ['products', 'products', 'product:Mate', 3, 'combos'],
+      }),
+    ).toEqual(['products', 'combos'])
+  })
+
   it('un tipo desconocido no regenera nada', () => {
     expect(storefrontTagsFor('order.created', {})).toEqual([])
     expect(storefrontTagsFor('constructor', {})).toEqual([])
   })
 
   it('los tipos que mapea son los que se registran en el outbox', () => {
-    expect(STOREFRONT_EVENT_TYPES).toEqual(['combo.changed'])
-  })
-})
-
-describe('STOREFRONT_TAG_PATTERN', () => {
-  it.each(['combos', 'products', 'product:mate-imperial-premium', 'content:legal-terms'])(
-    'acepta %s',
-    (tag) => {
-      expect(STOREFRONT_TAG_PATTERN.test(tag)).toBe(true)
-    },
-  )
-
-  it.each(['../x', 'product:Mate', 'combos ', ''])('rechaza "%s"', (tag) => {
-    expect(STOREFRONT_TAG_PATTERN.test(tag)).toBe(false)
-  })
-
-  it('la tienda acepta hasta 50 etiquetas por pedido', () => {
-    expect(STOREFRONT_MAX_TAGS).toBe(50)
+    expect(STOREFRONT_EVENT_TYPES).toEqual(['combo.changed', 'storefront.stale'])
   })
 })
