@@ -53,7 +53,7 @@ export const SEED_CONTENT_BLOCKS: readonly SeedContentBlock[] = [
           key: 'leather',
           eyebrow: 'Hacelo tuyo',
           titleLines: ['Elegí', 'el cuero.'],
-          text: 'Negro, marrón, crudo o borravino. Elegís el cuero y la virola en la página de cada mate.',
+          text: 'Negro, marrón, crudo o borravino. Elegís el cuero en la página de cada mate.',
           ctaLabel: 'Armá tu kit',
         },
       ],
@@ -67,8 +67,8 @@ export const SEED_CONTENT_BLOCKS: readonly SeedContentBlock[] = [
           'yerba-canarias-te-y-jengibre-1-kg',
         ],
       },
-      collection: { eyebrow: 'Colección', title: 'Seis líneas para cada ronda' },
-      featured: { eyebrow: 'Destacados', title: 'Los más elegidos de la ronda' },
+      collection: { eyebrow: 'Colección', title: 'Categorías' },
+      featured: { eyebrow: 'Destacados', title: 'Los más vendidos' },
       reviews: { eyebrow: 'Reseñas', title: 'Lo que dice la ronda' },
       manifesto: {
         eyebrow: 'Manifiesto',
@@ -261,7 +261,7 @@ export const SEED_CONTENT_BLOCKS: readonly SeedContentBlock[] = [
           'Cada pieza es artesanal: los tonos de la calabaza, el cuero y el cincelado pueden variar.',
         materialsTitle: 'Materiales',
         materials:
-          'Calabaza natural curable, virola de alpaca o acero según variante, cuero vacuno cosido a mano y base de alpaca o cuero según el modelo.',
+          'Calabaza natural curable, cuero vacuno cosido a mano y base de alpaca o cuero según el modelo. La virola de cada mate está en su descripción.',
         careTitle: 'Cuidado',
         care: 'Curalo antes del primer uso. Después de cada ronda, secalo boca abajo y evitá el sol directo sobre el cuero. Más detalles en Preguntas frecuentes.',
       },

@@ -47,6 +47,9 @@ export interface SeedTabsOverride extends SeedJsonObject {
   care?: string
 }
 
+/** Cuero de un mate, en el orden canónico del contrato (`Leather`). */
+export type SeedLeather = 'Negro' | 'Marrón' | 'Crudo' | 'Borravino'
+
 /** Producto del catálogo con su stock y sus fotos. */
 export interface SeedProduct {
   /** Correlativo del que sale el código (`7` → "N°07"). */
@@ -65,6 +68,8 @@ export interface SeedProduct {
   status: 'draft' | 'published' | 'archived'
   /** Si aparece entre los destacados. */
   featured: boolean
+  /** Cueros que ofrece, en el orden canónico (`products.leathers`); solo los mates llevan. */
+  leathers: readonly SeedLeather[]
   /** Unidades en el depósito (`inventory.on_hand`); 0 es agotado. */
   onHand: number
   /** Fotos en el orden de la galería; la primera es la principal. */

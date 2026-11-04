@@ -12,6 +12,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 39999,
     status: 'published',
     featured: true,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -42,6 +43,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 24999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -64,6 +66,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 28999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -79,6 +82,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 29999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -102,6 +106,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 39999,
     status: 'published',
     featured: true,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -117,6 +122,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 37999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -154,6 +160,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: null,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -169,6 +176,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 43000,
     status: 'published',
     featured: true,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -191,6 +199,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 37999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -205,6 +214,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 36999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -228,6 +238,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 19999,
     status: 'published',
     featured: true,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -243,6 +254,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 22999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -265,6 +277,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 24999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -287,6 +300,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 31999,
     status: 'published',
     featured: true,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 12,
     images: [
       {
@@ -309,6 +323,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 27999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 0,
     images: [],
     tabsOverride: null,
@@ -323,6 +338,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 28999,
     status: 'published',
     featured: false,
+    leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
     onHand: 2,
     images: [
       {
@@ -345,6 +361,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 9999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [
       {
@@ -367,6 +384,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 12500,
     status: 'published',
     featured: true,
+    leathers: [],
     onHand: 12,
     images: [
       {
@@ -389,6 +407,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 12500,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [
       {
@@ -411,6 +430,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 28999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -425,6 +445,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 25999,
     status: 'published',
     featured: true,
+    leathers: [],
     onHand: 12,
     images: [
       {
@@ -447,6 +468,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 25999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -462,6 +484,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 25999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -476,6 +499,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 28999,
     status: 'published',
     featured: true,
+    leathers: [],
     onHand: 12,
     images: [
       {
@@ -499,6 +523,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 25999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -513,6 +538,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 28999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [],
     tabsOverride: null,
@@ -527,6 +553,7 @@ export const SEED_PRODUCTS: readonly SeedProduct[] = [
     priceArs: 25999,
     status: 'published',
     featured: false,
+    leathers: [],
     onHand: 12,
     images: [
       {

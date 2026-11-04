@@ -118,7 +118,7 @@ describe('seed', () => {
       if (category !== undefined) byGroup[category.group] += row._count._all
     }
     expect(byGroup).toEqual({ mate: 16, bombilla: 8, yerba: 3 })
-    // Los 16 mates con los cuatro cueros y las bombillas y las yerbas sin (como la migración b6).
+    // Los cueros del diseño: los 16 mates con los cuatro y las bombillas y las yerbas sin ninguno.
     const withLeathers = await db().product.findMany({
       select: { leathers: true, category: { select: { group: true } } },
     })
@@ -339,6 +339,56 @@ describe('seed', () => {
     )
     expect(printed).toContain('mate-torpedo-premium')
     expect(printed).not.toContain('mate-imperial-premium')
+  })
+
+  it('una nueva corrida no pisa los contenidos, los ajustes ni los envíos guardados desde el panel', async () => {
+    const home = await db().contentBlock.findUniqueOrThrow({ where: { key: 'home' } })
+    const editedHome = { ...(home.data as Record<string, unknown>), editedFromPanel: true }
+    await db().contentBlock.update({
+      where: { key: 'home' },
+      data: { data: editedHome, version: 2 },
+    })
+    await db().settings.update({ where: { id: 1 }, data: { kitDiscountPercent: 15, version: 2 } })
+    await db().shippingOption.update({
+      where: { method: 'home' },
+      data: { costArs: 7000, enabled: false },
+    })
+
+    await expect(seed(db())).resolves.toMatchObject({ contentBlocks: 7 })
+
+    expect(await db().contentBlock.findUniqueOrThrow({ where: { key: 'home' } })).toMatchObject({
+      data: editedHome,
+      version: 2,
+    })
+    expect(await db().settings.findUniqueOrThrow({ where: { id: 1 } })).toMatchObject({
+      kitDiscountPercent: 15,
+      version: 2,
+    })
+    expect(
+      await db().shippingOption.findUniqueOrThrow({ where: { method: 'home' } }),
+    ).toMatchObject({ costArs: 7000, enabled: false })
+  })
+
+  it('un producto renombrado desde el panel vuelve al slug del diseño sin duplicarse ni fallar', async () => {
+    const before = await countAll(db())
+    const galleta = await db().product.findUniqueOrThrow({ where: { slug: 'mate-galleta' } })
+    // Como el dashboard: el slug anterior pasa al historial del producto.
+    await db().product.update({
+      where: { id: galleta.id },
+      data: { slug: 'mate-galleta-renovado', name: 'Mate Galleta Renovado' },
+    })
+    await db().productSlugHistory.create({ data: { slug: 'mate-galleta', productId: galleta.id } })
+
+    await expect(seed(db())).resolves.toMatchObject({ products: 27 })
+
+    expect(await countAll(db())).toEqual(before)
+    expect(await db().product.findUniqueOrThrow({ where: { id: galleta.id } })).toMatchObject({
+      sequence: galleta.sequence,
+      slug: 'mate-galleta',
+      name: galleta.name,
+    })
+    const history = await db().productSlugHistory.findMany({ where: { productId: galleta.id } })
+    expect(history.map((h) => h.slug)).toEqual(['mate-galleta-renovado'])
   })
 })
 

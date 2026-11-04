@@ -1,16 +1,16 @@
 // Seed de desarrollo con los datos del diseño (`prisma/seed-data/`, generados desde las fixtures
 // del front por `scripts/import-fixtures.mjs`). Se corre con `npm run db:seed` o
 // `npx prisma db seed`; es idempotente: cada fila se escribe con `upsert` por su clave natural y
-// una segunda corrida deja la base igual (pisa con los valores del diseño las filas que siembra).
-// Las excepciones: el admin semilla se crea solo si no existe y nunca se pisa su contraseña, y el
-// stock (`on_hand`) nunca baja por debajo de lo reservado por pedidos vivos (lo avisa y lo deja).
+// una segunda corrida deja la base igual (pisa con los valores del diseño las líneas, los productos,
+// las reseñas y los combos que siembra). Las excepciones: los contenidos, los ajustes, los envíos y
+// el admin semilla solo se crean si faltan (nunca se pisa lo guardado desde el panel), y el stock
+// (`on_hand`) nunca baja por debajo de lo reservado por pedidos vivos (lo avisa y lo deja).
 import { createHash } from 'node:crypto'
 
 import { PrismaPg } from '@prisma/adapter-pg'
 import { argon2id, hash } from 'argon2'
 
 import { Prisma, PrismaClient } from '../src/generated/prisma/client'
-import { LEATHERS } from '../src/modules/catalog/domain/product.entity'
 import { SEED_ADMIN } from './seed-data/admin'
 import { SEED_CATEGORIES } from './seed-data/categories'
 import { SEED_COMBOS } from './seed-data/combos'
@@ -146,14 +146,16 @@ async function seedCategories(tx: Tx): Promise<Map<string, string>> {
 }
 
 /**
- * Siembra un producto por `slug`, con sus fotos por `(productId, position)` y su stock.
+ * Siembra un producto por `sequence`, con sus fotos por `(productId, position)` y su stock.
  *
- * El `sequence` (el código "N°07") solo se fija al crearlo: es la identidad visible del producto.
- * Las fotos que sobren de una corrida anterior (posiciones mayores) se borran. El stock se crea con
- * el `onHand` del diseño y en una nueva corrida se actualiza solo si no queda por debajo de lo
- * reservado (`reserved <= onHand`, en el mismo `UPDATE`); si no, la fila queda como estaba (no se
- * toca `reserved`) y se avisa por la salida estándar, como el resumen del seed. Los cueros son los
- * de la migración b6: los cuatro en los mates y ninguno en el resto.
+ * El `sequence` (el código "N°07") es la identidad del producto: no cambia aunque el dashboard le
+ * cambie el slug (Ruling B-82). Si el producto ya existe con otro slug, vuelve al del diseño como
+ * en el dashboard: el slug que tenía pasa a su historial y el del diseño sale de ahí. Las fotos que
+ * sobren de una corrida anterior (posiciones mayores) se borran. El stock se crea con el `onHand`
+ * del diseño y en una nueva corrida se actualiza solo si no queda por debajo de lo reservado
+ * (`reserved <= onHand`, en el mismo `UPDATE`); si no, la fila queda como estaba (no se toca
+ * `reserved`) y se avisa por la salida estándar, como el resumen del seed. Los cueros son los del
+ * diseño (`SeedProduct.leathers`).
  *
  * @throws {Error} Si la línea del producto no está en el seed.
  */
@@ -169,10 +171,10 @@ async function seedProduct(
     )
   }
   const createdAt = new Date(product.createdAt)
-  const group = SEED_CATEGORIES.find((category) => category.slug === product.categorySlug)?.group
   const data = {
     categoryId,
-    leathers: group === 'mate' ? [...LEATHERS] : [],
+    slug: product.slug,
+    leathers: [...product.leathers],
     name: product.name,
     description: product.description,
     priceArs: product.priceArs,
@@ -181,12 +183,24 @@ async function seedProduct(
     tabsOverride: product.tabsOverride ?? Prisma.DbNull,
     publishedAt: product.status === 'published' ? createdAt : null,
   }
+  const previous = await tx.product.findUnique({
+    where: { sequence: product.sequence },
+    select: { slug: true },
+  })
   const { id: productId } = await tx.product.upsert({
-    where: { slug: product.slug },
-    create: { sequence: product.sequence, slug: product.slug, createdAt, ...data },
+    where: { sequence: product.sequence },
+    create: { sequence: product.sequence, createdAt, ...data },
     update: data,
     select: { id: true },
   })
+  if (previous !== null && previous.slug !== product.slug) {
+    await tx.productSlugHistory.deleteMany({ where: { slug: product.slug, productId } })
+    await tx.productSlugHistory.upsert({
+      where: { slug: previous.slug },
+      create: { slug: previous.slug, productId },
+      update: { productId, createdAt: new Date() },
+    })
+  }
 
   for (const [index, image] of product.images.entries()) {
     const mediaAssetId = await upsertMediaAsset(tx, image)
@@ -289,25 +303,24 @@ async function seedCombos(tx: Tx): Promise<void> {
   }
 }
 
-/** Siembra los contenidos editables (por `key`), los ajustes (`id = 1`) y los envíos (`method`). */
+/**
+ * Crea los contenidos editables (por `key`), los ajustes (`id = 1`) y los envíos (`method`) que
+ * falten. Los que ya están no se tocan (Ruling B-82): una nueva corrida nunca pisa lo que se guardó
+ * desde el panel.
+ */
 async function seedContentAndSettings(tx: Tx): Promise<void> {
   for (const block of SEED_CONTENT_BLOCKS) {
     await tx.contentBlock.upsert({
       where: { key: block.key },
       create: { key: block.key, data: block.data },
-      update: { data: block.data },
+      update: {},
     })
   }
 
-  await tx.settings.upsert({
-    where: { id: 1 },
-    create: { id: 1, ...SEED_SETTINGS },
-    update: SEED_SETTINGS,
-  })
+  await tx.settings.upsert({ where: { id: 1 }, create: { id: 1, ...SEED_SETTINGS }, update: {} })
 
   for (const option of SEED_SHIPPING_OPTIONS) {
-    const { method, ...data } = option
-    await tx.shippingOption.upsert({ where: { method }, create: option, update: data })
+    await tx.shippingOption.upsert({ where: { method: option.method }, create: option, update: {} })
   }
 }
 
@@ -341,13 +354,14 @@ async function seedAdmin(tx: Tx): Promise<number> {
  * 18 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío, los 5
  * combos (4 publicados y un borrador) y el admin semilla del panel.
  *
- * Es idempotente (todo es `upsert` por `slug`, `(productId, position)`, `key`, `id = 1`,
- * `method` o el id determinístico de la reseña o del combo; las piezas de cada combo se
- * reemplazan; el admin se crea solo si falta y nunca se pisa su
- * contraseña; el stock nunca baja de lo reservado) y corre en una sola transacción: o queda todo
- * o nada. Al final mueve la secuencia de `products.sequence` al máximo, porque el seed inserta los
- * correlativos a mano y el próximo alta no tiene que chocar. Las reseñas y los contenidos que crea quedan sin cliente ni editor
- * (`customer_id` y `updated_by` en null).
+ * Es idempotente (todo es `upsert` por `slug` de la línea, `sequence` del producto,
+ * `(productId, position)`, `key`, `id = 1`, `method` o el id determinístico de la reseña o del
+ * combo; las piezas de cada combo se reemplazan; los contenidos, los ajustes, los envíos y el admin
+ * se crean solo si faltan y nunca se pisan; el stock nunca baja de lo reservado) y corre en una
+ * sola transacción: o queda todo o nada. Al final mueve la secuencia de `products.sequence` al
+ * máximo, porque el seed inserta los correlativos a mano y el próximo alta no tiene que chocar. Las
+ * reseñas y los contenidos que crea quedan sin cliente ni editor (`customer_id` y `updated_by` en
+ * null).
  *
  * @param prisma - Cliente de Prisma conectado a una base ya migrada.
  * @returns Cuántas filas de cada tipo dejó sembradas.

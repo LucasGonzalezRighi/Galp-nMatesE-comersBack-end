@@ -22,10 +22,12 @@ FIXTURES_PATH=/ruta/a/fixtures/index.ts node scripts/import-fixtures.mjs
 
 El script carga las fixtures con `tsx`, las pasa a términos del back y reescribe estos archivos formateados con Prettier. Revisá el diff y commitealo: el seed no importa nada del front cuando corre.
 
-`FIXTURE_COMBOS` es opcional: si las fixtures no lo exportan (el front antes de los combos), `combos.ts` sale con `SEED_COMBOS = []` y el resumen lo dice. Los combos del diseño llegan con la rama `feat/inicio-combos` del front. Con esa rama mergeada en `../frontend`, alcanza con `node scripts/import-fixtures.mjs`, sin `FIXTURES_PATH`. Mientras no esté mergeada, apuntá `FIXTURES_PATH` a las fixtures del worktree de esa rama (hoy `../frontend-inicio-combos`, que desaparece con el merge):
+`FIXTURE_COMBOS` es opcional: si las fixtures no lo exportan (el front antes de los combos), `combos.ts` sale con `SEED_COMBOS = []` y el resumen lo dice. Cada producto tiene que traer `leathers` (el contrato de cueros por producto): si falta, el import corta.
+
+La última regeneración (B6) salió de la ronda "ajustes de la tienda" del front (`../frontend-ajustes`, rama `feat/ajustes-tienda`, en `24b62ab`, igual a `main` del front). Si `../frontend` no está en `main`, apuntá `FIXTURES_PATH` a un worktree que sí:
 
 ```sh
-FIXTURES_PATH="../frontend-inicio-combos/packages/api-client/src/mock/fixtures/index.ts" node scripts/import-fixtures.mjs
+FIXTURES_PATH="../frontend-ajustes/packages/api-client/src/mock/fixtures/index.ts" node scripts/import-fixtures.mjs
 ```
 
 ## Mapeos
@@ -33,6 +35,7 @@ FIXTURES_PATH="../frontend-inicio-combos/packages/api-client/src/mock/fixtures/i
 | Fixture del front                    | Base                                                                                                                       |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `product.sequence` (código "N°07")   | `products.sequence` 7; después del seed la secuencia queda en el máximo                                                    |
+| `product.leathers`                   | `products.leathers` (`text[]`, orden canónico; los 16 mates con los cuatro cueros, el resto `[]`)                          |
 | `product.priceArs`                   | `products.price_ars` (`null` = a consultar)                                                                                |
 | `product.status`                     | `products.status` (`published`, con `published_at` = fecha de alta)                                                        |
 | `product.stock`                      | `inventory.on_hand` (0 = agotado); `reserved` arranca en 0 y el seed no lo toca                                            |
@@ -44,7 +47,11 @@ FIXTURES_PATH="../frontend-inicio-combos/packages/api-client/src/mock/fixtures/i
 
 ## Idempotencia
 
-Todo es `upsert` por clave natural (`slug`, `(product_id, position)`, `key`, `id = 1`, `method`, id determinístico de la reseña o del combo) en una sola transacción: dos corridas seguidas dejan la base igual. Una corrida **pisa con los valores del diseño** las filas que siembra (no toca las demás) y no cambia el `sequence` de un producto que ya existe. Las piezas de cada combo del diseño se reemplazan enteras; los combos creados desde el dashboard tienen otro id (UUID v7) y el seed no los toca. La excepción es el admin semilla: se crea si falta y nunca se actualiza.
+Todo es `upsert` por clave natural (`slug` de la línea, `sequence` del producto, `(product_id, position)`, `key`, `id = 1`, `method`, id determinístico de la reseña o del combo) en una sola transacción: dos corridas seguidas dejan la base igual.
+
+- **Líneas, productos, reseñas y combos:** una corrida **pisa con los valores del diseño** las filas que siembra (no toca las demás). Los productos se buscan por `sequence` (el código "N°07"), que no cambia aunque el dashboard les cambie el nombre o el slug: un producto renombrado vuelve al slug del diseño sin duplicarse, el slug que tenía pasa a su historial (`product_slug_history`, la tienda lo redirige) y el del diseño sale de ahí. Las piezas de cada combo del diseño se reemplazan enteras; los combos y los productos creados desde el dashboard tienen otro id o `sequence` y el seed no los toca.
+- **Contenidos, ajustes y envíos** (`content_blocks`, `settings`, `shipping_options`): **solo se crean si faltan**; si ya están no se tocan, así una nueva corrida nunca pisa lo que se guardó desde el panel. Por eso una base sembrada antes de una regeneración no recibe los textos nuevos del diseño (por ejemplo, los títulos "Categorías" y "Los más vendidos" del inicio): editalos desde el dashboard o borrá la fila y volvé a sembrar.
+- **Admin semilla:** se crea si falta y nunca se actualiza.
 
 ## Stock reservado y re-seed
 
@@ -54,4 +61,4 @@ Desde B4 los pedidos sin pagar reservan stock (`inventory.reserved` más una fil
 Aviso: el stock de mate-torpedo-premium queda en 20 y no en 12, porque tiene 20 unidades reservadas.
 ```
 
-Así se puede re-sembrar una base con pedidos vivos sin que choque el CHECK `inventory_reserved_check` y se deshaga todo el seed. Cuando esas reservas vencen o se liberan, la próxima corrida deja el `on_hand` del diseño. El seed no siembra pedidos (la demo del panel con `GLP-09001…09012` llega en B6) y no toca la secuencia `order_number_seq`.
+Así se puede re-sembrar una base con pedidos vivos sin que choque el CHECK `inventory_reserved_check` y se deshaga todo el seed. Cuando esas reservas vencen o se liberan, la próxima corrida deja el `on_hand` del diseño. El seed no siembra pedidos (los pedidos llegan desde la tienda; la demo del panel con `GLP-09001…09012` queda en el mock del front, Ruling B-83) y no toca la secuencia `order_number_seq`.

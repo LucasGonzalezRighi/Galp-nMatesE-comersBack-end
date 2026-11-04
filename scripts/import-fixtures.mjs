@@ -120,6 +120,7 @@ function mapFixtures(fixtures) {
     .map((p) => {
       const categorySlug = categorySlugs.get(p.categoryId)
       check(categorySlug !== undefined, `el producto ${p.slug} apunta a ${p.categoryId}`)
+      check(Array.isArray(p.leathers), `el producto ${p.slug} no trae leathers`)
       return {
         sequence: p.sequence,
         slug: p.slug,
@@ -129,6 +130,7 @@ function mapFixtures(fixtures) {
         priceArs: p.priceArs,
         status: p.status,
         featured: p.featured,
+        leathers: p.leathers,
         onHand: p.stock,
         images: p.images.map(toImage),
         tabsOverride: p.tabsOverride,
