@@ -26,7 +26,7 @@ const SEARCH_TEXT = searchableTextSql(Prisma.sql`p.name || ' ' || p.description 
  * Orden de cada criterio, desempatado por código como el front. Los "a consultar" (`NULL`) van
  * al final en los dos órdenes por precio; A-Z usa la intercalación española de ICU.
  */
-const ORDER_BY: Record<ProductSortOrder, Prisma.Sql> = {
+export const ORDER_BY: Record<ProductSortOrder, Prisma.Sql> = {
   destacados: Prisma.sql`p.featured DESC, p.sequence ASC`,
   menor: Prisma.sql`p.price_ars ASC NULLS LAST, p.sequence ASC`,
   mayor: Prisma.sql`p.price_ars DESC NULLS LAST, p.sequence ASC`,

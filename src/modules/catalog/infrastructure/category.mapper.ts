@@ -2,7 +2,10 @@ import type { Prisma } from '../../../generated/prisma/client'
 import { createCategory } from '../domain/category.entity'
 import type { CategoryListing } from '../application/ports/category.repository.port'
 
-/** Relaciones que se leen con cada línea: su foto y la cantidad de productos publicados. */
+/**
+ * Relaciones que se leen con cada línea: su foto (el `alt` es el de la línea, `image_alt`, que es
+ * por uso) y la cantidad de productos publicados.
+ */
 export const CATEGORY_INCLUDE = {
   image: { select: { publicId: true, url: true, width: true, height: true, alt: true } },
   _count: { select: { products: { where: { status: 'published' } } } },
@@ -26,7 +29,7 @@ export function toCategoryListing(row: CategoryRow): CategoryListing {
       name: row.name,
       group: row.group,
       blurb: row.blurb,
-      image: row.image === null ? null : { ...row.image },
+      image: row.image === null ? null : { ...row.image, alt: row.imageAlt ?? row.image.alt },
       position: row.position,
     }),
     productCount: row._count.products,

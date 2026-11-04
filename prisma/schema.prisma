@@ -322,6 +322,8 @@ model Category {
   group     ProductGroup
   blurb     String
   imageId   String?      @map("image_id") @db.Uuid
+  /// Texto alternativo de la foto en esta línea (es por uso, Ruling B-74); `null` sin foto.
+  imageAlt  String?      @map("image_alt")
   position  Int
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -382,7 +384,9 @@ model ProductSlugHistory {
   @@map("product_slug_history")
 }
 
-/// Foto subida a un proveedor (`local` en desarrollo, Cloudinary después).
+/// Foto subida a un proveedor: `local` (las del seed), `simulated` o `cloudinary` (las que guarda el
+/// dashboard, según `MEDIA_MODE`). Una por `publicId`; su `alt` es el de la primera vez: cada uso
+/// guarda el suyo (`product_images.alt`, `categories.image_alt`).
 model MediaAsset {
   id        String   @id @default(uuid(7)) @db.Uuid
   provider  String
@@ -405,6 +409,9 @@ model ProductImage {
   productId    String @map("product_id") @db.Uuid
   mediaAssetId String @map("media_asset_id") @db.Uuid
   position     Int
+  /// Texto alternativo de la foto en este producto (es por uso: la misma foto puede tener otro en
+  /// otro lugar, Ruling B-74).
+  alt          String
 
   product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)

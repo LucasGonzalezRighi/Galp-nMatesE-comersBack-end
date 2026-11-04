@@ -123,7 +123,10 @@ function trimmedItems({ obj, key }: TransformFnParams): unknown {
  * @param notArrayMessage - Mensaje si no es una lista.
  * @param listRules - Reglas de la lista entera, en el orden del schema del front.
  */
-function IdList(notArrayMessage: string, ...listRules: PropertyDecorator[]): PropertyDecorator {
+export function IdList(
+  notArrayMessage: string,
+  ...listRules: PropertyDecorator[]
+): PropertyDecorator {
   return applyDecorators(
     Transform(trimmedItems),
     IsArray({ message: notArrayMessage }),

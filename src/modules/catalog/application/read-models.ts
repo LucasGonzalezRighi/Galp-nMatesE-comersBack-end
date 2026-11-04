@@ -3,7 +3,7 @@
 
 import type { ProductGroup } from '../domain/category.entity'
 import type { ComboStatus } from '../domain/combo.entity'
-import type { Leather, ProductTabs } from '../domain/product.entity'
+import type { Leather, ProductStatus, ProductTabs } from '../domain/product.entity'
 
 export type { ProductGroup } from '../domain/category.entity'
 export type { ComboStatus } from '../domain/combo.entity'
@@ -170,4 +170,42 @@ export interface ComboView {
   status: ComboStatus
   /** Lugar en el listado, desde 1. */
   position: number
+}
+
+/** Textos propios de las pestañas de un producto (`ProductTabsOverride`); `null` usa el del grupo. */
+export interface ProductTabsOverrideView {
+  /** Materiales propio, o `null`. */
+  materials: string | null
+  /** Cuidado propio, o `null`. */
+  care: string | null
+}
+
+/** Producto como lo ve el dashboard (`AdminProduct`): la ficha más lo que la tienda no muestra. */
+export interface AdminProduct extends ProductDetail {
+  /** Estado de publicación. */
+  status: ProductStatus
+  /** Unidades disponibles (`on_hand − reserved`; Ruling B-71). */
+  stock: number
+  /** Correlativo del que sale `code`. */
+  sequence: number
+  /** Textos propios de las pestañas, o `null` si usa los del grupo. */
+  tabsOverride: ProductTabsOverrideView | null
+  /** Slugs anteriores, del más viejo al más nuevo. */
+  previousSlugs: string[]
+  /** Alta, en ISO 8601 (UTC). */
+  createdAt: string
+  /** Última modificación, en ISO 8601 (UTC). */
+  updatedAt: string
+}
+
+/** Página de productos del dashboard (`AdminProductPage`). */
+export interface AdminProductPage {
+  /** Productos de la página. */
+  items: AdminProduct[]
+  /** Número de página, desde 1. */
+  page: number
+  /** Productos por página que aplicó el servidor (1 a 100). */
+  pageSize: number
+  /** Total de productos que cumplen los filtros. */
+  total: number
 }

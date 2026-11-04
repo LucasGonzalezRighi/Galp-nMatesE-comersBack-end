@@ -3,6 +3,7 @@ import { DocumentBuilder, type OpenAPIObject, SwaggerModule } from '@nestjs/swag
 
 import { API_PREFIX } from './app.setup'
 import type { Env } from './config/env'
+import { CATALOG_ADMIN_OPENAPI_SCHEMAS } from './modules/catalog/interface/dto/catalog-admin.response.dto'
 import { CATALOG_OPENAPI_SCHEMAS } from './modules/catalog/interface/dto/catalog.response.dto'
 import { IDENTITY_OPENAPI_SCHEMAS } from './modules/identity/interface/dto/identity.response.dto'
 import { ORDERS_OPENAPI_SCHEMAS } from './modules/orders/interface/dto/orders.response.dto'
@@ -42,6 +43,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     schemas: {
       ...SHARED_OPENAPI_SCHEMAS,
       ...CATALOG_OPENAPI_SCHEMAS,
+      ...CATALOG_ADMIN_OPENAPI_SCHEMAS,
       ...REVIEWS_OPENAPI_SCHEMAS,
       ...IDENTITY_OPENAPI_SCHEMAS,
       ...ORDERS_OPENAPI_SCHEMAS,

@@ -132,6 +132,7 @@ async function seedCategories(tx: Tx): Promise<Map<string, string>> {
       blurb: category.blurb,
       position: category.position,
       imageId,
+      imageAlt: category.image?.alt ?? null,
     }
     const saved = await tx.category.upsert({
       where: { slug: category.slug },
@@ -192,8 +193,8 @@ async function seedProduct(
     const position = index + 1
     await tx.productImage.upsert({
       where: { productId_position: { productId, position } },
-      create: { productId, position, mediaAssetId },
-      update: { mediaAssetId },
+      create: { productId, position, mediaAssetId, alt: image.alt },
+      update: { mediaAssetId, alt: image.alt },
     })
   }
   await tx.productImage.deleteMany({

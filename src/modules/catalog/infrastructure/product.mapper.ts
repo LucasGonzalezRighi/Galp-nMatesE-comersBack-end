@@ -3,15 +3,17 @@ import { summarizeRatings } from '../../reviews/domain/rating'
 import { isLeather, type Leather, Product, type TabsOverride } from '../domain/product.entity'
 
 /**
- * Relaciones que se leen con cada producto: la línea, las fotos por posición, el stock y las
- * puntuaciones de las reseñas aprobadas (para `rating`; así la caché del catálogo lo incluye).
+ * Relaciones que se leen con cada producto: la línea, las fotos por posición (con el `alt` de este
+ * producto, que es por uso), el stock y las puntuaciones de las reseñas aprobadas (para `rating`;
+ * así la caché del catálogo lo incluye).
  */
 export const PRODUCT_INCLUDE = {
   category: { select: { id: true, slug: true, name: true, group: true } },
   images: {
     orderBy: { position: 'asc' },
     select: {
-      mediaAsset: { select: { publicId: true, url: true, width: true, height: true, alt: true } },
+      alt: true,
+      mediaAsset: { select: { publicId: true, url: true, width: true, height: true } },
     },
   },
   inventory: { select: { onHand: true, reserved: true } },
@@ -72,7 +74,7 @@ export function toProduct(row: ProductRow): Product {
     status: row.status,
     featured: row.featured,
     category: { ...row.category },
-    images: row.images.map(({ mediaAsset }) => ({ ...mediaAsset })),
+    images: row.images.map(({ alt, mediaAsset }) => ({ ...mediaAsset, alt })),
     inventory: row.inventory ?? { onHand: 0, reserved: 0 },
     tabsOverride: toTabsOverride(row.tabsOverride),
     rating: summarizeRatings(row.reviews.map(({ rating }) => rating.toNumber())),

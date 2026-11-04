@@ -153,6 +153,12 @@ describe('seed', () => {
     })
     // La foto de la línea Imperiales es la misma que la principal del Premium: un solo asset.
     expect(categories[0]?.imageId).toBe(premium.images[0]?.mediaAssetId)
+    // El texto alternativo es por uso: cada foto del producto y la de la línea guardan el suyo.
+    expect(premium.images.map((i) => i.alt)).toEqual(premium.images.map((i) => i.mediaAsset.alt))
+    expect(categories[0]?.imageAlt).toBe(
+      'Mate Imperial Premium con virola de alpaca cincelada y base con pelotitas de bronce',
+    )
+    expect(categories.slice(1).every((c) => c.imageAlt === null)).toBe(true)
 
     const stock = await db().inventory.findMany({ select: { onHand: true, reserved: true } })
     expect(stock.filter((s) => s.onHand === 0)).toHaveLength(1)
