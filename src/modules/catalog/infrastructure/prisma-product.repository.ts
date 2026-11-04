@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common'
 
 import { Prisma } from '../../../generated/prisma/client'
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
+import { searchableTextSql } from '../../../shared/infrastructure/prisma/search-text'
 import type { ProductGroup } from '../domain/category.entity'
-import { normalizeSearchText } from '../domain/search-text'
 import type { Product } from '../domain/product.entity'
 import type {
   ProductFilter,
@@ -13,12 +13,6 @@ import type {
 import type { ProductSortOrder } from '../application/read-models'
 import { PRODUCT_INCLUDE, toProduct } from './product.mapper'
 
-/** Letras con acento que la búsqueda iguala a su letra base (`translate` de Postgres). */
-const ACCENTED = 'ÁÀÂÄÃÉÈÊËÍÌÎÏÓÒÔÖÕÚÙÛÜÑÇáàâäãéèêëíìîïóòôöõúùûüñç'
-
-/** Cada letra de {@link ACCENTED} sin acento y en minúscula, en el mismo orden. */
-const UNACCENTED = ACCENTED.replace(/./gu, (letter) => normalizeSearchText(letter))
-
 /** UUID de cualquier versión: los ids que no lo son no pueden estar en `products.id`. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -26,7 +20,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * Texto donde se busca, normalizado en SQL igual que `normalizeSearchText`: nombre, descripción y
  * línea unidos con espacios, sin acentos, en minúsculas y con los espacios colapsados.
  */
-const SEARCH_TEXT = Prisma.sql`regexp_replace(lower(translate(p.name || ' ' || p.description || ' ' || c.name, ${ACCENTED}, ${UNACCENTED})), ${'\\s+'}, ' ', 'g')`
+const SEARCH_TEXT = searchableTextSql(Prisma.sql`p.name || ' ' || p.description || ' ' || c.name`)
 
 /**
  * Orden de cada criterio, desempatado por código como el front. Los "a consultar" (`NULL`) van

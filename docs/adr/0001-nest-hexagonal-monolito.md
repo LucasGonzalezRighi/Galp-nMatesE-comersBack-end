@@ -46,6 +46,23 @@ y el equipo es una sola persona.
   de `settings` con `SettingsPriceDisplayAdapter`). Para no crear ciclos, un repositorio puede
   leer otra tabla directamente cuando es solo lectura (el rating de los productos sale de
   `reviews` dentro del repo del catálogo, spec §3.2).
+- **Dos escrituras cruzadas acotadas entre `orders` y `payments`**, siempre dentro de la misma
+  transacción que su cambio y solo en el adaptador Prisma:
+  - B-45: `PrismaPaymentRepository.update` sincroniza `orders.payment_status` cuando cambia el
+    intento vigente del pedido.
+  - B-75 (la inversa, B6): cuando el dashboard cancela un pedido que espera el pago,
+    `PrismaAdminOrderRepository` pasa el intento activo a `cancelled` con `is_active = false` y
+    `orders.payment_status` a `cancelled`, en la misma transacción que el `UPDATE` condicional
+    del pedido, la reserva liberada y el historial. Así la respuesta sale con el pago cancelado
+    (como el mock) y no queda un intento abierto en un pedido cancelado. Bloquea primero el
+    intento (`SELECT … FOR UPDATE`) y después el pedido, en el mismo orden que B-45, para no
+    trabarse con un cambio de pago simultáneo. Lo de la pasarela no se hace ahí: el evento
+    `order.cancelled` (con `cancelledAttemptId`) lo atiende `payments`
+    (`OnOrderCancelledCommand`: cancela el pago o vence la preferencia en Mercado Pago y devuelve
+    lo cobrado con `late_approval`).
+
+  Fuera de esas dos, cada módulo escribe solo sus tablas.
+
 - Operación simple: un proceso, Postgres y Redis; escala vertical primero.
 
 ## Alternativas descartadas

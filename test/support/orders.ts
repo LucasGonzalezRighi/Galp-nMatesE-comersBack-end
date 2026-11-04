@@ -1,3 +1,9 @@
+import { normalizeSearchText } from '../../src/modules/catalog/domain/search-text'
+import type {
+  AdminOrderFilter,
+  AdminOrderRepository,
+  AdminStatusEvents,
+} from '../../src/modules/orders/application/ports/admin-order.repository.port'
 import type { CustomerDirectoryPort } from '../../src/modules/orders/application/ports/customer-directory.port'
 import type { OrderExpirationSchedulerPort } from '../../src/modules/orders/application/ports/order-expiration.port'
 import type {
@@ -21,11 +27,14 @@ import {
 } from '../../src/modules/orders/domain/order-number'
 import {
   AWAITING_PAYMENT_STATUSES,
+  EXPIRABLE_PAYMENT_STATUSES,
   type PaymentStatus,
 } from '../../src/modules/orders/domain/order-status'
 import {
+  type AdminStatusChange,
   isExpirable,
   isRefundable,
+  markAdminStatus,
   markExpired,
   markPaid,
   markRefunded,
@@ -656,5 +665,76 @@ export class RecordingExpirationScheduler implements OrderExpirationSchedulerPor
   schedule(orderId: string, at: Date): Promise<void> {
     this.scheduled.push({ orderId, at })
     return Promise.resolve()
+  }
+}
+
+/**
+ * {@link AdminOrderRepository} en memoria sobre el mismo almacén que {@link InMemoryOrderRepository}
+ * (pedidos, reservas y eventos) y el mismo {@link InMemoryStock}, con las reglas del adaptador
+ * Prisma: el listado filtra por estados, pago y texto normalizado, del más nuevo al más viejo; el
+ * cambio es condicional (si el pedido ya no está como se leyó, `null`), cancelar libera la reserva
+ * y el intento activo del pedido (si su último pago sigue abierto) sale como `<id>:attempt`.
+ */
+export class InMemoryAdminOrderRepository implements AdminOrderRepository {
+  /**
+   * @param store - Pedidos, reservas y eventos.
+   * @param stock - Stock compartido.
+   */
+  constructor(
+    private readonly store: InMemoryOrderRepository,
+    private readonly stock: InMemoryStock,
+  ) {}
+
+  /** {@inheritDoc AdminOrderRepository.list} */
+  list(filter: AdminOrderFilter, page: number, pageSize: number): Promise<OrderPage> {
+    const matching = this.store.orders
+      .filter(
+        (order) =>
+          (filter.statuses.length === 0 || filter.statuses.includes(order.status)) &&
+          (filter.paymentStatus === null || order.paymentStatus === filter.paymentStatus) &&
+          (filter.q === null ||
+            normalizeSearchText(
+              `${order.number} ${order.contact.firstName} ${order.contact.lastName} ${order.contact.email}`,
+            ).includes(filter.q)),
+      )
+      .sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.number.localeCompare(a.number),
+      )
+    const start = (page - 1) * pageSize
+    return Promise.resolve({
+      items: matching.slice(start, start + pageSize).map((order) => structuredClone(order)),
+      total: matching.length,
+    })
+  }
+
+  /** {@inheritDoc AdminOrderRepository.changeStatus} */
+  changeStatus(
+    order: Order,
+    change: AdminStatusChange,
+    at: Date,
+    events: AdminStatusEvents,
+  ): Promise<Order | null> {
+    const index = this.store.orders.findIndex((candidate) => candidate.id === order.id)
+    const current = this.store.orders[index]
+    if (current?.status !== order.status) return Promise.resolve(null)
+    const cancelling = change.status === 'cancelled'
+    if (
+      cancelling &&
+      !(EXPIRABLE_PAYMENT_STATUSES as readonly PaymentStatus[]).includes(current.paymentStatus)
+    ) {
+      return Promise.resolve(null)
+    }
+    const changed = markAdminStatus(current, change, at)
+    this.store.orders[index] = changed
+    let cancelledAttemptId: string | null = null
+    if (cancelling) {
+      this.stock.release(this.store.reservations.get(order.id) ?? [])
+      this.store.reservations.set(order.id, [])
+      if (current.payment !== null && current.payment.status !== changed.payment?.status) {
+        cancelledAttemptId = `${order.id}:attempt`
+      }
+    }
+    this.store.events.push(...events(cancelledAttemptId))
+    return Promise.resolve(structuredClone(changed))
   }
 }

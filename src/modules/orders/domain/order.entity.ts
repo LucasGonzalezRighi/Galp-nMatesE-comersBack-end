@@ -1,6 +1,12 @@
 import type { ShippingMethod } from '../../settings/domain/store-settings.entity'
+import {
+  type AdminOrderTarget,
+  checkOrderTransition,
+  isAdminOrderTarget,
+} from './admin-order-transitions'
 import { ORDER_NUMBER_PATTERN } from './order-number'
 import {
+  AWAITING_PAYMENT_STATUSES,
   EXPIRABLE_PAYMENT_STATUSES,
   type OrderStatus,
   type PaymentMethod,
@@ -282,4 +288,84 @@ export function markRefunded(order: Order, at: Date): Order {
     paymentStatus: 'refunded',
     history: [...order.history, { status: 'refunded', at, note: null }],
   }
+}
+
+/** Cambio de estado que pide el dashboard, ya validado y recortado. */
+export interface AdminStatusChange {
+  /** Estado nuevo. */
+  status: AdminOrderTarget
+  /** Empresa y número de seguimiento: solo con `shipped`; con los demás, `null`. */
+  tracking: OrderTracking | null
+  /** Nota del historial, o `null`. */
+  note: string | null
+}
+
+/** Estados de un intento que todavía está activo (los que cancela la cancelación del admin). */
+const OPEN_ATTEMPT_STATUSES: readonly PaymentStatus[] = ['none', ...AWAITING_PAYMENT_STATUSES]
+
+/**
+ * Valida un cambio del dashboard: destino conocido, seguimiento solo (y siempre) al despachar.
+ *
+ * @param change - Cambio pedido.
+ * @throws {RangeError} En español, si el destino no es uno de los del dashboard.
+ * @throws {TypeError} En español, si el seguimiento o la nota no corresponden.
+ */
+export function assertAdminStatusChange(change: AdminStatusChange): void {
+  if (!isAdminOrderTarget(change.status)) {
+    throw new RangeError(`Destino de pedido desconocido: "${String(change.status)}".`)
+  }
+  if (change.status === 'shipped') {
+    if (
+      change.tracking === null ||
+      change.tracking.carrier.trim() === '' ||
+      change.tracking.number.trim() === ''
+    ) {
+      throw new TypeError('Un despacho necesita la empresa y el número de seguimiento')
+    }
+  } else if (change.tracking !== null) {
+    throw new TypeError('La empresa y el seguimiento solo se cargan al despachar el pedido')
+  }
+  if (change.note !== null && change.note.trim() === '') {
+    throw new TypeError('Una nota vacía va en null')
+  }
+}
+
+/**
+ * Pedido con el estado que pidió el dashboard: una fila más en el historial en `at` con la nota;
+ * al despachar, el seguimiento; al cancelar, el intento activo (el último, si sigue en `none`,
+ * `pending` o `action_required`) queda `cancelled` y el pago también (sin intentos sigue `none`).
+ *
+ * @param order - Pedido actual.
+ * @param change - Cambio pedido.
+ * @param at - Momento del cambio.
+ * @returns El pedido cambiado.
+ * @throws {TypeError} En español, si la fecha o el cambio no son válidos o el pedido no puede
+ *   pasar a ese estado.
+ */
+export function markAdminStatus(order: Order, change: AdminStatusChange, at: Date): Order {
+  assertDate(at, 'El momento del cambio de estado')
+  assertAdminStatusChange(change)
+  if (checkOrderTransition(order.status, order.paymentStatus, change.status) !== 'ok') {
+    throw new TypeError(
+      `El pedido ${order.number} no puede pasar de ${order.status} a ${change.status}`,
+    )
+  }
+  const changed: Order = {
+    ...order,
+    status: change.status,
+    history: [...order.history, { status: change.status, at, note: change.note }],
+  }
+  if (change.status === 'shipped') return { ...changed, tracking: change.tracking }
+  if (
+    change.status === 'cancelled' &&
+    order.payment !== null &&
+    OPEN_ATTEMPT_STATUSES.includes(order.payment.status)
+  ) {
+    return {
+      ...changed,
+      paymentStatus: 'cancelled',
+      payment: { ...order.payment, status: 'cancelled', challengeUrl: null },
+    }
+  }
+  return changed
 }

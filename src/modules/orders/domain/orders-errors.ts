@@ -1,5 +1,7 @@
 import type { ChangeNotice, FieldError } from '../../../shared/domain/change-notice'
 import { DomainError } from '../../../shared/domain/domain-error'
+import { type AdminOrderTarget, STATUS_TEXT } from './admin-order-transitions'
+import type { OrderStatus } from './order-status'
 
 /** Motivos del 409 de `POST /orders`, en orden de precedencia. */
 export type OrderConflictCode = 'stock_changed' | 'price_changed' | 'total_changed'
@@ -45,6 +47,54 @@ export class OrderNotFoundError extends DomainError {
   constructor() {
     super('not_found', 404, 'No encontramos ese pedido.')
     this.name = 'OrderNotFoundError'
+  }
+}
+
+/** 404 `not_found` del dashboard: el número no es de ningún pedido (texto del mock del admin). */
+export class AdminOrderNotFoundError extends DomainError {
+  constructor() {
+    super('not_found', 404, 'No existe ese pedido.')
+    this.name = 'AdminOrderNotFoundError'
+  }
+}
+
+/** `detail` del 409 `payment_in_progress` (el del mock). */
+export const PAYMENT_IN_PROGRESS_DETAIL =
+  'Hay un pago en curso: esperá a que se resuelva para cancelar el pedido.'
+
+/**
+ * 409 `invalid_status_transition`: el pedido no puede pasar a ese estado desde el que tiene
+ * (`El pedido está pagado: no puede pasar a cancelado.`).
+ */
+export class InvalidStatusTransitionError extends DomainError {
+  /**
+   * @param from - Estado actual del pedido.
+   * @param to - Estado que pidió el dashboard.
+   * @throws {TypeError} En español, si alguno de los dos estados no existe.
+   */
+  constructor(from: OrderStatus, to: AdminOrderTarget) {
+    const fromText = STATUS_TEXT[from] as string | undefined
+    const toText = STATUS_TEXT[to] as string | undefined
+    if (fromText === undefined || toText === undefined) {
+      throw new TypeError(
+        `Una transición inválida necesita estados conocidos (llegó ${from} → ${to})`,
+      )
+    }
+    super(
+      'invalid_status_transition',
+      409,
+      `El pedido está ${fromText}: no puede pasar a ${toText}.`,
+      'Transición inválida',
+    )
+    this.name = 'InvalidStatusTransitionError'
+  }
+}
+
+/** 409 `payment_in_progress`: se pidió cancelar un pedido con un pago `pending` o `action_required`. */
+export class PaymentInProgressError extends DomainError {
+  constructor() {
+    super('payment_in_progress', 409, PAYMENT_IN_PROGRESS_DETAIL, 'Hay un pago en curso')
+    this.name = 'PaymentInProgressError'
   }
 }
 

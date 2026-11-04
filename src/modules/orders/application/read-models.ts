@@ -175,3 +175,15 @@ export interface CreateOrderResultView {
   /** Token del pedido (`ot_` + 64 hex): se entrega solo en esta respuesta. */
   orderToken: string
 }
+
+/** Página de pedidos del dashboard (`AdminOrderPage` del contrato): pedidos completos, de a 20. */
+export interface AdminOrderPageView {
+  /** Pedidos de la página. */
+  items: OrderView[]
+  /** Número de página, desde 1. */
+  page: number
+  /** Pedidos por página (siempre 20). */
+  pageSize: number
+  /** Total de pedidos que cumplen los filtros. */
+  total: number
+}

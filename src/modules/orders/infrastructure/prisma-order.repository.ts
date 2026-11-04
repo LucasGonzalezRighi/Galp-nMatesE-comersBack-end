@@ -305,11 +305,14 @@ export function assertBatchLimit(limit: number, label: string): void {
 
 /**
  * Libera las reservas activas de un pedido: devuelve las unidades a `inventory` (por id de
- * producto, como al reservar) y las marca `released`.
+ * producto, como al reservar) y las marca `released`. La usan el vencimiento y la cancelación del
+ * dashboard (`PrismaAdminOrderRepository`).
  *
+ * @param tx - Transacción abierta.
+ * @param orderId - Id del pedido.
  * @returns Los productos liberados.
  */
-async function releaseReservations(
+export async function releaseReservations(
   tx: Prisma.TransactionClient,
   orderId: string,
 ): Promise<string[]> {

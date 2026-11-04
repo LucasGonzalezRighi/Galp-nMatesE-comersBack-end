@@ -15,6 +15,7 @@ import {
   type OpenApiSchema,
   schemaRef,
 } from '../../../../shared/infrastructure/http/openapi'
+import { ADMIN_ORDER_TARGETS } from '../../domain/admin-order-transitions'
 import { ORDER_NUMBER_PATTERN } from '../../domain/order-number'
 import {
   LINE_TYPES,
@@ -420,7 +421,8 @@ const PRODUCT_ID: OpenApiSchema = { type: 'string', minLength: 1, maxLength: 80 
  * `OrderStatus`, `PaymentStatus`, `TotalArs`, que identidad publicaba hasta B4, y `LineType`,
  * `PaymentMethod`, `Honeypot`), las líneas del carrito (`CartItemInput` es un `oneOf` con
  * `discriminator`) y los destinos de un envío (`ShippingAddress` es un `oneOf`;
- * `BranchAddressInput` lleva `additionalProperties: false`). `buildOpenApiDocument` los suma a
+ * `BranchAddressInput` lleva `additionalProperties: false`) y los del dashboard (`AdminOrderPage`
+ * y el cuerpo `OrderStatusChange`, con `type: [string, null]`). `buildOpenApiDocument` los suma a
  * `components.schemas`. `Leather`, `Ferrule` y `ShippingMethod` ya los publican catálogo y ajustes.
  */
 export const ORDERS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
@@ -485,4 +487,24 @@ export const ORDERS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
     },
   },
   ShippingAddress: { oneOf: [schemaRef('AddressInput'), schemaRef('BranchAddressInput')] },
+  AdminOrderPage: {
+    type: 'object',
+    required: ['items', 'page', 'pageSize', 'total'],
+    properties: {
+      items: { type: 'array', items: schemaRef('Order') },
+      page: { type: 'integer', minimum: 1 },
+      pageSize: { type: 'integer', minimum: 1, maximum: 100 },
+      total: { type: 'integer', minimum: 0 },
+    },
+  },
+  OrderStatusChange: {
+    type: 'object',
+    required: ['status', 'carrier', 'trackingNumber', 'note'],
+    properties: {
+      status: { type: 'string', enum: [...ADMIN_ORDER_TARGETS] },
+      carrier: { type: ['string', 'null'], minLength: 2, maxLength: 40 },
+      trackingNumber: { type: ['string', 'null'], minLength: 4, maxLength: 40 },
+      note: { type: ['string', 'null'], maxLength: 500 },
+    },
+  },
 }

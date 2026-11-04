@@ -6,8 +6,13 @@ import { SECRETS_PORT, type SecretsPort } from '../../shared/application/ports/s
 import { type Clock, CLOCK } from '../../shared/domain/clock'
 import { IdentityModule } from '../identity/identity.module'
 import { SettingsModule } from '../settings/settings.module'
+import { ChangeOrderStatusCommand } from './application/commands/change-order-status.command'
 import { CreateOrderCommand } from './application/commands/create-order.command'
 import { ExpireOrdersCommand } from './application/commands/expire-orders.command'
+import {
+  ADMIN_ORDER_REPOSITORY,
+  type AdminOrderRepository,
+} from './application/ports/admin-order.repository.port'
 import {
   CUSTOMER_DIRECTORY_PORT,
   type CustomerDirectoryPort,
@@ -26,8 +31,10 @@ import {
   STORE_SETTINGS_PORT,
   type StoreSettingsPort,
 } from './application/ports/store-settings.port'
+import { GetAdminOrderQuery } from './application/queries/get-admin-order.query'
 import { GetMyOrderQuery } from './application/queries/get-my-order.query'
 import { GetOrderQuery } from './application/queries/get-order.query'
+import { ListAdminOrdersQuery } from './application/queries/list-admin-orders.query'
 import { ListMyOrdersQuery } from './application/queries/list-my-orders.query'
 import { QuoteCartQuery } from './application/queries/quote-cart.query'
 import { QuoteShippingQuery } from './application/queries/quote-shipping.query'
@@ -37,9 +44,11 @@ import { IdentityCustomersAdapter } from './infrastructure/identity-customers.ad
 import { ORDER_EXPIRATION_QUEUE } from './infrastructure/order-expiration.queue'
 import { OrderExpirationProcessor } from './infrastructure/order-expiration.processor'
 import { OrderExpirationSweep } from './infrastructure/order-expiration.sweep'
+import { PrismaAdminOrderRepository } from './infrastructure/prisma-admin-order.repository'
 import { PrismaOrderPaymentsAdapter } from './infrastructure/prisma-order-payments.adapter'
 import { PrismaOrderRepository } from './infrastructure/prisma-order.repository'
 import { SettingsStoreAdapter } from './infrastructure/settings-store.adapter'
+import { AdminOrdersController } from './interface/admin-orders.controller'
 import { CartController } from './interface/cart.controller'
 import { MyOrdersController } from './interface/my-orders.controller'
 import { OrdersController } from './interface/orders.controller'
@@ -53,7 +62,9 @@ import { OrdersController } from './interface/orders.controller'
  * los ajustes, de `SettingsModule`; los clientes, del `CUSTOMER_REPOSITORY` de `IdentityModule`.
  * El vencimiento tiene tres caminos idempotentes: el job diferido de la cola `order-expiration`
  * (con `enableOfflineQueue: false`, como el outbox: con Redis caído falla al instante y el cierre
- * de la app no lo espera), el barrido cada 60 s y la lectura. El reloj y los secretos vienen de
+ * de la app no lo espera), el barrido cada 60 s y la lectura. El dashboard lista, lee y cambia el
+ * estado de los pedidos (`/admin/orders`, con {@link PrismaAdminOrderRepository}: cancelar cancela
+ * también el intento de pago activo en la misma transacción, Ruling B-75). El reloj y los secretos vienen de
  * los módulos globales.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Exporta a `payments`
@@ -73,10 +84,11 @@ import { OrdersController } from './interface/orders.controller'
       }),
     }),
   ],
-  controllers: [CartController, OrdersController, MyOrdersController],
+  controllers: [CartController, OrdersController, MyOrdersController, AdminOrdersController],
   providers: [
     { provide: ORDER_REPOSITORY, useClass: PrismaOrderRepository },
     { provide: ORDER_PAYMENTS_PORT, useClass: PrismaOrderPaymentsAdapter },
+    { provide: ADMIN_ORDER_REPOSITORY, useClass: PrismaAdminOrderRepository },
     { provide: PRODUCT_CATALOG_PORT, useClass: CatalogProductsAdapter },
     { provide: STORE_SETTINGS_PORT, useClass: SettingsStoreAdapter },
     { provide: CUSTOMER_DIRECTORY_PORT, useClass: IdentityCustomersAdapter },
@@ -150,6 +162,28 @@ import { OrdersController } from './interface/orders.controller'
       useFactory: (orders: OrderRepository, expire: ExpireOrdersCommand) =>
         new GetMyOrderQuery(orders, expire),
       inject: [ORDER_REPOSITORY, ExpireOrdersCommand],
+    },
+    {
+      provide: ListAdminOrdersQuery,
+      useFactory: (orders: AdminOrderRepository, expire: ExpireOrdersCommand) =>
+        new ListAdminOrdersQuery(orders, expire),
+      inject: [ADMIN_ORDER_REPOSITORY, ExpireOrdersCommand],
+    },
+    {
+      provide: GetAdminOrderQuery,
+      useFactory: (orders: OrderRepository, expire: ExpireOrdersCommand) =>
+        new GetAdminOrderQuery(orders, expire),
+      inject: [ORDER_REPOSITORY, ExpireOrdersCommand],
+    },
+    {
+      provide: ChangeOrderStatusCommand,
+      useFactory: (
+        orders: OrderRepository,
+        adminOrders: AdminOrderRepository,
+        expire: ExpireOrdersCommand,
+        clock: Clock,
+      ) => new ChangeOrderStatusCommand(orders, adminOrders, expire, clock),
+      inject: [ORDER_REPOSITORY, ADMIN_ORDER_REPOSITORY, ExpireOrdersCommand, CLOCK],
     },
     OrderExpirationProcessor,
     OrderExpirationSweep,

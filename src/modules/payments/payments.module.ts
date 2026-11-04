@@ -14,6 +14,7 @@ import { SettingsModule } from '../settings/settings.module'
 import { ApplyProviderPaymentCommand } from './application/commands/apply-provider-payment.command'
 import { CancelPaymentCommand } from './application/commands/cancel-payment.command'
 import { CreatePreferenceCommand } from './application/commands/create-preference.command'
+import { OnOrderCancelledCommand } from './application/commands/on-order-cancelled.command'
 import { OnOrderExpiredCommand } from './application/commands/on-order-expired.command'
 import { PayWithCardCommand } from './application/commands/pay-with-card.command'
 import { ProcessWebhookEventCommand } from './application/commands/process-webhook-event.command'
@@ -44,6 +45,7 @@ import { BullWebhookQueue } from './infrastructure/bull-webhook-queue.adapter'
 import { EnvPaymentsSettings } from './infrastructure/env-payments-settings.adapter'
 import { hmacSha256Hex } from './infrastructure/hmac'
 import { MercadoPagoGateway } from './infrastructure/mercadopago.gateway'
+import { OrderCancelledOutboxHandler } from './infrastructure/order-cancelled.outbox-handler'
 import { OrderExpiredOutboxHandler } from './infrastructure/order-expired.outbox-handler'
 import { PAYMENT_WEBHOOKS_QUEUE } from './infrastructure/payment-webhooks.queue'
 import { PaymentWebhooksProcessor } from './infrastructure/payment-webhooks.processor'
@@ -92,7 +94,9 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
  * `enableOfflineQueue: false` y sus workers se cierran forzados si Redis no contesta (el contrato
  * arma la app sin `init()` contra un Redis que no existe). `OrderExpiredOutboxHandler` atiende
  * `order.expired` del outbox compartido (Ruling B-43): cancela el intento activo y devuelve lo
- * cobrado de un pedido que venció sin completarse. El barrido de 60 s vence, concilia y retoma
+ * cobrado de un pedido que venció sin completarse; `OrderCancelledOutboxHandler` atiende
+ * `order.cancelled` (Ruling B-75): `orders` ya canceló el intento activo en la misma transacción
+ * del pedido y acá se cierra en Mercado Pago y se devuelve lo cobrado. El barrido de 60 s vence, concilia y retoma
  * notificaciones.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`, con un `Logger` de Nest como
@@ -302,6 +306,21 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
       inject: [PAYMENT_REPOSITORY, PAYMENT_GATEWAY_PORT, ApplyProviderPaymentCommand],
     },
     {
+      provide: OnOrderCancelledCommand,
+      useFactory: (
+        payments: PaymentRepository,
+        gateway: PaymentGatewayPort,
+        onExpired: OnOrderExpiredCommand,
+      ) =>
+        new OnOrderCancelledCommand(
+          payments,
+          gateway,
+          onExpired,
+          new Logger(OnOrderCancelledCommand.name),
+        ),
+      inject: [PAYMENT_REPOSITORY, PAYMENT_GATEWAY_PORT, OnOrderExpiredCommand],
+    },
+    {
       provide: SimulateProviderResultCommand,
       useFactory: (
         payments: PaymentRepository,
@@ -324,6 +343,7 @@ function createGateway(env: Env, settings: EnvPaymentsSettings, clock: Clock): P
     },
     PaymentWebhooksProcessor,
     OrderExpiredOutboxHandler,
+    OrderCancelledOutboxHandler,
     PaymentsSweep,
   ],
 })
