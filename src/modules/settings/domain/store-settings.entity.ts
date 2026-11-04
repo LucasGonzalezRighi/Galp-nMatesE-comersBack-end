@@ -112,3 +112,40 @@ export function createStoreSettings(props: StoreSettings): StoreSettings {
   }
   return props
 }
+
+/**
+ * Nombre fijo de cada método de envío: el dashboard no lo cambia (manda `label`, pero el back lo
+ * ignora) y una opción que falte se crea con este (`DEFAULT_SHIPPING_OPTIONS` del front).
+ */
+export const DEFAULT_SHIPPING_LABELS = {
+  home: 'Envío a domicilio',
+  branch: 'Envío a sucursal',
+  pickup: 'Retiro en persona',
+} as const satisfies Record<ShippingMethod, string>
+
+/** `reason` del aviso a la tienda de cada guardado de los ajustes (Ruling B-73). */
+export const SETTINGS_UPDATED_REASON = 'settings.updated'
+
+/**
+ * Etiquetas de la tienda que regenera un guardado de los ajustes (Ruling B-73): los ajustes y,
+ * siempre, productos y combos, que traen el precio neto calculado con el IVA y `showNetPrice`.
+ */
+export const SETTINGS_STOREFRONT_TAGS: readonly string[] = ['settings', 'products', 'combos']
+
+/**
+ * Redondea la alícuota de IVA a 2 decimales, con las mitades hacia arriba (10,555 → 10,56), como
+ * la guarda la base (`Decimal(5, 2)`, Ruling B-79). Redondea sobre el texto decimal del número (con
+ * 10 decimales), así `10.555` (que en binario es un poco menos) no queda en 10,55.
+ *
+ * @param value - Alícuota en porcentaje, de 0 a 100.
+ * @returns La alícuota con 2 decimales como mucho.
+ * @throws {RangeError} En español, si no es un número finito de 0 a 100.
+ */
+export function roundVatRatePercent(value: number): number {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new RangeError(
+      `La alícuota de IVA tiene que estar entre 0 y 100; se recibió ${String(value)}.`,
+    )
+  }
+  return Number(`${String(Math.round(Number(`${value.toFixed(10)}e2`)))}e-2`)
+}

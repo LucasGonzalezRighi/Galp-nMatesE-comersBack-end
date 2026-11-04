@@ -228,6 +228,7 @@ model User {
   customer            Customer?
   passwordResetTokens PasswordResetToken[]
   editedContentBlocks ContentBlock[]
+  editedSettings      Settings[]
 
   @@map("users")
 }
@@ -761,9 +762,16 @@ model Settings {
   showNetPrice              Boolean  @map("show_net_price")
   /// Datos del vendedor (`legalName`, `cuit`, `taxCondition`…), con `null` en lo no cargado.
   seller                    Json
+  /// Sube de a 1 con cada guardado del dashboard.
+  version                   Int      @default(1)
+  /// Usuario admin que los guardó por última vez (null si nunca se guardaron o si se borró el usuario).
+  updatedBy                 String?  @map("updated_by") @db.Uuid
   createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                 DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  updatedByUser User? @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([updatedBy])
   @@map("settings")
 }
 

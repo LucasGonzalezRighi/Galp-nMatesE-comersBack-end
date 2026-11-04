@@ -6,7 +6,7 @@ import type { ContentRepository } from '../ports/content.repository.port'
 import { GetContentQuery } from './get-content.query'
 
 /** Repositorio en memoria con los bloques dados. */
-function repository(blocks: Partial<Record<ContentKey, unknown>>): ContentRepository {
+function repository(blocks: Partial<Record<ContentKey, unknown>>): Pick<ContentRepository, 'find'> {
   return { find: (key) => Promise.resolve(blocks[key] ?? null) }
 }
 

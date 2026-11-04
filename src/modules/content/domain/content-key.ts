@@ -43,3 +43,23 @@ export function legalContentKey(document: LegalDocument): ContentKey {
   }
   return `legal-${document}`
 }
+
+/** `reason` del aviso a la tienda de cada guardado de un contenido (Ruling B-73). */
+export const CONTENT_UPDATED_REASON = 'content.updated'
+
+/**
+ * Etiquetas de la tienda que regenera el guardado de un contenido (Ruling B-73): la de su clave
+ * (`content:home`, `content:legal-terms`…); las pestañas de la ficha suman `products`, porque la
+ * ficha trae los textos ya combinados.
+ *
+ * @param key - Clave del contenido guardado.
+ * @returns Las etiquetas, en el orden en que se avisan.
+ * @throws {RangeError} En español, si no es una clave de contenido.
+ */
+export function contentStorefrontTags(key: ContentKey): string[] {
+  if (!isContentKey(key)) {
+    throw new RangeError(`"${String(key)}" no es una clave de contenido.`)
+  }
+  const tag = `content:${key}`
+  return key === 'product-tabs' ? [tag, 'products'] : [tag]
+}

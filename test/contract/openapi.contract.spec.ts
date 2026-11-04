@@ -18,6 +18,11 @@ import {
   normalizeSecuritySchemes,
   type NormalizedSecurityScheme,
 } from './normalize'
+import { ADMIN_CATALOG_PATHS } from './b6/admin-catalog'
+import { ADMIN_ORDERS_PATHS } from './b6/admin-orders'
+import { CONTENT_PATHS } from './b6/content'
+import { DASHBOARD_PATHS } from './b6/dashboard'
+import { SUPPORT_PATHS } from './b6/support'
 
 /**
  * Operaciones (`MÉTODO /ruta`, rutas relativas a `/api/v1`) que el back ya implementa: tienen que
@@ -76,6 +81,12 @@ const IMPLEMENTED_PATHS: readonly string[] = [
   'PUT /admin/combos/order',
   'PATCH /admin/combos/{id}',
   'DELETE /admin/combos/{id}',
+  // B6: cada tarea suma las suyas en su archivo de `b6/`.
+  ...CONTENT_PATHS,
+  ...ADMIN_ORDERS_PATHS,
+  ...SUPPORT_PATHS,
+  ...ADMIN_CATALOG_PATHS,
+  ...DASHBOARD_PATHS,
 ]
 
 /** Operaciones que Swagger genera y el contrato no tiene, a propósito. */

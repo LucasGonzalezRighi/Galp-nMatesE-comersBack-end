@@ -3,7 +3,7 @@
 // controlador devuelve el read model de `application`): los campos van con asignación definida
 // (`!`), como dice el README.
 
-import { ApiProperty, ApiSchema } from '@nestjs/swagger'
+import { ApiProperty, ApiSchema, getSchemaPath } from '@nestjs/swagger'
 
 import {
   ApiSchemaProperty,
@@ -105,4 +105,24 @@ export class PublicSettingsDto {
     },
   })
   seller!: unknown
+}
+
+/**
+ * Esquemas de los ajustes que no salen de una clase: `AdminSettings` es un `allOf` del contrato
+ * (los públicos más el umbral de poco stock y el IVA). Se suman en `swagger.ts`.
+ */
+export const SETTINGS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
+  AdminSettings: {
+    allOf: [
+      { $ref: getSchemaPath(PublicSettingsDto) },
+      {
+        type: 'object',
+        required: ['lowStockThreshold', 'vatRatePercent'],
+        properties: {
+          lowStockThreshold: { type: 'integer', minimum: 0, maximum: 999 },
+          vatRatePercent: { type: 'number', minimum: 0, maximum: 100 },
+        },
+      },
+    ],
+  },
 }

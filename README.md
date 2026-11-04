@@ -565,6 +565,21 @@ las lista con `GET /admin/products`, que todavía da 404. El nombre, la descripc
 estado se guardan igual, pero un combo nuevo o un cambio de piezas desde el dashboard espera a B6
 (por API funcionan).
 
+## Fotos (Cloudinary)
+
+Desde B6 las fotos del dashboard (socios de Nosotros y, después, productos y líneas) se guardan
+sin llamar a la Admin API de Cloudinary: una foto se acepta si su `publicId` está en la carpeta de
+su uso (`galpon/productos/`, `galpon/lineas/`, `galpon/socios/`, `galpon/sitio/`) o si es la que
+el recurso ya tiene, y la `url` se arma con la nube. Si no, 422 `unknown_image` "La foto no
+existe: subila de nuevo". Las variables (detalle en `.env.example`):
+
+| Variable                | Por defecto | Notas                                                                                                      |
+| ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `MEDIA_MODE`            | `simulated` | `simulated` (nube `galpon-mock`, como el mock) o `cloudinary`. En `production` tiene que ser `cloudinary`. |
+| `CLOUDINARY_CLOUD_NAME` | (sin valor) | Nube de Cloudinary: arma las `url`. Obligatoria con `cloudinary`.                                          |
+| `CLOUDINARY_API_KEY`    | (sin valor) | API key de Cloudinary. Obligatoria con `cloudinary`.                                                       |
+| `CLOUDINARY_API_SECRET` | (sin valor) | API secret de Cloudinary (firma las subidas). Obligatorio con `cloudinary`; nunca se loguea.               |
+
 ## Scripts
 
 | Script                   | Qué hace                                                                          |

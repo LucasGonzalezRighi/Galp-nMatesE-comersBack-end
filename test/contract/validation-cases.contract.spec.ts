@@ -21,6 +21,20 @@ import {
 import { CardPaymentInputDto } from '../../src/modules/payments/interface/dto/card-payment-input.dto'
 import type { FieldError } from '../../src/shared/infrastructure/http/problem.filter'
 import { createValidationPipe } from '../../src/shared/infrastructure/http/validation.pipe'
+import { ADMIN_CATALOG_MAPPINGS } from './b6/admin-catalog'
+import { ADMIN_ORDERS_MAPPINGS } from './b6/admin-orders'
+import { CONTENT_MAPPINGS } from './b6/content'
+import { SUPPORT_MAPPINGS } from './b6/support'
+import {
+  errorsOf,
+  errorsOrAnyMessage,
+  type Mapping,
+  partialCase,
+  pick,
+  type ValidationCase,
+  wholeCase,
+  withoutNulls,
+} from './validation-cases.support'
 
 /**
  * Casos de validación compartidos con el front (spec §7 y §9, nivel Contrato): las mismas
@@ -32,37 +46,6 @@ import { createValidationPipe } from '../../src/shared/infrastructure/http/valid
  * (checkout, reseñas, dashboard…) entra con el módulo que los implemente. Un caso válido sin
  * `output` solo tiene que pasar (README del contrato).
  */
-
-/** Caso del archivo compartido (lo que genera `@galpon/schemas`). */
-interface ValidationCase {
-  name: string
-  schema: string
-  input: Record<string, unknown>
-  valid: boolean
-  /** Salida del schema del front (solo en los válidos). */
-  output?: Record<string, unknown>
-  /** Primer mensaje por campo (solo en los inválidos); los anidados van con punto. */
-  errors?: Record<string, string>
-}
-
-/** Qué le pasa al DTO y qué se espera, ya traducido al nombre de los campos del DTO. */
-interface Check {
-  /** Cuerpo que recibe el DTO. */
-  body: Record<string, unknown>
-  /** Salida esperada de un caso válido, sin los campos que valen `null`; sin ella, solo tiene que pasar. */
-  output?: Record<string, unknown> | undefined
-  /** Primer mensaje esperado por campo de un caso inválido. */
-  errors: Record<string, string>
-}
-
-/** Un DTO y la forma de armarle el `Check` a cada caso del archivo (`null`: no le toca). */
-interface Mapping {
-  name: string
-  dto: new () => object
-  check: (validationCase: ValidationCase) => Check | null
-  /** Pasa la salida del DTO a lo que queda después del dominio (por defecto, tal cual). */
-  effective?: (value: Record<string, unknown>) => Record<string, unknown>
-}
 
 type Outcome = { ok: true; value: Record<string, unknown> } | { ok: false; errors: FieldError[] }
 
@@ -112,10 +95,6 @@ async function validate(dto: new () => object, body: Record<string, unknown>): P
   }
 }
 
-function withoutNulls(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).filter(([, item]) => item != null))
-}
-
 /** Primer mensaje de cada campo, que es lo que compara el archivo compartido. */
 function firstMessages(errors: readonly FieldError[]): Record<string, string> {
   const messages: Record<string, string> = {}
@@ -123,65 +102,7 @@ function firstMessages(errors: readonly FieldError[]): Record<string, string> {
   return messages
 }
 
-function pick(source: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
-  return Object.fromEntries(keys.filter((key) => key in source).map((key) => [key, source[key]]))
-}
-
-/** Los errores del caso que corresponden a `fields`, con el nombre que les da el DTO. */
-function errorsOf(
-  validationCase: ValidationCase,
-  rename: (field: string) => string | null,
-): Record<string, string> {
-  const errors: Record<string, string> = {}
-  for (const [field, message] of Object.entries(validationCase.errors ?? {})) {
-    const mapped = rename(field)
-    if (mapped !== null) errors[mapped] = message
-  }
-  return errors
-}
-
-const sameField = (field: string): string => field
 const identity = (value: Record<string, unknown>): Record<string, unknown> => value
-
-/** El schema del front y el DTO tienen los mismos campos: se compara el caso entero. */
-function wholeCase(schema: string): (validationCase: ValidationCase) => Check | null {
-  return (validationCase) =>
-    validationCase.schema === schema
-      ? {
-          body: validationCase.input,
-          output: validationCase.output,
-          errors: errorsOf(validationCase, sameField),
-        }
-      : null
-}
-
-/** Casos de `schemas` que prueban `fields` (los válidos entran todos; los inválidos, si fallan en alguno). */
-function partialCase(
-  schemas: readonly string[],
-  fields: readonly string[],
-  build: (validationCase: ValidationCase) => Pick<Check, 'body' | 'output'>,
-): (validationCase: ValidationCase) => Check | null {
-  return (validationCase) => {
-    if (!schemas.includes(validationCase.schema)) return null
-    const errors = errorsOf(validationCase, (field) => (fields.includes(field) ? field : null))
-    if (!validationCase.valid && Object.keys(errors).length === 0) return null
-    if (
-      validationCase.valid &&
-      !fields.every((field) => typeof validationCase.output?.[field] === 'string')
-    ) {
-      return null
-    }
-    return { ...build(validationCase), errors }
-  }
-}
-
-/** Errores del caso; los que el archivo deja sin texto (`null`) solo tienen que fallar. */
-function errorsOrAnyMessage(validationCase: ValidationCase): Record<string, string> {
-  const entries = Object.entries(validationCase.errors ?? {}) as [string, string | null][]
-  return Object.fromEntries(
-    entries.map(([field, message]) => [field, message ?? (expect.any(String) as string)]),
-  )
-}
 
 const MAPPINGS: readonly Mapping[] = [
   { name: 'RegisterDto (registerSchema)', dto: RegisterDto, check: wholeCase('registerSchema') },
@@ -323,6 +244,11 @@ const MAPPINGS: readonly Mapping[] = [
     dto: ComboOrderInputDto,
     check: wholeCase('comboOrderSchema'),
   },
+  // B6: cada tarea suma los suyos en su archivo de `b6/`.
+  ...CONTENT_MAPPINGS,
+  ...ADMIN_ORDERS_MAPPINGS,
+  ...SUPPORT_MAPPINGS,
+  ...ADMIN_CATALOG_MAPPINGS,
 ]
 
 describe('casos de validación compartidos con el front', () => {

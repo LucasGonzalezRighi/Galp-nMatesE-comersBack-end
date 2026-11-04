@@ -14,6 +14,7 @@ const BASE: Env = {
   LOG_LEVEL: 'warn',
   MP_MODE: 'live',
   MP_STATEMENT_DESCRIPTOR: 'GALPON MATES',
+  MEDIA_MODE: 'cloudinary',
 }
 
 describe('buildPinoHttpOptions', () => {

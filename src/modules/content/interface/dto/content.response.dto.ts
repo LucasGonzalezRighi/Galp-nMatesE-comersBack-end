@@ -1,8 +1,9 @@
 // DTOs de respuesta de los contenidos, solo para Swagger: reproducen `HomeContent`,
 // `AboutContent`, `FaqContent`, `FooterContent`, `ProductTabsContent`, `LegalContent` y sus partes
 // con nombre (`SectionHeading`, `StoryScene`, `ProductTabsGroupContent`) del contrato, y el test de
-// contrato los compara. Nunca se instancian (los controladores devuelven los read models de
-// `application`): los campos van con asignación definida (`!`), como dice el README.
+// contrato los compara (también el cuerpo de Nosotros, `AboutContentInput`). Nunca se instancian
+// (los controladores devuelven los read models de `application`): los campos van con asignación
+// definida (`!`), como dice el README.
 
 import { ApiProperty, ApiSchema, getSchemaPath } from '@nestjs/swagger'
 
@@ -169,6 +170,45 @@ export class AboutContentDto {
   /** Socios (hasta 8). */
   @ApiSchemaProperty(
     list(undefined, 8, object({ name: text(60), role: text(80), photo: nullableRef('Image') })),
+  )
+  partners!: unknown[]
+
+  /** Cita. */
+  @ApiSchemaProperty(text(300))
+  quote!: string
+
+  /** Antetítulo de los pasos. */
+  @ApiSchemaProperty(text(60))
+  stepsEyebrow!: string
+
+  /** Los 3 pasos. */
+  @ApiSchemaProperty(list(3, 3, object({ title: text(60), text: text(400) })))
+  steps!: unknown[]
+
+  /** Texto del botón. */
+  @ApiSchemaProperty(text(40))
+  ctaLabel!: string
+}
+
+/**
+ * Textos de Nosotros como los manda el dashboard (`AboutContentInput`): lo mismo que
+ * `AboutContent`, pero la foto de cada socio es un `ImageInput` (sin `url`: la arma el back).
+ */
+@ApiSchema({ name: 'AboutContentInput' })
+export class AboutContentInputSchemaDto {
+  /** Portada. */
+  @ApiSchemaProperty(
+    object({ eyebrow: text(60), titleLines: list(1, 3, text(60)), text: text(600) }),
+  )
+  hero!: unknown
+
+  /** Socios (hasta 8), con la foto ya subida o `null`. */
+  @ApiSchemaProperty(
+    list(
+      undefined,
+      8,
+      object({ name: text(60), role: text(80), photo: nullableRef('ImageInput') }),
+    ),
   )
   partners!: unknown[]
 

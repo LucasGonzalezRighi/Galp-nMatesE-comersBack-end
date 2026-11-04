@@ -19,6 +19,18 @@ const LIVE_MISSING =
   'Con MP_MODE=live hacen falta MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET y PUBLIC_API_ORIGIN.'
 const PRODUCTION_SIMULATED = 'En producción MP_MODE tiene que ser live.'
 
+/** Fotos en Cloudinary: las tres variables que exige `MEDIA_MODE=cloudinary` (de mentira). */
+const CLOUDINARY = {
+  MEDIA_MODE: 'cloudinary',
+  CLOUDINARY_CLOUD_NAME: 'galpon-test',
+  CLOUDINARY_API_KEY: '123456789012345',
+  CLOUDINARY_API_SECRET: 'secreto-de-cloudinary',
+}
+
+const MEDIA_MISSING =
+  'Con MEDIA_MODE=cloudinary hacen falta CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET.'
+const MEDIA_PRODUCTION_SIMULATED = 'En producción MEDIA_MODE tiene que ser cloudinary.'
+
 /** Secreto de revalidación de la tienda (32 caracteres, de mentira). */
 const STORE_SECRET = 'x'.repeat(32)
 const STORE_SECRET_PRODUCTION =
@@ -57,6 +69,7 @@ describe('parseEnv', () => {
       LOG_LEVEL: 'info',
       MP_MODE: 'simulated',
       MP_STATEMENT_DESCRIPTOR: 'GALPON MATES',
+      MEDIA_MODE: 'simulated',
     })
   })
 
@@ -64,6 +77,7 @@ describe('parseEnv', () => {
     const env = parseEnv({
       ...REQUIRED,
       ...LIVE,
+      ...CLOUDINARY,
       NODE_ENV: 'production',
       STORE_REVALIDATE_SECRET: STORE_SECRET,
       PORT: '4000',
@@ -91,7 +105,7 @@ describe('parseEnv', () => {
     })
 
     it('en producción sin el secreto lanza el mensaje exacto', () => {
-      const message = errorOf({ ...REQUIRED, ...LIVE, NODE_ENV: 'production' })
+      const message = errorOf({ ...REQUIRED, ...LIVE, ...CLOUDINARY, NODE_ENV: 'production' })
       expect(message).toContain(STORE_SECRET_PRODUCTION)
       expect(message.split(STORE_SECRET_PRODUCTION)).toHaveLength(2)
     })
@@ -101,6 +115,54 @@ describe('parseEnv', () => {
     const message = errorOf({ ...REQUIRED, DATABASE_URL: 'mysql://root:secreto@localhost/galpon' })
     expect(message).toContain('DATABASE_URL')
     expect(message).not.toContain('secreto')
+  })
+
+  describe('Fotos (Cloudinary)', () => {
+    it('sin variables de fotos queda en modo simulado y sin credenciales', () => {
+      const env = parseEnv(REQUIRED)
+      expect(env.MEDIA_MODE).toBe('simulated')
+      expect(env.CLOUDINARY_CLOUD_NAME).toBeUndefined()
+      expect(env.CLOUDINARY_API_KEY).toBeUndefined()
+      expect(env.CLOUDINARY_API_SECRET).toBeUndefined()
+    })
+
+    it('con MEDIA_MODE=cloudinary y las tres variables las devuelve tal cual', () => {
+      expect(parseEnv({ ...REQUIRED, ...CLOUDINARY })).toMatchObject(CLOUDINARY)
+    })
+
+    it('con MEDIA_MODE=cloudinary sin alguna variable lanza el mensaje exacto una sola vez', () => {
+      const message = errorOf({
+        ...REQUIRED,
+        ...CLOUDINARY,
+        CLOUDINARY_API_KEY: undefined,
+        CLOUDINARY_API_SECRET: undefined,
+      })
+      expect(message).toContain(`- ${MEDIA_MISSING}`)
+      expect(message.split(MEDIA_MISSING)).toHaveLength(2)
+      expect(errorOf({ ...REQUIRED, ...CLOUDINARY, CLOUDINARY_CLOUD_NAME: undefined })).toContain(
+        MEDIA_MISSING,
+      )
+    })
+
+    it('en producción con MEDIA_MODE=simulated (o sin MEDIA_MODE) lanza el mensaje exacto', () => {
+      const production = {
+        ...REQUIRED,
+        ...LIVE,
+        NODE_ENV: 'production',
+        STORE_REVALIDATE_SECRET: STORE_SECRET,
+      }
+      expect(errorOf(production)).toContain(`- ${MEDIA_PRODUCTION_SIMULATED}`)
+      expect(errorOf({ ...production, MEDIA_MODE: 'simulated' })).toContain(
+        MEDIA_PRODUCTION_SIMULATED,
+      )
+    })
+
+    it('rechaza un MEDIA_MODE desconocido o una credencial vacía, sin mostrar el secreto', () => {
+      expect(errorOf({ ...REQUIRED, MEDIA_MODE: 'local' })).toContain('MEDIA_MODE')
+      const message = errorOf({ ...REQUIRED, ...CLOUDINARY, CLOUDINARY_API_SECRET: '' })
+      expect(message).toContain('CLOUDINARY_API_SECRET')
+      expect(message).not.toContain(CLOUDINARY.CLOUDINARY_API_KEY)
+    })
   })
 
   describe('Mercado Pago', () => {

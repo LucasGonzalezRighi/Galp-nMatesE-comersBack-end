@@ -5,7 +5,7 @@ import type { ContentByKey } from '../read-models'
 /** Contenido editable por clave (`home`, `faq`, `product-tabs`, `legal-terms`…). */
 export class GetContentQuery {
   /** @param contents - Lecturas de contenidos. */
-  constructor(private readonly contents: ContentRepository) {}
+  constructor(private readonly contents: Pick<ContentRepository, 'find'>) {}
 
   /**
    * Devuelve el contenido de una clave con su forma del contrato.

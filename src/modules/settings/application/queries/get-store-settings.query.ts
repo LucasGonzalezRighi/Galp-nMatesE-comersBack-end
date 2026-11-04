@@ -7,7 +7,7 @@ import type { SettingsRepository } from '../ports/settings.repository.port'
  */
 export class GetStoreSettingsQuery {
   /** @param settings - Lectura de los ajustes. */
-  constructor(private readonly settings: SettingsRepository) {}
+  constructor(private readonly settings: Pick<SettingsRepository, 'get'>) {}
 
   /**
    * Devuelve los ajustes completos.

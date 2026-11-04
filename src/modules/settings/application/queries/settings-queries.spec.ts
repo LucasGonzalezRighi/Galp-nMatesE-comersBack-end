@@ -38,7 +38,7 @@ const SETTINGS: StoreSettings = {
   ],
 }
 
-const repository: SettingsRepository = { get: () => Promise.resolve(SETTINGS) }
+const repository: Pick<SettingsRepository, 'get'> = { get: () => Promise.resolve(SETTINGS) }
 
 describe('GetPublicSettingsQuery', () => {
   it('devuelve solo lo público, sin la alícuota de IVA ni el umbral de stock bajo', async () => {

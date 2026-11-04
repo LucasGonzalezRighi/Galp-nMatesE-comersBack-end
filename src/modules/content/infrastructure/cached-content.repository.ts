@@ -2,14 +2,28 @@ import { Inject, Injectable } from '@nestjs/common'
 
 import { CACHE_PORT, type CachePort } from '../../../shared/application/ports/cache.port'
 import { readThrough } from '../../../shared/application/read-through'
+import type { JsonObject } from '../../../shared/domain/domain-event'
 import type { ContentKey } from '../domain/content-key'
-import type { ContentRepository } from '../application/ports/content.repository.port'
+import type { ContentRepository, ContentWrite } from '../application/ports/content.repository.port'
 import { PrismaContentRepository } from './prisma-content.repository'
 
 /** Vida de los contenidos en la caché (claves `content:*`). */
 export const CONTENT_CACHE_TTL_SECONDS = 300
 
-/** Decora el repositorio de contenidos con la caché (300 s, clave `content:{key}`). */
+/**
+ * Clave de un contenido en la caché.
+ *
+ * @param key - Clave del contenido.
+ * @returns `content:{key}`.
+ */
+export function contentCacheKey(key: ContentKey): string {
+  return `content:${key}`
+}
+
+/**
+ * Decora el repositorio de contenidos con la caché (300 s, clave `content:{key}`): las lecturas
+ * pasan por ella y cada guardado la borra después del commit.
+ */
 @Injectable()
 export class CachedContentRepository implements ContentRepository {
   /**
@@ -23,8 +37,15 @@ export class CachedContentRepository implements ContentRepository {
 
   /** {@inheritDoc ContentRepository.find} */
   find(key: ContentKey): Promise<unknown> {
-    return readThrough(this.cache, `content:${key}`, CONTENT_CACHE_TTL_SECONDS, () =>
+    return readThrough(this.cache, contentCacheKey(key), CONTENT_CACHE_TTL_SECONDS, () =>
       this.inner.find(key),
     )
+  }
+
+  /** {@inheritDoc ContentRepository.save} */
+  async save(key: ContentKey, data: JsonObject, write: ContentWrite): Promise<void> {
+    await this.inner.save(key, data, write)
+    // Después del commit: una lectura que llegue en el medio vuelve a Postgres y ve lo nuevo.
+    await this.cache.del(contentCacheKey(key))
   }
 }

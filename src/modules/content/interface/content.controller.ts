@@ -33,7 +33,7 @@ export const LEGAL_DOCUMENT_NOT_FOUND = 'No existe ese documento legal.'
  * @param value - Texto de `{document}`.
  * @returns `true` si es `terms` o `privacy`.
  */
-function isLegalDocument(value: string): value is LegalDocument {
+export function isLegalDocument(value: string): value is LegalDocument {
   return (LEGAL_DOCUMENTS as readonly string[]).includes(value)
 }
 

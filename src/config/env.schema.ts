@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { MEDIA_CLOUDINARY_MISSING_MESSAGE, MEDIA_PRODUCTION_SIMULATED_MESSAGE } from './media'
+
 /** Configuración de la API, ya validada y con los valores por defecto aplicados. */
 export interface Env {
   /** Entorno de ejecución (por defecto `development`): en `test` el logger no escribe nada. */
@@ -39,6 +41,18 @@ export interface Env {
   PUBLIC_API_ORIGIN?: string | undefined
   /** Texto del resumen de la tarjeta (por defecto `GALPON MATES`, hasta 13 caracteres). */
   MP_STATEMENT_DESCRIPTOR: string
+  /**
+   * Fotos del dashboard (por defecto `simulated`): `simulated` firma como el mock y arma las `url`
+   * con la nube `galpon-mock` (no se admite en `production`); `cloudinary` firma con las
+   * credenciales de Cloudinary.
+   */
+  MEDIA_MODE: 'simulated' | 'cloudinary'
+  /** Nube de Cloudinary (arma las `url` de las fotos). Obligatoria con `cloudinary`. */
+  CLOUDINARY_CLOUD_NAME?: string | undefined
+  /** API key de Cloudinary (va en la firma de las subidas). Obligatoria con `cloudinary`. */
+  CLOUDINARY_API_KEY?: string | undefined
+  /** API secret de Cloudinary (firma las subidas). Obligatorio con `cloudinary`; nunca se loguea. */
+  CLOUDINARY_API_SECRET?: string | undefined
 }
 
 const HTTP_PROTOCOL = /^https?$/
@@ -63,7 +77,8 @@ function isBareOrigin(value: string): boolean {
  * Esquema zod de las variables de entorno. Los nombres son los de `.env.example`; `PORT` llega
  * como texto y se convierte a número. Las reglas entre variables (`MP_MODE=live` exige sus tres
  * credenciales; `production` exige `live` y `STORE_REVALIDATE_SECRET`) se revisan solo si cada
- * variable es válida por sí sola.
+ * variable es válida por sí sola; lo mismo `MEDIA_MODE=cloudinary` con sus tres credenciales y
+ * `production` con `cloudinary`.
  */
 export const envSchema = z
   .object({
@@ -80,6 +95,10 @@ export const envSchema = z
     MP_WEBHOOK_SECRET: z.string().min(1).optional(),
     PUBLIC_API_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).refine(isBareOrigin).optional(),
     MP_STATEMENT_DESCRIPTOR: z.string().min(1).max(13).default('GALPON MATES'),
+    MEDIA_MODE: z.enum(['simulated', 'cloudinary']).default('simulated'),
+    CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
+    CLOUDINARY_API_KEY: z.string().min(1).optional(),
+    CLOUDINARY_API_SECRET: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     // Reglas entre variables: sin `path`, `parseEnv` muestra el mensaje tal cual.
@@ -92,6 +111,16 @@ export const envSchema = z
     }
     if (env.NODE_ENV === 'production' && env.STORE_REVALIDATE_SECRET === undefined) {
       ctx.addIssue({ code: 'custom', message: STORE_REVALIDATE_PRODUCTION_MESSAGE, path: [] })
+    }
+    const cloudinary = env.MEDIA_MODE === 'cloudinary'
+    if (
+      cloudinary &&
+      (!env.CLOUDINARY_CLOUD_NAME || !env.CLOUDINARY_API_KEY || !env.CLOUDINARY_API_SECRET)
+    ) {
+      ctx.addIssue({ code: 'custom', message: MEDIA_CLOUDINARY_MISSING_MESSAGE, path: [] })
+    }
+    if (env.NODE_ENV === 'production' && !cloudinary) {
+      ctx.addIssue({ code: 'custom', message: MEDIA_PRODUCTION_SIMULATED_MESSAGE, path: [] })
     }
   }) satisfies z.ZodType<Env>
 
@@ -111,4 +140,8 @@ export const ENV_HINTS: Record<keyof Env, string> = {
   PUBLIC_API_ORIGIN:
     'un origen http o https sin ruta ni barra final (por ejemplo https://api.ejemplo.com)',
   MP_STATEMENT_DESCRIPTOR: 'un texto de 1 a 13 caracteres (por ejemplo GALPON MATES)',
+  MEDIA_MODE: 'simulated o cloudinary',
+  CLOUDINARY_CLOUD_NAME: 'el nombre de la nube de Cloudinary (no vacío)',
+  CLOUDINARY_API_KEY: 'la API key de Cloudinary (no vacía)',
+  CLOUDINARY_API_SECRET: 'el API secret de Cloudinary (no vacío)',
 }
