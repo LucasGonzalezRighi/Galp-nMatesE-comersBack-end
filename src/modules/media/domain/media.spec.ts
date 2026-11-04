@@ -113,11 +113,36 @@ describe('media', () => {
     }
   })
 
+  it('una foto que el navegador sacaría de la carpeta (puntos como %2e, tabs o saltos de línea) da unknown_image', () => {
+    for (const publicId of [
+      'galpon/socios/%2e%2e/productos/mate',
+      'galpon/socios/.%2E/productos/mate',
+      'galpon/socios/%2E./productos/mate',
+      'galpon/socios/%2e/lucas',
+      'galpon/socios/.\t./productos/mate',
+      'galpon/socios/.\n./productos/mate',
+      'galpon/socios/.\r./productos/mate',
+      'galpon/socios/lucas\u0000',
+    ]) {
+      // El parser de URL del navegador (WHATWG) toma `%2e` como un punto y borra tabs y saltos
+      // de línea: la `url` armada con cualquiera de estos apuntaría a `galpon/productos/mate`.
+      expect(resolveImage({ publicId, width: 800, height: 800, alt: 'Mate' }, rule())).toEqual({
+        ok: false,
+        error: {
+          field: 'partners.0.photo.publicId',
+          code: 'unknown_image',
+          message: UNKNOWN_IMAGE_MESSAGE,
+        },
+      })
+    }
+  })
+
   it('acepta subcarpetas y puntos dentro de un nombre', () => {
     for (const publicId of [
       'galpon/socios/2026/lucas',
       'galpon/socios/lucas.v2',
       'galpon/socios/..lucas',
+      'galpon/socios/lucas%2ev2',
     ]) {
       expect(
         resolveImage({ publicId, width: 800, height: 800, alt: 'Lucas' }, rule()),

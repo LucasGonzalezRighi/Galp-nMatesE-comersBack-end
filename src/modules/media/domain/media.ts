@@ -76,25 +76,48 @@ export function mediaUrl(cloudName: string, publicId: string): string {
   return `https://res.cloudinary.com/${cloudName}/image/upload/${publicId}`
 }
 
+/** Punto codificado: el parser de URL del navegador (WHATWG) toma `%2e` como `.` en un segmento. */
+const ENCODED_DOT = /%2e/gi
+
 /**
- * Indica si lo que sigue a la carpeta de un uso queda adentro de ella: uno o más segmentos
- * separados por una barra, ninguno vacío (sin barras dobles ni al final), ni `.` ni `..`, y sin
- * barras invertidas. Así `galpon/socios/../productos/x` no pasa por una foto de socios.
+ * Indica si un texto tiene caracteres de control (ASCII 0 a 31 o 127). El parser de URL del
+ * navegador borra tabs y saltos de línea, así que `.\t.` terminaría siendo `..`.
+ *
+ * @param text - Texto a revisar.
+ * @returns `true` si tiene alguno.
+ */
+function hasControlCharacter(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index)
+    if (code < 0x20 || code === 0x7f) return true
+  }
+  return false
+}
+
+/**
+ * Indica si lo que sigue a la carpeta de un uso queda adentro de ella, también para el
+ * navegador que abra la `url`: uno o más segmentos separados por una barra, ninguno vacío (sin
+ * barras dobles ni al final), ni `.` ni `..` (tampoco escritos con `%2e`), sin barras invertidas
+ * y sin caracteres de control. Así `galpon/socios/../productos/x` (o `%2e%2e`) no pasa por una
+ * foto de socios.
  *
  * @param rest - El `publicId` sin la carpeta y su barra.
  * @returns `true` si es una ruta limpia dentro de la carpeta.
  */
 function isInsideFolder(rest: string): boolean {
-  if (rest === '' || rest.includes('\\')) return false
-  return rest.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+  if (rest === '' || rest.includes('\\') || hasControlCharacter(rest)) return false
+  return rest.split('/').every((segment) => {
+    const dots = segment.replace(ENCODED_DOT, '.')
+    return segment !== '' && dots !== '.' && dots !== '..'
+  })
 }
 
 /**
  * Resuelve una foto que manda el dashboard (`ImageInput`) a la que se guarda (`Image`), sin
  * consultar a Cloudinary (Ruling B-74): si es una de las que el recurso ya tiene conserva su
  * `url`; si no, su `publicId` tiene que estar dentro de la carpeta de su uso (sin segmentos `.`
- * o `..`, barras dobles ni barras invertidas) y la `url` se arma con la nube. Medidas y `alt`
- * salen siempre del cuerpo.
+ * o `..`, ni escritos con `%2e`, barras dobles, barras invertidas ni caracteres de control) y la
+ * `url` se arma con la nube. Medidas y `alt` salen siempre del cuerpo.
  *
  * @param input - Foto del cuerpo, ya validada en su forma.
  * @param rule - Uso, fotos guardadas, nube y ruta del campo.
