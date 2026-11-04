@@ -180,10 +180,49 @@ describe('order.mapper', () => {
   it('ordena las piezas del kit como mate, bombilla y yerba', () => {
     const kit = toOrder(row()).lines[1]
 
-    expect(kit?.kitItems?.map((piece) => [piece.role, piece.productId])).toEqual([
-      ['mate', 'p-mate'],
-      ['bombilla', 'p-bombilla'],
-      ['yerba', 'p-yerba'],
+    expect(kit?.kitItems?.map((piece) => [piece.role, piece.productId, piece.position])).toEqual([
+      ['mate', 'p-mate', 1],
+      ['bombilla', 'p-bombilla', 2],
+      ['yerba', 'p-yerba', 3],
+    ])
+  })
+
+  it('un kit viejo con las piezas en position 0 sale por grupo', () => {
+    const kit = row().items[1]
+    if (kit === undefined) throw new Error('falta la línea de ejemplo')
+    const components = kit.components.map((piece) => ({ ...piece, position: 0 }))
+
+    const [line] = toOrder(row({ items: [{ ...kit, components }] })).lines
+
+    expect(line?.kitItems?.map((piece) => piece.role)).toEqual(['mate', 'bombilla', 'yerba'])
+  })
+
+  it('lee una línea de combo [yerba, mate] con sus piezas en el orden del combo', () => {
+    const [product, kit] = row().items
+    if (product === undefined || kit === undefined) throw new Error('faltan las líneas de ejemplo')
+    const combo = {
+      ...kit,
+      lineType: 'combo' as const,
+      name: 'Yerba y mate',
+      detail: 'Yerba + Mate · Cuero negro · Alpaca cincelada',
+      components: [
+        { role: 'mate' as const, productId: 'p-mate', position: 2 },
+        { role: 'yerba' as const, productId: 'p-yerba', position: 1 },
+      ].map((piece) => ({ ...piece, orderItemId: kit.id, slug: 's', name: 'n', unitPriceArs: 1 })),
+    }
+
+    const [, line] = toOrder(row({ items: [product, combo] })).lines
+
+    expect(line).toMatchObject({
+      type: 'combo',
+      name: 'Yerba y mate',
+      productId: null,
+      productSlug: null,
+      options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+    })
+    expect(line?.kitItems?.map((piece) => [piece.position, piece.role])).toEqual([
+      [1, 'yerba'],
+      [2, 'mate'],
     ])
   })
 
@@ -241,14 +280,6 @@ describe('order.mapper', () => {
     ).toThrow('La dirección de envío guardada en el pedido no es válida')
     expect(() => toShippingAddress({ ...HOME, number: 12 })).toThrow(TypeError)
     expect(() => toShippingAddress(['CABA'])).toThrow(TypeError)
-  })
-
-  it('rechaza una línea de combo mientras el pedido no guarde combos', () => {
-    const [product] = row().items
-    if (product === undefined) throw new Error('falta la línea de ejemplo')
-    expect(() => toOrder(row({ items: [{ ...product, lineType: 'combo' }] }))).toThrow(
-      'Una línea de combo todavía no se puede leer como línea de pedido',
-    )
   })
 
   it('lee y valida las opciones de una línea', () => {

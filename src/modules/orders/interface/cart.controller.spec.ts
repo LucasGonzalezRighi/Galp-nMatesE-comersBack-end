@@ -28,6 +28,15 @@ const KIT_LINE = {
   expectedUnitPriceArs: 75997,
 }
 
+/** Combo con mate y el precio visto, como lo manda la tienda. */
+const COMBO_LINE = {
+  type: 'combo',
+  comboId: 'cmb-duo-imperial',
+  quantity: 2,
+  options: { leather: 'Marrón', ferrule: 'Acero' },
+  expectedUnitPriceArs: 61999,
+}
+
 /** Cotización que devuelve el caso de uso simulado (el controlador la pasa tal cual). */
 const QUOTE = {
   lines: [],
@@ -84,6 +93,18 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
     ])
   })
 
+  it('POST /cart/quote acepta un combo; sin options ni precio visto llega con options null', async () => {
+    const withoutOptions = { type: 'combo', comboId: 'cmb-bombilla-y-yerba', quantity: 1 }
+
+    const response = await post('/cart/quote', { items: [COMBO_LINE, withoutOptions] })
+
+    expect(response.status).toBe(200)
+    expect(quoteCart.execute).toHaveBeenCalledWith([
+      COMBO_LINE,
+      { ...withoutOptions, options: null },
+    ])
+  })
+
   it('POST /cart/quote: un producto sin options llega con options null', async () => {
     const withoutOptions = { type: 'product', productId: MATE_LINE.productId, quantity: 1 }
 
@@ -129,11 +150,11 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
     ],
     [
       'type desconocido',
-      { items: [{ ...MATE_LINE, type: 'combo' }] },
+      { items: [{ ...MATE_LINE, type: 'regalo' }] },
       {
         field: 'items.0.type',
         code: 'invalid_value',
-        message: 'El tipo de la línea tiene que ser product o kit.',
+        message: 'El tipo de la línea tiene que ser product, kit o combo.',
       },
     ],
     [
@@ -142,7 +163,30 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
       {
         field: 'items.1.type',
         code: 'invalid_value',
-        message: 'El tipo de la línea tiene que ser product o kit.',
+        message: 'El tipo de la línea tiene que ser product, kit o combo.',
+      },
+    ],
+    [
+      'comboId vacío',
+      { items: [{ ...COMBO_LINE, comboId: '' }] },
+      { field: 'items.0.comboId', code: 'too_small', message: 'Elegí un combo válido.' },
+    ],
+    [
+      'precio visto de un combo de más de 99.999.999',
+      { items: [{ ...COMBO_LINE, expectedUnitPriceArs: 100_000_000 }] },
+      {
+        field: 'items.0.expectedUnitPriceArs',
+        code: 'too_big',
+        message: 'El precio visto tiene que ser un monto entero en pesos.',
+      },
+    ],
+    [
+      'campo de más en un combo',
+      { items: [{ ...COMBO_LINE, productId: 'prd-x' }] },
+      {
+        field: 'items.0.productId',
+        code: 'unrecognized_key',
+        message: 'Este campo no está permitido.',
       },
     ],
     [

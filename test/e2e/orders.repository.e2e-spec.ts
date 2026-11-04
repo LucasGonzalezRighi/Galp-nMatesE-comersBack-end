@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { seed } from '../../prisma/seed'
+import { comboSeedId, seed } from '../../prisma/seed'
 import {
   productGroupCacheKey,
   productSlugCacheKey,
@@ -300,10 +300,10 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
 
       // El repositorio lee lo que guardó: líneas, piezas del kit en orden y el historial.
       const saved = await orders().findByNumber('GLP-10001')
-      expect(saved?.lines[1]?.kitItems?.map((piece) => piece.role)).toEqual([
-        'mate',
-        'bombilla',
-        'yerba',
+      expect(saved?.lines[1]?.kitItems?.map((piece) => [piece.role, piece.position])).toEqual([
+        ['mate', 1],
+        ['bombilla', 2],
+        ['yerba', 3],
       ])
       expect(saved?.lines[0]).toMatchObject({ productId: mate.id, options: MATE_OPTIONS })
       expect(saved?.history).toEqual([{ status: 'pending_payment', at: row.createdAt, note: null }])
@@ -425,6 +425,40 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
       } finally {
         await prisma().product.update({ where: { id: coquito.id }, data: { status: 'published' } })
       }
+    })
+
+    it('trae los combos publicados y en borrador con sus piezas en orden, sin los ids que no son UUID', async () => {
+      const mate = await product('mate-imperial-premium')
+      const curvo = await product('bombillon-premium-curvo')
+      const galleta = await prisma().product.findUniqueOrThrow({ where: { slug: 'mate-galleta' } })
+      const yerba = await product('yerba-canarias-1-kg')
+      const duoId = comboSeedId({ key: 'cmb-duo-imperial' })
+      const draftId = comboSeedId({ key: 'cmb-galleta-y-canarias' })
+
+      const found = await get<ProductCatalogPort>(PRODUCT_CATALOG_PORT).findCombosForCart([
+        draftId,
+        'cmb-duo-imperial',
+        newId(),
+        duoId,
+      ])
+
+      expect([...found].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+        {
+          id: duoId,
+          name: 'Dúo Imperial',
+          status: 'published',
+          priceArs: 61999,
+          productIds: [mate.id, curvo.id],
+        },
+        {
+          id: draftId,
+          name: 'Galleta y Canarias',
+          status: 'draft',
+          priceArs: 33999,
+          productIds: [galleta.id, yerba.id],
+        },
+      ])
+      expect(await get<ProductCatalogPort>(PRODUCT_CATALOG_PORT).findCombosForCart([])).toEqual([])
     })
   })
 
@@ -971,6 +1005,66 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         providerPaymentId: '7000000002',
         challengeUrl: 'https://www.mercadopago.com.ar/3ds/challenge?id=abc123',
       })
+    })
+  })
+
+  describe('líneas de combo', () => {
+    it('guarda la línea combo con la position de cada pieza y la lee en el orden del combo', async () => {
+      const yerba = await product('yerba-canarias-te-y-jengibre-1-kg')
+      const mate = await product('mate-torpedo-virola-de-alpaca-cincelada')
+      const listPriceArs = yerba.priceArs + mate.priceArs
+      const priceArs = listPriceArs - 4000
+      const draft: OrderDraft = {
+        ...draftOf([]),
+        lines: [
+          {
+            type: 'combo',
+            name: 'Yerba y mate',
+            detail: `${yerba.name} + ${mate.name} · Cuero negro · Alpaca cincelada`,
+            quantity: 1,
+            unitPriceArs: listPriceArs,
+            kitSavingsArs: listPriceArs - priceArs,
+            totalArs: priceArs,
+            productId: null,
+            productSlug: null,
+            options: MATE_OPTIONS,
+            kitItems: [yerba, mate].map((piece, index) => ({
+              role: index === 0 ? 'yerba' : 'mate',
+              position: index + 1,
+              productId: piece.id,
+              slug: piece.slug,
+              name: piece.name,
+              unitPriceArs: piece.priceArs,
+            })),
+          },
+        ],
+        reservation: [
+          { productId: yerba.id, quantity: 1 },
+          { productId: mate.id, quantity: 1 },
+        ],
+        itemsGrossArs: listPriceArs,
+        kitSavingsArs: listPriceArs - priceArs,
+        subtotalArs: priceArs,
+        totalArs: priceArs,
+      }
+      const yerbaBefore = await reservedOf(yerba.id)
+      const mateBefore = await reservedOf(mate.id)
+
+      const order = await place(draft)
+      const saved = await orders().findByNumber(order.number)
+      const row = await prisma().orderItem.findFirstOrThrow({
+        where: { orderId: order.id },
+        include: { components: { orderBy: { position: 'asc' } } },
+      })
+
+      expect(row.lineType).toBe('combo')
+      expect(row.components.map((piece) => [piece.position, piece.role])).toEqual([
+        [1, 'yerba'],
+        [2, 'mate'],
+      ])
+      expect(saved?.lines).toEqual(draft.lines)
+      expect(await reservedOf(yerba.id)).toBe(yerbaBefore + 1)
+      expect(await reservedOf(mate.id)).toBe(mateBefore + 1)
     })
   })
 })

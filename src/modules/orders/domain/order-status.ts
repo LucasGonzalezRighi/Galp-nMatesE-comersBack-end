@@ -74,9 +74,12 @@ export const PAYMENT_METHODS = ['mp_redirect', 'card'] as const
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
 /** Tipos de línea (`LineType` del contrato). */
-export const LINE_TYPES = ['product', 'kit'] as const
+export const LINE_TYPES = ['product', 'kit', 'combo'] as const
 
-/** Tipo de línea: un producto suelto o un kit de mate, bombilla y yerba. */
+/**
+ * Tipo de línea: un producto suelto, un kit de mate, bombilla y yerba con descuento o un combo de
+ * productos fijos con precio final.
+ */
 export type LineType = (typeof LINE_TYPES)[number]
 
 /** Quién hizo un cambio de estado (columna `order_status_history.actor`). */

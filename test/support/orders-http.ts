@@ -43,6 +43,22 @@ export function mateLine(id: string, quantity = 1): CartLine {
 }
 
 /**
+ * Línea de un combo (si el combo no lleva mate, el back ignora las opciones).
+ *
+ * @param id - Id del combo.
+ * @param quantity - Cantidad de combos (por defecto 1).
+ * @param options - Cuero y virola del mate (por defecto {@link MATE_OPTIONS}).
+ * @returns La línea del carrito.
+ */
+export function comboLine(
+  id: string,
+  quantity = 1,
+  options: Readonly<Record<string, string>> | null = MATE_OPTIONS,
+): CartLine {
+  return { type: 'combo', comboId: id, quantity, options }
+}
+
+/**
  * Los pasos de la tienda para crear un pedido por HTTP (cotizar, armar el cuerpo y confirmar),
  * contra el servidor de una app de E2E.
  *

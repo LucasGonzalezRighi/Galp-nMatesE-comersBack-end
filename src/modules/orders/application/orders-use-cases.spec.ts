@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { FixedClock, FIXED_NOW } from '../../../../test/support/clock'
 import {
+  COMBOS,
   FixedStoreSettings,
   InMemoryCustomerDirectory,
   InMemoryOrderRepository,
@@ -11,7 +12,7 @@ import {
   RecordingExpirationScheduler,
 } from '../../../../test/support/orders'
 import { FixedSecrets } from '../../../../test/support/session'
-import type { KitCartItem, ProductCartItem } from '../domain/cart-line'
+import type { ComboCartItem, KitCartItem, ProductCartItem } from '../domain/cart-line'
 import {
   CartValidationError,
   OrderConflictError,
@@ -29,7 +30,7 @@ import { QuoteShippingQuery } from './queries/quote-shipping.query'
 const MINUTE = 60_000
 const RESERVATION_MS = 30 * MINUTE
 const GUEST = { customerId: null }
-const { imperialPremium, coquito, bombillon100, yerbaCanarias } = PRODUCTS
+const { imperialPremium, coquito, bombillon100, bombillonCurvo, yerbaCanarias } = PRODUCTS
 const CONFLICT_DETAIL = 'El pedido cambió desde que armaste el resumen. Revisalo antes de pagar.'
 
 const MATE: ProductCartItem = {
@@ -102,6 +103,13 @@ function orderInput(changes: Partial<CreateOrderInput> = {}): CreateOrderInput {
     website: null,
     ...changes,
   }
+}
+
+const DUO: ComboCartItem = {
+  type: 'combo',
+  comboId: COMBOS.duoImperial.id,
+  quantity: 1,
+  options: { leather: 'Marrón', ferrule: 'Acero' },
 }
 
 const KIT: KitCartItem = {
@@ -325,6 +333,52 @@ describe('CreateOrderCommand', () => {
         },
       ],
     })
+  })
+
+  it('un combo reserva cada pieza y guarda sus piezas en el orden del combo', async () => {
+    const t = setup()
+    const result = await t.createOrder.execute(
+      orderInput({ items: [DUO], expectedTotalArs: 68499 }),
+      GUEST,
+    )
+
+    expect(result.order.lines).toEqual([
+      {
+        type: 'combo',
+        name: 'Dúo Imperial',
+        detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón · Acero',
+        quantity: 1,
+        unitPriceArs: 68998,
+        kitSavingsArs: 6999,
+        totalArs: 61999,
+        productSlug: null,
+        options: { leather: 'Marrón', ferrule: 'Acero' },
+        kitItems: [
+          { slug: 'mate-imperial-premium', name: 'Mate Imperial Premium', unitPriceArs: 39999 },
+          { slug: 'bombillon-premium-curvo', name: 'Bombillón Premium Curvo', unitPriceArs: 28999 },
+        ],
+      },
+    ])
+    expect(result.order).toMatchObject({ kitSavingsArs: 6999, subtotalArs: 61999 })
+    expect(t.stock.reserved(imperialPremium.id)).toBe(1)
+    expect(t.stock.reserved(bombillonCurvo.id)).toBe(1)
+  })
+
+  it('un combo dado de baja responde 409 stock_changed sin producto, nunca un error', async () => {
+    const t = setup()
+    t.catalog.updateCombo(COMBOS.duoImperial.id, { status: 'draft' })
+    const error = await rejection(
+      t.createOrder.execute(orderInput({ items: [DUO], expectedTotalArs: 68499 }), GUEST),
+    )
+
+    expect(error).toMatchObject({
+      status: 409,
+      code: 'stock_changed',
+      changes: [
+        { kind: 'unavailable', productId: null, message: 'Dúo Imperial ya no está disponible.' },
+      ],
+    })
+    expect(t.orders.orders).toEqual([])
   })
 
   it('responde 409 price_changed si cambió el precio que esperaba la tienda', async () => {
@@ -780,6 +834,25 @@ describe('QuoteCartQuery', () => {
     ]
 
     await expect(t.quoteCart.execute(items)).rejects.toBeInstanceOf(CartValidationError)
+  })
+
+  it('carga los combos y busca las piezas junto con los productos de las demás líneas', async () => {
+    const t = setup()
+    const quote = await t.quoteCart.execute([MATE, DUO])
+
+    expect(t.catalog.calls).toEqual([[imperialPremium.id, bombillonCurvo.id]])
+    expect(quote.lines.map((line) => [line.type, line.totalArs])).toEqual([
+      ['product', 39999],
+      ['combo', 61999],
+    ])
+  })
+
+  it('un combo con mate sin opciones responde 422', async () => {
+    const t = setup()
+
+    await expect(t.quoteCart.execute([{ ...DUO, options: null }])).rejects.toMatchObject({
+      errors: [{ field: 'items.0.options', code: 'required' }],
+    })
   })
 })
 

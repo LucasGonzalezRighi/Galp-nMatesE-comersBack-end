@@ -40,11 +40,11 @@ export class CartQuoteLineDto {
   @ApiProperty({ type: 'string' })
   key!: string
 
-  /** Producto suelto o kit. */
+  /** Producto suelto, kit o combo. */
   @ApiSchemaProperty(namedRef('LineType'))
   type!: string
 
-  /** Nombre del producto o `Kit`. */
+  /** Nombre del producto, `Kit` o el nombre del combo. */
   @ApiProperty({ type: 'string' })
   name!: string
 
@@ -60,7 +60,7 @@ export class CartQuoteLineDto {
   @ApiSchemaProperty(nullableRef('TotalArs'))
   netUnitPriceArs!: number | null
 
-  /** Ahorro por kit de la línea. */
+  /** Ahorro por kit o por combo de la línea. */
   @ApiSchemaProperty(namedRef('TotalArs'))
   kitSavingsArs!: number
 
@@ -88,11 +88,11 @@ export class CartQuoteDto {
   @ApiSchemaProperty(namedRef('TotalArs'))
   itemsGrossArs!: number
 
-  /** Suma de los ahorros por kit. */
+  /** Suma de los ahorros por kit y por combo. */
   @ApiSchemaProperty(namedRef('TotalArs'))
   kitSavingsArs!: number
 
-  /** Bruto menos el ahorro por kit. */
+  /** Bruto menos los ahorros por kit y por combo. */
   @ApiSchemaProperty(namedRef('TotalArs'))
   subtotalArs!: number
 
@@ -140,11 +140,11 @@ export class OrderShippingDto {
 /** Línea de un pedido (`OrderLine`). */
 @ApiSchema({ name: 'OrderLine' })
 export class OrderLineDto {
-  /** Producto suelto o kit. */
+  /** Producto suelto, kit o combo. */
   @ApiSchemaProperty(namedRef('LineType'))
   type!: string
 
-  /** Nombre del producto o `Kit`. */
+  /** Nombre del producto, `Kit` o el nombre del combo. */
   @ApiProperty({ type: 'string' })
   name!: string
 
@@ -160,7 +160,7 @@ export class OrderLineDto {
   @ApiSchemaProperty(namedRef('TotalArs'))
   unitPriceArs!: number
 
-  /** Ahorro por kit de la línea. */
+  /** Ahorro por kit o por combo de la línea. */
   @ApiSchemaProperty(namedRef('TotalArs'))
   kitSavingsArs!: number
 
@@ -168,19 +168,19 @@ export class OrderLineDto {
   @ApiSchemaProperty(namedRef('TotalArs'))
   totalArs!: number
 
-  /** Slug del producto al comprar, o `null` en un kit. */
+  /** Slug del producto al comprar, o `null` en un kit o un combo. */
   @ApiSchemaProperty(NULLABLE_STRING)
   productSlug!: string | null
 
-  /** Cuero y virola, o `null`. */
+  /** Cuero y virola de un mate, de un kit o del mate de un combo, o `null`. */
   @ApiSchemaProperty(nullableRef('CartItemOptions'))
   options!: unknown
 
-  /** Las tres piezas de un kit, o `null`. */
+  /** Las piezas de un kit (3) o de un combo (2 o 3, en el orden del combo), o `null`. */
   @ApiSchemaProperty({
     type: 'array',
     nullable: true,
-    minItems: 3,
+    minItems: 2,
     maxItems: 3,
     items: {
       type: 'object',
@@ -294,7 +294,7 @@ export class OrderDto {
   @ApiSchemaProperty(namedRef('TotalArs'))
   itemsGrossArs!: number
 
-  /** Suma de los ahorros por kit. */
+  /** Suma de los ahorros por kit y por combo. */
   @ApiSchemaProperty(namedRef('TotalArs'))
   kitSavingsArs!: number
 
@@ -391,9 +391,9 @@ export class OrderSummaryPageDto {
   total!: number
 }
 
-/** Línea del carrito de un producto suelto o de un kit, con sus campos comunes. */
+/** Línea del carrito de un producto suelto, de un kit o de un combo, con sus campos comunes. */
 function cartItemSchema(
-  type: 'product' | 'kit',
+  type: 'product' | 'kit' | 'combo',
   required: readonly string[],
   ids: Readonly<Record<string, OpenApiSchema>>,
   expectedPrice: string,
@@ -412,7 +412,7 @@ function cartItemSchema(
   }
 }
 
-/** Id de un producto en una línea del carrito. */
+/** Id de un producto (o de un combo) en una línea del carrito. */
 const PRODUCT_ID: OpenApiSchema = { type: 'string', minLength: 1, maxLength: 80 }
 
 /**
@@ -453,13 +453,24 @@ export const ORDERS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
     },
     'TotalArs',
   ),
+  ComboCartItemInput: cartItemSchema(
+    'combo',
+    ['comboId', 'quantity', 'options'],
+    { comboId: PRODUCT_ID, options: nullableRef('CartItemOptions') },
+    'Pesos',
+  ),
   CartItemInput: {
-    oneOf: [schemaRef('ProductCartItemInput'), schemaRef('KitCartItemInput')],
+    oneOf: [
+      schemaRef('ProductCartItemInput'),
+      schemaRef('KitCartItemInput'),
+      schemaRef('ComboCartItemInput'),
+    ],
     discriminator: {
       propertyName: 'type',
       mapping: {
         product: '#/components/schemas/ProductCartItemInput',
         kit: '#/components/schemas/KitCartItemInput',
+        combo: '#/components/schemas/ComboCartItemInput',
       },
     },
   },

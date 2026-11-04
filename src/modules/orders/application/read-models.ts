@@ -16,7 +16,7 @@ export interface ShippingQuote {
   eta: string
 }
 
-/** Pieza de un kit en un pedido (`OrderLine.kitItems[]`). */
+/** Pieza de un kit o de un combo en un pedido (`OrderLine.kitItems[]`). */
 export interface OrderKitItemView {
   /** Slug al comprar. */
   slug: string
@@ -28,9 +28,9 @@ export interface OrderKitItemView {
 
 /** Línea de un pedido (`OrderLine` del contrato). */
 export interface OrderLineView {
-  /** Producto suelto o kit. */
+  /** Producto suelto, kit o combo. */
   type: LineType
-  /** Nombre del producto o `Kit`. */
+  /** Nombre del producto, `Kit` o el nombre del combo. */
   name: string
   /** Opciones elegidas; vacío si no hay. */
   detail: string
@@ -38,15 +38,15 @@ export interface OrderLineView {
   quantity: number
   /** Precio de lista de una unidad. */
   unitPriceArs: number
-  /** Ahorro por kit de la línea. */
+  /** Ahorro por kit o por combo de la línea. */
   kitSavingsArs: number
   /** Importe de la línea. */
   totalArs: number
-  /** Slug del producto al comprar, o `null` en un kit. */
+  /** Slug del producto al comprar, o `null` en un kit o un combo. */
   productSlug: string | null
-  /** Cuero y virola de un mate o del kit, o `null`. */
+  /** Cuero y virola de un mate, del kit o del mate del combo, o `null`. */
   options: CartItemOptions | null
-  /** Las tres piezas de un kit, o `null`. */
+  /** Las piezas de un kit (3) o de un combo (2 o 3, en el orden del combo), o `null`. */
   kitItems: OrderKitItemView[] | null
 }
 
@@ -120,7 +120,7 @@ export interface OrderView {
   lines: OrderLineView[]
   /** Suma de los precios de lista. */
   itemsGrossArs: number
-  /** Suma de los ahorros por kit. */
+  /** Suma de los ahorros por kit y por combo. */
   kitSavingsArs: number
   /** Importe de las líneas sin envío. */
   subtotalArs: number

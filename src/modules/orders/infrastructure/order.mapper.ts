@@ -4,7 +4,6 @@ import { FERRULES, LEATHERS } from '../../catalog/domain/product.entity'
 import { isProvince } from '../../identity/domain/province'
 import type { CartItemOptions, Ferrule, Leather } from '../domain/cart-line'
 import type { Order, OrderPaymentInfo } from '../domain/order.entity'
-import type { LineType } from '../domain/order-status'
 import type { OrderKitItemDraft, OrderLineDraft } from '../domain/pricing'
 import type { ShippingAddress } from '../domain/shipping'
 
@@ -135,34 +134,30 @@ export function cartItemOptionsJson(
 }
 
 /**
- * Tipo de línea guardado → el del dominio. La base ya admite `combo` (migración b5c_combos), pero
- * el dominio de pedidos todavía no guarda combos, así que ninguna fila lo tiene.
- *
- * @throws {Error} En español, si la línea guardada es un combo.
+ * Línea guardada → línea del dominio. Las piezas de un kit o de un combo salen por `position` (el
+ * orden del combo) y, a igual `position`, por grupo: así un kit guardado con `position` 0 sale
+ * mate, bombilla y yerba.
  */
-function toLineType(lineType: OrderRow['items'][number]['lineType']): LineType {
-  if (lineType === 'combo') {
-    throw new Error('Una línea de combo todavía no se puede leer como línea de pedido')
-  }
-  return lineType
-}
-
-/** Línea guardada → línea del dominio, con las piezas del kit en orden mate, bombilla, yerba. */
 function toLine(item: OrderRow['items'][number]): OrderLineDraft {
   const kitItems: OrderKitItemDraft[] | null =
-    item.lineType === 'kit'
-      ? [...item.components]
-          .sort((a, b) => PRODUCT_GROUPS.indexOf(a.role) - PRODUCT_GROUPS.indexOf(b.role))
+    item.lineType === 'product'
+      ? null
+      : [...item.components]
+          .sort(
+            (a, b) =>
+              a.position - b.position ||
+              PRODUCT_GROUPS.indexOf(a.role) - PRODUCT_GROUPS.indexOf(b.role),
+          )
           .map((piece) => ({
             role: piece.role,
+            position: piece.position,
             productId: piece.productId,
             slug: piece.slug,
             name: piece.name,
             unitPriceArs: piece.unitPriceArs,
           }))
-      : null
   return {
-    type: toLineType(item.lineType),
+    type: item.lineType,
     name: item.name,
     detail: item.detail,
     quantity: item.quantity,

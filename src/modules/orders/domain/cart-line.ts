@@ -46,8 +46,25 @@ export interface KitCartItem {
   expectedUnitPriceArs?: number
 }
 
+/**
+ * Combo en el carrito (`ComboCartItemInput`): solo lleva el combo; la cotización usa sus piezas y
+ * su precio vigentes.
+ */
+export interface ComboCartItem {
+  /** Discriminador. */
+  type: 'combo'
+  /** Id del combo. */
+  comboId: string
+  /** Cantidad de combos, de 1 a 20. */
+  quantity: number
+  /** Cuero y virola del mate del combo; `null` si no lleva mate (si llegan, se ignoran). */
+  options: CartItemOptions | null
+  /** Precio final del combo que la tienda tenía cotizado; si difiere, `price_changed`. */
+  expectedUnitPriceArs?: number
+}
+
 /** Línea del carrito que manda la tienda. */
-export type CartItem = ProductCartItem | KitCartItem
+export type CartItem = ProductCartItem | KitCartItem | ComboCartItem
 
 /** Máximo de líneas por carrito (`CartQuoteInput.items.maxItems`). */
 export const MAX_CART_LINES = 50
@@ -59,11 +76,13 @@ export const KIT_FERRULE: Ferrule = 'Alpaca cincelada'
 export const KIT_LINE_NAME = 'Kit'
 
 /**
- * Clave de la línea, igual a la que arma la tienda: `product:{id}:{cuero|-}:{virola|-}` o
- * `kit:{mateId}:{bombillaId}:{yerbaId}:{cuero}`, con acentos y espacios tal cual.
+ * Clave de la línea, igual a la que arma la tienda: `product:{id}:{cuero|-}:{virola|-}`,
+ * `kit:{mateId}:{bombillaId}:{yerbaId}:{cuero}` o `combo:{comboId}:{cuero|-}:{virola|-}`, con
+ * acentos y espacios tal cual. La de un combo no incluye las piezas.
  *
  * @param item - Línea del carrito.
- * @param isMate - Si el producto suelto es un mate: en los demás las opciones se ignoran.
+ * @param isMate - Si el producto suelto es un mate, o si el combo lleva mate o no existe (sin el
+ *   combo no se sabe y se conserva lo que mandó la tienda): en los demás las opciones se ignoran.
  * @returns La clave.
  */
 export function cartLineKey(item: CartItem, isMate: boolean): string {
@@ -71,19 +90,38 @@ export function cartLineKey(item: CartItem, isMate: boolean): string {
     return `kit:${item.mateId}:${item.bombillaId}:${item.yerbaId}:${item.leather}`
   }
   const options = isMate ? item.options : null
-  return `product:${item.productId}:${options?.leather ?? '-'}:${options?.ferrule ?? '-'}`
+  const prefix = item.type === 'combo' ? `combo:${item.comboId}` : `product:${item.productId}`
+  return `${prefix}:${options?.leather ?? '-'}:${options?.ferrule ?? '-'}`
 }
 
 /**
- * Ids de los productos de las líneas y de las piezas de los kits, sin repetir.
+ * Ids de los combos del carrito, sin repetir.
  *
  * @param items - Líneas del carrito.
  * @returns Los ids a buscar en el catálogo, en el orden en que aparecen.
  */
-export function cartProductIds(items: readonly CartItem[]): string[] {
-  const ids = items.flatMap((item) =>
-    item.type === 'kit' ? [item.mateId, item.bombillaId, item.yerbaId] : [item.productId],
-  )
+export function cartComboIds(items: readonly CartItem[]): string[] {
+  return [...new Set(items.flatMap((item) => (item.type === 'combo' ? [item.comboId] : [])))]
+}
+
+/**
+ * Ids de los productos de las líneas, de las piezas de los kits y de las piezas de los combos ya
+ * cargados, sin repetir.
+ *
+ * @param items - Líneas del carrito.
+ * @param combos - Ids de las piezas de cada combo encontrado, por id del combo (los que no están
+ *   no aportan piezas).
+ * @returns Los ids a buscar en el catálogo, en el orden en que aparecen.
+ */
+export function cartProductIds(
+  items: readonly CartItem[],
+  combos: ReadonlyMap<string, { readonly productIds: readonly string[] }> = new Map(),
+): string[] {
+  const ids = items.flatMap((item): readonly string[] => {
+    if (item.type === 'kit') return [item.mateId, item.bombillaId, item.yerbaId]
+    if (item.type === 'combo') return combos.get(item.comboId)?.productIds ?? []
+    return [item.productId]
+  })
   return [...new Set(ids)]
 }
 

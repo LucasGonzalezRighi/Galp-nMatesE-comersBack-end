@@ -1,8 +1,8 @@
-// Líneas del carrito que manda la tienda (`CartItemInput` del contrato): un producto suelto o un
-// kit, según `type`. Los mensajes son los del mock del front (`mock/handlers/pricing.ts`); los que
-// el mock deja a zod (tipo de línea, ids, cuero y virola) van en español rioplatense. Swagger
-// publica estos esquemas crudos (`oneOf` con `discriminator`) desde `ORDERS_OPENAPI_SCHEMAS`: estas
-// clases solo validan.
+// Líneas del carrito que manda la tienda (`CartItemInput` del contrato): un producto suelto, un
+// kit o un combo, según `type`. Los mensajes son los del mock del front
+// (`mock/handlers/pricing.ts`); los que el mock deja a zod (tipo de línea, ids, cuero y virola) van
+// en español rioplatense. Swagger publica estos esquemas crudos (`oneOf` con `discriminator`) desde
+// `ORDERS_OPENAPI_SCHEMAS`: estas clases solo validan.
 
 import { applyDecorators } from '@nestjs/common'
 import { plainToInstance, Transform, type TransformFnParams, Type } from 'class-transformer'
@@ -46,10 +46,12 @@ export const CART_MESSAGES = {
   quantityMin: 'La cantidad tiene que ser al menos 1.',
   /** Cantidad mayor que 20. */
   quantityMax: 'La cantidad no puede pasar de 20.',
-  /** `type` que no es `product` ni `kit` (o una línea que no es un objeto). */
-  lineType: 'El tipo de la línea tiene que ser product o kit.',
+  /** `type` que no es `product`, `kit` ni `combo` (o una línea que no es un objeto). */
+  lineType: 'El tipo de la línea tiene que ser product, kit o combo.',
   /** Id de producto vacío, largo o que no es texto. */
   productId: 'Elegí un producto válido.',
+  /** Id de combo vacío, largo o que no es texto. */
+  comboId: 'Elegí un combo válido.',
   /** Cuero que no es uno de los del contrato. */
   leather: 'Elegí el cuero del mate.',
   /** Virola que no es una de las del contrato. */
@@ -66,7 +68,7 @@ const MAX_LINE_QUANTITY = 20
 /** Tope de `Pesos` (precio de lista de un producto). */
 const MAX_PESOS = 99_999_999
 
-/** Largo máximo de un id de producto (`productId.maxLength` del contrato). */
+/** Largo máximo de un id de producto o de combo (`productId.maxLength` y `comboId.maxLength`). */
 const PRODUCT_ID_MAX_LENGTH = 80
 
 /** Deja validar el campo solo si vino con valor (`null` y ausente pasan). */
@@ -83,9 +85,8 @@ function QuantityField(): PropertyDecorator {
   )
 }
 
-/** Id de un producto: texto de 1 a 80 caracteres, crudo del JSON. */
-function ProductIdField(): PropertyDecorator {
-  const message = CART_MESSAGES.productId
+/** Id de un producto (o de un combo, con su mensaje): texto de 1 a 80 caracteres, crudo del JSON. */
+function ProductIdField(message: string = CART_MESSAGES.productId): PropertyDecorator {
   return applyDecorators(
     RawValue(),
     MaxLength(PRODUCT_ID_MAX_LENGTH, { message }),
@@ -173,6 +174,31 @@ export class KitCartItemInputDto {
   expectedUnitPriceArs?: number | null
 }
 
+/** Combo (`ComboCartItemInput`): el back usa sus piezas y su precio vigentes. */
+export class ComboCartItemInputDto {
+  /** Discriminador: `combo`. */
+  @IsIn(['combo'], { message: CART_MESSAGES.lineType })
+  type!: 'combo'
+
+  /** Id del combo. */
+  @ProductIdField(CART_MESSAGES.comboId)
+  comboId!: string
+
+  /** Cantidad de combos, de 1 a 20. */
+  @QuantityField()
+  quantity!: number
+
+  /** Cuero y virola del mate del combo; `null` (o ausente) si no lleva mate. */
+  @ValidateIf(IF_PRESENT)
+  @ValidateNested({ message: CART_MESSAGES.options })
+  @Type(() => CartItemOptionsDto)
+  options?: CartItemOptionsDto | null
+
+  /** Precio final por combo que la tienda tenía cotizado (`Pesos`); `null` es no mandarlo. */
+  @ExpectedPriceField(MAX_PESOS)
+  expectedUnitPriceArs?: number | null
+}
+
 /**
  * Línea con un `type` desconocido (o que no es un objeto): solo se conserva `type`, así el único
  * error es el del discriminador y no uno por cada campo que trae.
@@ -184,7 +210,7 @@ export class UnknownCartItemInputDto {
 }
 
 /** Línea del carrito ya convertida a su clase. */
-export type CartItemInputDto = ProductCartItemInputDto | KitCartItemInputDto
+export type CartItemInputDto = ProductCartItemInputDto | KitCartItemInputDto | ComboCartItemInputDto
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -203,6 +229,9 @@ function toItemInstances({ obj, key }: TransformFnParams): unknown {
       return plainToInstance(ProductCartItemInputDto, item)
     }
     if (isRecord(item) && item.type === 'kit') return plainToInstance(KitCartItemInputDto, item)
+    if (isRecord(item) && item.type === 'combo') {
+      return plainToInstance(ComboCartItemInputDto, item)
+    }
     return Object.assign(new UnknownCartItemInputDto(), { type: isRecord(item) ? item.type : null })
   })
 }
@@ -255,6 +284,9 @@ export function toCartItem(item: CartItemInputDto): CartItem {
     item.options === null || item.options === undefined
       ? null
       : { leather: item.options.leather, ferrule: item.options.ferrule }
+  if (item.type === 'combo') {
+    return { type: 'combo', comboId: item.comboId, quantity: item.quantity, options, ...expected }
+  }
   return {
     type: 'product',
     productId: item.productId,

@@ -214,6 +214,7 @@ async function insertOrder(
     (line.kitItems ?? []).map((piece) => ({
       orderItemId: id,
       role: piece.role,
+      position: piece.position,
       productId: piece.productId,
       slug: piece.slug,
       name: piece.name,

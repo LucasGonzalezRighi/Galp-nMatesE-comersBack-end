@@ -2,11 +2,21 @@ import type { ChangeNotice, FieldError } from '../../../shared/domain/change-not
 import { formatPesos } from '../../../shared/domain/format-pesos'
 import { Pesos } from '../../../shared/domain/pesos'
 import type { ProductGroup } from '../../catalog/domain/category.entity'
+import {
+  COMBO_MAX_ITEMS,
+  COMBO_MIN_ITEMS,
+  comboHasMate,
+  type ComboLineAmounts,
+  comboLineAmounts,
+  type ComboStatus,
+  hasDistinctGroups,
+} from '../../catalog/domain/combo.entity'
 import { MAX_QUANTITY_PER_PRODUCT } from '../../catalog/domain/inventory.entity'
 import {
   type CartItem,
   type CartItemOptions,
   cartLineKey,
+  type ComboCartItem,
   KIT_FERRULE,
   KIT_LINE_NAME,
   leatherLabel,
@@ -20,6 +30,12 @@ export const MAX_TOTAL_ARS = 2_147_483_647
 
 /** Nombre de una línea cuyo producto no existe. */
 export const MISSING_PRODUCT_NAME = 'Producto no disponible'
+
+/** Nombre de una línea cuyo combo no existe. */
+export const MISSING_COMBO_NAME = 'Combo no disponible'
+
+/** Mensaje de un mate (suelto o dentro de un combo) que llega sin cuero ni virola. */
+const MISSING_OPTIONS_MESSAGE = 'Elegí el cuero y la virola del mate.'
 
 /** Producto como lo necesita la cotización. */
 export interface PricedProduct {
@@ -39,6 +55,20 @@ export interface PricedProduct {
   available: number
 }
 
+/** Combo como lo necesita la cotización: sus piezas se buscan aparte, como {@link PricedProduct}. */
+export interface PricedCombo {
+  /** Id del combo. */
+  id: string
+  /** Nombre (el de la línea). */
+  name: string
+  /** Borrador o publicado: solo se vende publicado. */
+  status: ComboStatus
+  /** Precio final del combo, en pesos enteros. */
+  priceArs: number
+  /** Ids de las piezas, en el orden del combo. */
+  productIds: string[]
+}
+
 /** Ajustes de la tienda que cambian los importes. */
 export interface PricingSettings {
   /** Descuento del kit, entero de 0 a 30. */
@@ -56,17 +86,20 @@ export type LineIssue = 'unavailable' | 'sold_out' | 'quantity_reduced' | 'price
 export interface CartQuoteLine {
   /** Clave igual a la de la tienda. */
   key: string
-  /** Producto suelto o kit. */
+  /** Producto suelto, kit o combo. */
   type: LineType
-  /** Nombre del producto, `Kit` o `Producto no disponible`. */
+  /** Nombre del producto, `Kit`, el del combo, `Producto no disponible` o `Combo no disponible`. */
   name: string
-  /** Opciones elegidas; vacío si no hay. */
+  /** Opciones elegidas (en un kit o un combo, además las piezas con " + "); vacío si no hay. */
   detail: string
-  /** Precio de lista de una unidad (en un kit, la suma de las tres piezas). */
+  /**
+   * Precio de lista de una unidad (en un kit, la suma de las tres piezas; en un combo,
+   * `max(suma de las piezas, precio del combo)`).
+   */
   unitPriceArs: number
   /** Neto de lo que paga el cliente por unidad, o `null` con `showNetPrice` apagado. */
   netUnitPriceArs: number | null
-  /** Ahorro por kit de toda la línea. */
+  /** Ahorro por kit o por combo de toda la línea. */
   kitSavingsArs: number
   /** `unitPriceArs × cantidad − kitSavingsArs`. */
   totalArs: number
@@ -82,7 +115,7 @@ export interface CartQuote {
   lines: CartQuoteLine[]
   /** Suma de los precios de lista de las líneas compradas. */
   itemsGrossArs: number
-  /** Suma de los ahorros por kit. */
+  /** Suma de los ahorros por kit y por combo. */
   kitSavingsArs: number
   /** `itemsGrossArs − kitSavingsArs`. */
   subtotalArs: number
@@ -90,10 +123,15 @@ export interface CartQuote {
   netSubtotalArs: number | null
 }
 
-/** Pieza de un kit tal como se compró. */
+/** Pieza de un kit o de un combo tal como se compró. */
 export interface OrderKitItemDraft {
-  /** Rol de la pieza en el kit. */
+  /** Grupo de la pieza (en un kit, su rol; en un combo no se repite). */
   role: ProductGroup
+  /**
+   * Lugar de la pieza en la línea, desde 1 (en un combo, el orden del combo; en un kit, mate,
+   * bombilla y yerba). Los kits guardados antes de los combos pueden tener 0.
+   */
+  position: number
   /** Id del producto. */
   productId: string
   /** Slug al comprar. */
@@ -106,27 +144,27 @@ export interface OrderKitItemDraft {
 
 /** Línea que va al pedido: copia de lo que se compró (nombres, slugs y precios del momento). */
 export interface OrderLineDraft {
-  /** Producto suelto o kit. */
+  /** Producto suelto, kit o combo. */
   type: LineType
-  /** Nombre del producto o `Kit`. */
+  /** Nombre del producto, `Kit` o el del combo. */
   name: string
-  /** Opciones elegidas; vacío si no hay. */
+  /** Opciones elegidas (en un kit o un combo, además las piezas); vacío si no hay. */
   detail: string
   /** Unidades compradas (ya reducidas al stock). */
   quantity: number
   /** Precio de lista de una unidad. */
   unitPriceArs: number
-  /** Ahorro por kit de la línea. */
+  /** Ahorro por kit o por combo de la línea. */
   kitSavingsArs: number
   /** Importe de la línea. */
   totalArs: number
-  /** Id del producto suelto; `null` en un kit. */
+  /** Id del producto suelto; `null` en un kit o un combo. */
   productId: string | null
-  /** Slug del producto suelto; `null` en un kit. */
+  /** Slug del producto suelto; `null` en un kit o un combo. */
   productSlug: string | null
-  /** Cuero y virola de un mate o del kit; `null` en los demás productos. */
+  /** Cuero y virola de un mate, del kit o del mate del combo; `null` en los demás. */
   options: CartItemOptions | null
-  /** Las tres piezas de un kit; `null` si no es un kit. */
+  /** Las piezas de un kit (3) o de un combo (2 o 3, en su orden); `null` en un producto suelto. */
   kitItems: OrderKitItemDraft[] | null
 }
 
@@ -232,6 +270,155 @@ function blockedLine(
   }
 }
 
+/** Lo que la cotización va juntando línea por línea (cada rama lo modifica). */
+interface PricingState {
+  /** Unidades ya tomadas por producto (sueltas y piezas de kits y combos). */
+  accepted: Map<string, number>
+  /** Líneas cotizadas. */
+  quoteLines: CartQuoteLine[]
+  /** Líneas que van al pedido. */
+  lines: OrderLineDraft[]
+  /** Avisos de stock y de bajas. */
+  stockChanges: ChangeNotice[]
+  /** Avisos de precio. */
+  priceChanges: ChangeNotice[]
+  /** Mates sin cuero ni virola. */
+  optionErrors: FieldError[]
+}
+
+/**
+ * Cotiza una línea de combo con las reglas de `ComboCartItemInput` del contrato y del mock:
+ * combo inexistente o en borrador, una pieza que no se vende o piezas que ya no son de grupos
+ * distintos → `unavailable` (con el nombre del combo); combo con mate sin cuero ni virola → error
+ * en `items.{i}.options`; stock de cada pieza compartido con las demás líneas; importes de
+ * {@link comboLineAmounts}; `price_changed` contra el precio del combo, con `productId` `null`.
+ *
+ * @param item - Línea de combo.
+ * @param index - Lugar de la línea en el carrito, para el error por campo.
+ * @param combo - El combo de la línea, o `undefined` si no existe.
+ * @param products - Productos por id (las piezas que no están cuentan como inexistentes).
+ * @param settings - IVA y si se muestran los netos.
+ * @param state - Lo cotizado hasta acá (se modifica).
+ * @returns Los importes de la línea, o `null` si no se puede comprar.
+ */
+function priceComboItem(
+  item: ComboCartItem,
+  index: number,
+  combo: PricedCombo | undefined,
+  products: ReadonlyMap<string, PricedProduct>,
+  settings: PricingSettings,
+  state: PricingState,
+): ComboLineAmounts | null {
+  const { vatRatePercent, showNetPrice } = settings
+  const found = (combo?.productIds ?? []).map((id) => products.get(id))
+  const hasMate = comboHasMate(
+    found.flatMap((product) => (product === undefined ? [] : [product.group])),
+  )
+  // Sin el combo no se sabe si lleva mate: la clave conserva lo que mandó la tienda.
+  const keepsOptions = combo === undefined || hasMate
+  const options = keepsOptions ? item.options : null
+  const name = combo?.name ?? MISSING_COMBO_NAME
+  const pieceNames = found.map((product) => product?.name ?? MISSING_PRODUCT_NAME).join(' + ')
+  const base = {
+    key: cartLineKey(item, keepsOptions),
+    type: item.type,
+    name,
+    detail:
+      options === null || pieceNames === ''
+        ? pieceNames
+        : `${pieceNames} · ${leatherLabel(options.leather)} · ${options.ferrule}`,
+  }
+  const blocked = (issue: 'unavailable' | 'sold_out', notice: ChangeNotice): null => {
+    state.quoteLines.push(blockedLine(base, issue, showNetPrice))
+    state.stockChanges.push(notice)
+    return null
+  }
+  const unavailable = (productId: string | null): null =>
+    blocked('unavailable', {
+      kind: 'unavailable',
+      productId,
+      message: `${name} ya no está disponible.`,
+    })
+
+  if (combo?.status !== 'published') return unavailable(null)
+  const missing = found.findIndex((product) => !isSellable(product, undefined))
+  if (missing !== -1) return unavailable(combo.productIds[missing] ?? null)
+  const pieces = found.filter((product) => isSellable(product, undefined))
+  if (
+    pieces.length < COMBO_MIN_ITEMS ||
+    pieces.length > COMBO_MAX_ITEMS ||
+    !hasDistinctGroups(pieces.map((product) => product.group))
+  ) {
+    return unavailable(null)
+  }
+  if (hasMate && options === null) {
+    state.optionErrors.push({
+      field: `items.${String(index)}.options`,
+      code: 'required',
+      message: MISSING_OPTIONS_MESSAGE,
+    })
+  }
+
+  const rooms = pieces.map((product) => roomFor(product, state.accepted))
+  const room = Math.min(...rooms)
+  const limitingId = pieces[rooms.indexOf(room)]?.id ?? null
+  if (room === 0) return blocked('sold_out', stockChangeNotice(limitingId, name, 0))
+
+  const quantity = Math.min(item.quantity, room)
+  const amounts = comboLineAmounts(
+    pieces.map((product) => product.priceArs),
+    combo.priceArs,
+    quantity,
+  )
+  const unitPriceArs = amounts.grossArs / quantity
+  const priceChanged =
+    item.expectedUnitPriceArs !== undefined && item.expectedUnitPriceArs !== combo.priceArs
+  const issue: LineIssue | null =
+    quantity < item.quantity ? 'quantity_reduced' : priceChanged ? 'price_changed' : null
+  for (const product of pieces) {
+    state.accepted.set(product.id, (state.accepted.get(product.id) ?? 0) + quantity)
+  }
+  if (issue === 'quantity_reduced') {
+    state.stockChanges.push(stockChangeNotice(limitingId, name, room))
+  } else if (issue === 'price_changed') {
+    state.priceChanges.push({
+      kind: 'price',
+      productId: null,
+      message: `${name} cambió de precio: ahora cuesta ${formatPesos(combo.priceArs)}.`,
+    })
+  }
+  state.quoteLines.push({
+    ...base,
+    unitPriceArs,
+    netUnitPriceArs: showNetPrice ? netPrice(combo.priceArs, vatRatePercent) : null,
+    kitSavingsArs: amounts.savingsArs,
+    totalArs: amounts.totalArs,
+    maxQuantity: room,
+    issue,
+  })
+  state.lines.push({
+    type: item.type,
+    name,
+    detail: base.detail,
+    quantity,
+    unitPriceArs,
+    kitSavingsArs: amounts.savingsArs,
+    totalArs: amounts.totalArs,
+    productId: null,
+    productSlug: null,
+    options,
+    kitItems: pieces.map((product, position) => ({
+      role: product.group,
+      position: position + 1,
+      productId: product.id,
+      slug: product.slug,
+      name: product.name,
+      unitPriceArs: product.priceArs,
+    })),
+  })
+  return amounts
+}
+
 /** Valida las líneas y los ajustes antes de cotizar. */
 function assertPricingInput(items: readonly CartItem[], settings: PricingSettings): void {
   if (items.length < 1 || items.length > MAX_CART_LINES) {
@@ -260,16 +447,21 @@ function assertPricingInput(items: readonly CartItem[], settings: PricingSetting
 
 /**
  * Cotiza el carrito como el mock del front: línea por línea y en orden, con el tope de 20 y el
- * stock compartidos por producto entre todas las líneas (sueltas y piezas de kits). Una línea con
- * problemas no hace fallar la cotización: se informa en `issue` y en los avisos.
+ * stock compartidos por producto entre todas las líneas (sueltas y piezas de kits y de combos).
+ * Una línea con problemas no hace fallar la cotización: se informa en `issue` y en los avisos.
  *
  * - Pieza inexistente, no publicada, sin precio o de otro grupo → `unavailable`.
+ * - Combo inexistente, en borrador o con piezas que ya no son de grupos distintos → `unavailable`.
  * - Sin lugar → `sold_out`; con menos lugar que lo pedido → `quantity_reduced` (se cotiza el máximo).
- * - `expectedUnitPriceArs` distinto del vigente → `price_changed` (pierde contra el stock).
- * - Ahorro del kit por unidad (`Pesos.percentOf`) por la cantidad; netos redondeados.
+ * - `expectedUnitPriceArs` distinto del vigente (en un combo, de su precio) → `price_changed`
+ *   (pierde contra el stock).
+ * - Ahorro del kit por unidad (`Pesos.percentOf`) por la cantidad; el de un combo, contra la suma
+ *   de sus piezas ({@link comboLineAmounts}); netos redondeados.
  *
  * @param items - Líneas del carrito (de 1 a 50, cantidades de 1 a 20).
- * @param products - Productos por id (los que no están cuentan como inexistentes).
+ * @param products - Productos por id, también las piezas de los combos (los que no están cuentan
+ *   como inexistentes).
+ * @param combos - Combos por id (los que no están cuentan como inexistentes).
  * @param settings - Descuento del kit, IVA y si se muestran los netos.
  * @returns La cotización, las líneas compradas, la reserva y los avisos.
  * @throws {CartTotalTooBigError} Si la suma de las líneas pasa de {@link MAX_TOTAL_ARS}.
@@ -278,20 +470,33 @@ function assertPricingInput(items: readonly CartItem[], settings: PricingSetting
 export function priceCart(
   items: readonly CartItem[],
   products: ReadonlyMap<string, PricedProduct>,
+  combos: ReadonlyMap<string, PricedCombo>,
   settings: PricingSettings,
 ): PricedCart {
   assertPricingInput(items, settings)
   const { kitDiscountPercent, vatRatePercent, showNetPrice } = settings
-  const accepted = new Map<string, number>()
-  const quoteLines: CartQuoteLine[] = []
-  const lines: OrderLineDraft[] = []
-  const stockChanges: ChangeNotice[] = []
-  const priceChanges: ChangeNotice[] = []
-  const optionErrors: FieldError[] = []
+  const state: PricingState = {
+    accepted: new Map(),
+    quoteLines: [],
+    lines: [],
+    stockChanges: [],
+    priceChanges: [],
+    optionErrors: [],
+  }
+  const { accepted, quoteLines, lines, stockChanges, priceChanges, optionErrors } = state
   let itemsGross = Pesos.of(0)
   let kitSavings = Pesos.of(0)
 
   items.forEach((item, index) => {
+    if (item.type === 'combo') {
+      const combo = combos.get(item.comboId)
+      const amounts = priceComboItem(item, index, combo, products, settings, state)
+      if (amounts !== null) {
+        itemsGross = itemsGross.add(Pesos.of(amounts.grossArs))
+        kitSavings = kitSavings.add(Pesos.of(amounts.savingsArs))
+      }
+      return
+    }
     const pieces: readonly (readonly [string, ProductGroup | undefined])[] =
       item.type === 'kit'
         ? [
@@ -312,7 +517,7 @@ export function priceCart(
       optionErrors.push({
         field: `items.${String(index)}.options`,
         code: 'required',
-        message: 'Elegí el cuero y la virola del mate.',
+        message: MISSING_OPTIONS_MESSAGE,
       })
     }
     const name = item.type === 'kit' ? KIT_LINE_NAME : (first?.name ?? MISSING_PRODUCT_NAME)
@@ -404,6 +609,7 @@ export function priceCart(
         item.type === 'kit'
           ? sold.map((product, position) => ({
               role: pieces[position]?.[1] ?? product.group,
+              position: position + 1,
               productId: product.id,
               slug: product.slug,
               name: product.name,

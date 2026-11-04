@@ -35,6 +35,7 @@ import {
   placeOrder,
 } from '../../src/modules/orders/domain/order.entity'
 import type {
+  PricedCombo,
   PricedProduct,
   PricingSettings,
   ReservationLine,
@@ -115,6 +116,47 @@ export const PRODUCTS = {
     available: 12,
   },
 } satisfies Record<string, PricedProduct>
+
+/**
+ * Combos de prueba con los nombres y precios del mock (`fixtures/combos.ts`) sobre los
+ * {@link PRODUCTS}: "Dúo Imperial" (mate + bombilla, $61.999 contra $68.998), uno sin mate y un
+ * borrador con el Mate Galleta (sin stock). Los ids son legibles, no UUID.
+ */
+export const COMBOS = {
+  duoImperial: {
+    id: 'cmb-duo-imperial',
+    name: 'Dúo Imperial',
+    status: 'published',
+    priceArs: 61999,
+    productIds: [PRODUCTS.imperialPremium.id, PRODUCTS.bombillonCurvo.id],
+  },
+  bombillaYerba: {
+    id: 'cmb-bombilla-y-yerba',
+    name: 'Bombilla y yerba',
+    status: 'published',
+    priceArs: 31999,
+    productIds: [PRODUCTS.bombillon100.id, PRODUCTS.yerbaCanarias.id],
+  },
+  galletaCanarias: {
+    id: 'cmb-galleta-y-canarias',
+    name: 'Galleta y Canarias',
+    status: 'draft',
+    priceArs: 33999,
+    productIds: [PRODUCTS.galleta.id, PRODUCTS.yerbaCanarias.id],
+  },
+} satisfies Record<string, PricedCombo>
+
+/**
+ * Arma el mapa por id de combos que recibe `priceCart`.
+ *
+ * @param combos - Combos (por defecto, todos los de {@link COMBOS}).
+ * @returns Mapa id → combo (copias).
+ */
+export function comboMap(
+  combos: readonly PricedCombo[] = Object.values(COMBOS),
+): Map<string, PricedCombo> {
+  return new Map(combos.map((combo) => [combo.id, { ...combo, productIds: [...combo.productIds] }]))
+}
 
 /** Ajustes de precio del seed: 10 % de descuento en kits, IVA 21 % y precio neto visible. */
 export const PRICING_SETTINGS: PricingSettings = {
@@ -244,21 +286,47 @@ export class InMemoryStock {
 /** {@link ProductCatalogPort} en memoria: productos de prueba con el stock de {@link InMemoryStock}. */
 export class InMemoryProductCatalog implements ProductCatalogPort {
   private readonly products = new Map<string, PricedProduct>()
+  private readonly combos: Map<string, PricedCombo>
   /** Ids pedidos en cada llamada. */
   readonly calls: string[][] = []
 
   /**
    * @param stock - Stock compartido; se carga con el `available` de cada producto.
    * @param products - Productos (por defecto, todos los de {@link PRODUCTS}).
+   * @param combos - Combos (por defecto, todos los de {@link COMBOS}).
    */
   constructor(
     private readonly stock: InMemoryStock,
     products: readonly PricedProduct[] = Object.values(PRODUCTS),
+    combos: readonly PricedCombo[] = Object.values(COMBOS),
   ) {
     for (const product of products) {
       this.products.set(product.id, { ...product })
       stock.set(product.id, product.available)
     }
+    this.combos = comboMap(combos)
+  }
+
+  /**
+   * Cambia datos de un combo (precio, estado, piezas…).
+   *
+   * @param comboId - Combo.
+   * @param changes - Campos a cambiar.
+   */
+  updateCombo(comboId: string, changes: Partial<Omit<PricedCombo, 'id'>>): void {
+    const combo = this.combos.get(comboId)
+    if (combo === undefined) throw new Error(`No existe el combo de prueba ${comboId}`)
+    this.combos.set(comboId, { ...combo, ...changes })
+  }
+
+  /** {@inheritDoc ProductCatalogPort.findCombosForCart} */
+  findCombosForCart(ids: readonly string[]): Promise<PricedCombo[]> {
+    return Promise.resolve(
+      ids.flatMap((id) => {
+        const combo = this.combos.get(id)
+        return combo === undefined ? [] : [{ ...combo, productIds: [...combo.productIds] }]
+      }),
+    )
   }
 
   /**

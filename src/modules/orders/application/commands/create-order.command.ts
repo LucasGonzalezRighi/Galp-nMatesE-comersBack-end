@@ -4,7 +4,7 @@ import { formatPesos } from '../../../../shared/domain/format-pesos'
 import { newId } from '../../../../shared/domain/id'
 import { normalizeEmail } from '../../../identity/domain/email'
 import type { ShippingMethod } from '../../../settings/domain/store-settings.entity'
-import { type CartItem, cartProductIds } from '../../domain/cart-line'
+import { type CartItem, cartComboIds, cartProductIds } from '../../domain/cart-line'
 import { orderCreatedEvent } from '../../domain/order-events'
 import { HONEYPOT_ORDER_NUMBER } from '../../domain/order-number'
 import { isPaymentMethod, type PaymentMethod } from '../../domain/order-status'
@@ -65,13 +65,13 @@ export interface CreateOrderContext {
 }
 
 /**
- * Creación de un pedido (`POST /orders`): recalcula precios, kits, envío y stock, reserva el stock
- * 30 minutos y deja el pedido en `pending_payment`, sin cobrar. Si algo cambió desde el resumen
- * responde 409 y no crea nada.
+ * Creación de un pedido (`POST /orders`): recalcula precios, kits, combos, envío y stock, reserva
+ * el stock 30 minutos y deja el pedido en `pending_payment`, sin cobrar. Si algo cambió desde el
+ * resumen responde 409 y no crea nada.
  */
 export class CreateOrderCommand {
   /**
-   * @param catalog - Productos con su stock libre.
+   * @param catalog - Productos con su stock libre y combos con sus piezas.
    * @param settings - Descuento del kit, IVA y opciones de envío.
    * @param orders - Pedidos (reserva y guardado en una transacción).
    * @param customers - Clientes, para vincular a los invitados.
@@ -126,13 +126,20 @@ export class CreateOrderCommand {
       input.shipping.method,
       'shipping.method',
     )
+    // Primero los combos: sus piezas se buscan junto con los productos de las demás líneas.
+    const combos = new Map(
+      (await this.catalog.findCombosForCart(cartComboIds(input.items))).map((combo) => [
+        combo.id,
+        combo,
+      ]),
+    )
     const products = new Map(
-      (await this.catalog.findForCart(cartProductIds(input.items))).map((product) => [
+      (await this.catalog.findForCart(cartProductIds(input.items, combos))).map((product) => [
         product.id,
         product,
       ]),
     )
-    const priced = priceCart(input.items, products, settings)
+    const priced = priceCart(input.items, products, combos, settings)
     if (priced.optionErrors.length > 0) throw new CartValidationError(priced.optionErrors)
     if (priced.stockChanges.length > 0) {
       throw new OrderConflictError('stock_changed', priced.stockChanges)
