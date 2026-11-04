@@ -56,8 +56,10 @@ export class CatalogProductsAdapter implements ProductCatalogPort {
       slug: row.slug,
       name: row.name,
       group: row.category.group,
-      // El CHECK `products_leathers_check` solo deja cueros de `Leather`.
-      leathers: row.leathers.filter(isLeather),
+      // El CHECK `products_leathers_check` solo deja cueros de `Leather`. Los de un producto que
+      // no es mate se ignoran, como en el catálogo (`product.mapper`): la tienda no muestra su
+      // selector, así que tampoco se piden al cotizar.
+      leathers: row.category.group === 'mate' ? row.leathers.filter(isLeather) : [],
       priceArs: row.priceArs,
       published: row.status === 'published',
       available: Math.max(0, (row.inventory?.onHand ?? 0) - (row.inventory?.reserved ?? 0)),

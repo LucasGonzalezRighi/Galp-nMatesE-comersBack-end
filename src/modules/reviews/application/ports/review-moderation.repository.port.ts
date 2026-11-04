@@ -46,14 +46,20 @@ export interface ReviewModerationRepository {
 
   /**
    * Escribe la moderación y el aviso a la tienda en la misma transacción; después del commit
-   * sube la versión de la caché del catálogo (el promedio de los listados cambia).
+   * sube la versión de la caché del catálogo (el promedio de los listados cambia). Lee el estado
+   * de la reseña dentro de la transacción, con la fila bloqueada, y con él pide los campos a
+   * escribir: así dos moderaciones a la vez no deciden `moderatedAt` con un estado viejo.
    *
    * @param id - Id de la reseña.
-   * @param patch - Campos a escribir.
+   * @param decide - Arma los campos a escribir con el estado actual (bloqueado) de la reseña.
    * @param event - Aviso `storefront.stale` para el outbox.
    * @returns La reseña como quedó, o `null` si ya no existe.
    */
-  update(id: string, patch: ReviewPatch, event: NewDomainEvent): Promise<ModeratedReview | null>
+  update(
+    id: string,
+    decide: (current: Pick<ModeratedReview, 'status'>) => ReviewPatch,
+    event: NewDomainEvent,
+  ): Promise<ModeratedReview | null>
 }
 
 /** Token de inyección del {@link ReviewModerationRepository}. */

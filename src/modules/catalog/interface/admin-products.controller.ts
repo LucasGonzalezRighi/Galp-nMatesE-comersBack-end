@@ -21,6 +21,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   AdminCsrfGuard,
@@ -57,6 +58,7 @@ const PRODUCT_ID_PARAM = {
  */
 @ApiTags('admin')
 @ApiExtraModels(AdminProductInputDto, ProductTabsOverrideDto)
+@SkipThrottle()
 @Controller('admin/products')
 export class AdminProductsController {
   /**

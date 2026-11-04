@@ -77,10 +77,24 @@ export function mediaUrl(cloudName: string, publicId: string): string {
 }
 
 /**
+ * Indica si lo que sigue a la carpeta de un uso queda adentro de ella: uno o más segmentos
+ * separados por una barra, ninguno vacío (sin barras dobles ni al final), ni `.` ni `..`, y sin
+ * barras invertidas. Así `galpon/socios/../productos/x` no pasa por una foto de socios.
+ *
+ * @param rest - El `publicId` sin la carpeta y su barra.
+ * @returns `true` si es una ruta limpia dentro de la carpeta.
+ */
+function isInsideFolder(rest: string): boolean {
+  if (rest === '' || rest.includes('\\')) return false
+  return rest.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+}
+
+/**
  * Resuelve una foto que manda el dashboard (`ImageInput`) a la que se guarda (`Image`), sin
  * consultar a Cloudinary (Ruling B-74): si es una de las que el recurso ya tiene conserva su
- * `url`; si no, su `publicId` tiene que estar dentro de la carpeta de su uso y la `url` se arma
- * con la nube. Medidas y `alt` salen siempre del cuerpo.
+ * `url`; si no, su `publicId` tiene que estar dentro de la carpeta de su uso (sin segmentos `.`
+ * o `..`, barras dobles ni barras invertidas) y la `url` se arma con la nube. Medidas y `alt`
+ * salen siempre del cuerpo.
  *
  * @param input - Foto del cuerpo, ya validada en su forma.
  * @param rule - Uso, fotos guardadas, nube y ruta del campo.
@@ -98,7 +112,7 @@ export function resolveImage(input: Omit<MediaImage, 'url'>, rule: ImageRule): R
   if (stored !== undefined)
     return { ok: true, image: { publicId, url: stored.url, width, height, alt } }
   const folder = `${MEDIA_FOLDERS[rule.purpose]}/`
-  if (publicId.startsWith(folder) && publicId.length > folder.length) {
+  if (publicId.startsWith(folder) && isInsideFolder(publicId.slice(folder.length))) {
     return {
       ok: true,
       image: { publicId, url: mediaUrl(rule.cloudName, publicId), width, height, alt },

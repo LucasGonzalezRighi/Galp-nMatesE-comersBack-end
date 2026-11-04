@@ -31,6 +31,14 @@ export interface ContactMessageRepository {
   nextWithdrawalNumber(): Promise<number>
 
   /**
+   * Número que tomaría el próximo arrepentimiento, sin consumirlo (para responderle a un bot sin
+   * gastar un código de `withdrawal_code_seq`).
+   *
+   * @returns Un entero desde 1; pasa de 999.999 solo si la secuencia ya se agotó.
+   */
+  peekWithdrawalNumber(): Promise<number>
+
+  /**
    * Guarda un mensaje nuevo, sin leer.
    *
    * @param message - Mensaje ya revisado.

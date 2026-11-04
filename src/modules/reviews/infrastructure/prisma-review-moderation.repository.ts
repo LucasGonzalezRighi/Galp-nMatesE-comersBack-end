@@ -131,18 +131,29 @@ export class PrismaReviewModerationRepository implements ReviewModerationReposit
     return row === null ? null : toModeratedReview(row)
   }
 
-  /** {@inheritDoc ReviewModerationRepository.update} */
+  /**
+   * {@inheritDoc ReviewModerationRepository.update}
+   *
+   * Bloquea la fila con `SELECT … FOR UPDATE` antes de decidir: otra moderación de la misma
+   * reseña espera al commit de esta y decide con el estado que dejó.
+   */
   async update(
     id: string,
-    patch: ReviewPatch,
+    decide: (current: Pick<ModeratedReview, 'status'>) => ReviewPatch,
     event: NewDomainEvent,
   ): Promise<ModeratedReview | null> {
     if (!UUID_PATTERN.test(id)) return null
     const row = await this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.review.updateMany({ where: { id }, data: patch })
-      if (count === 0) return null
+      const [locked] = await tx.$queryRaw<{ status: ReviewStatus }[]>`
+        SELECT status::text AS status FROM reviews WHERE id = ${id}::uuid FOR UPDATE`
+      if (locked === undefined) return null
+      const updated = await tx.review.update({
+        where: { id },
+        data: decide({ status: locked.status }),
+        select: MODERATED_SELECT,
+      })
       await this.outbox.append(tx, createDomainEvent(event, this.clock.now()))
-      return tx.review.findUniqueOrThrow({ where: { id }, select: MODERATED_SELECT })
+      return updated
     })
     if (row === null) return null
     await bumpCatalogCacheVersion(this.cache)

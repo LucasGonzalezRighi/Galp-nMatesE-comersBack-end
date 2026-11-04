@@ -68,14 +68,34 @@ class InMemoryReviews implements ReviewModerationRepository {
     return Promise.resolve(this.rows.find((row) => row.id === id) ?? null)
   }
 
-  update(id: string, patch: ReviewPatch, event: NewDomainEvent): Promise<ModeratedReview | null> {
+  update(
+    id: string,
+    decide: (current: Pick<ModeratedReview, 'status'>) => ReviewPatch,
+    event: NewDomainEvent,
+  ): Promise<ModeratedReview | null> {
     const row = this.rows.find((candidate) => candidate.id === id)
     if (row === undefined) return Promise.resolve(null)
-    Object.assign(row, patch)
+    Object.assign(row, decide({ status: row.status }))
     this.events.push(event)
     return Promise.resolve(row)
   }
 }
+
+/**
+ * Reseñas en memoria donde otro admin ya movió la reseña: `findById` devuelve la foto vieja
+ * (`pending`, sin moderar) y la fila de "la base" ya está aprobada desde {@link EARLIER}.
+ */
+class RacedReviews extends InMemoryReviews {
+  override findById(id: string): Promise<ModeratedReview | null> {
+    const row = this.rows.find((candidate) => candidate.id === id)
+    return Promise.resolve(
+      row === undefined ? null : { ...row, status: 'pending', moderatedAt: null },
+    )
+  }
+}
+
+/** Fecha de una moderación anterior, de otro admin. */
+const EARLIER = new Date('2026-11-04T14:00:00.000Z')
 
 const REVIEW: ReviewInput = {
   rating: 4.5,
@@ -189,6 +209,20 @@ describe('moderación', () => {
     expect(reviews.events.map((event) => event.payload)).toEqual([
       { reason: 'review.moderated', tags: TAGS },
     ])
+  })
+
+  it('decide moderatedAt con el estado de la transacción, no con el leído antes (carrera entre admins)', async () => {
+    const reviews = new RacedReviews()
+    await new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, REVIEW)
+    Object.assign(reviews.rows[0] ?? {}, { status: 'approved', moderatedAt: EARLIER })
+
+    const review = await new ModerateReviewCommand(reviews, clock).execute('rev-1', {
+      status: 'approved',
+    })
+
+    expect(review).toMatchObject({ id: 'rev-1', status: 'approved' })
+    expect(reviews.rows[0]?.moderatedAt).toEqual(EARLIER)
+    expect(reviews.events).toHaveLength(1)
   })
 
   it('el mismo estado que ya tenía no cuenta como moderación', () => {

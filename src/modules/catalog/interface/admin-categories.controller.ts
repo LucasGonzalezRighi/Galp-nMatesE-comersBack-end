@@ -24,6 +24,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   AdminCsrfGuard,
@@ -57,6 +58,7 @@ const CATEGORY_ID_PARAM = {
  */
 @ApiTags('admin')
 @ApiExtraModels(CategoryDto, CategoryInputDto, CategoryOrderInputDto)
+@SkipThrottle()
 @Controller('admin/categories')
 export class AdminCategoriesController {
   /**

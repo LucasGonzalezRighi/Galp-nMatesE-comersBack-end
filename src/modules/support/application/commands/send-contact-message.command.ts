@@ -1,8 +1,5 @@
-import {
-  type ContactReason,
-  createContactMessage,
-  isHoneypotFilled,
-} from '../../domain/contact-message'
+import { isHoneypotFilled } from '../../../../shared/domain/honeypot'
+import { type ContactReason, createContactMessage } from '../../domain/contact-message'
 import type { ContactMessageRepository } from '../ports/contact-message.repository.port'
 import { SILENT_SUPPORT_MAIL_LOG, type SupportMailLog } from '../ports/support-mail-log.port'
 

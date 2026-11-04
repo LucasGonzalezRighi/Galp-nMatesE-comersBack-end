@@ -71,17 +71,6 @@ export function authorNameOrAnonymous(name: string | null): string {
 }
 
 /**
- * Indica si el campo trampa (`website`) vino lleno: cualquier texto que no sea vacío, un espacio
- * también (como el mock).
- *
- * @param website - Valor del campo trampa.
- * @returns `true` si lo llenó un bot.
- */
-export function isHoneypotFilled(website: string | null): boolean {
-  return website !== null && website !== ''
-}
-
-/**
  * Revisa una reseña nueva: queda `pending`, sin compra verificada (el visitante no demostró haber
  * comprado) y sin destacar; eso lo pone el repositorio.
  *

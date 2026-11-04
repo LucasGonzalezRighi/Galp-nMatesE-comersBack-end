@@ -65,17 +65,6 @@ export function formatWithdrawalCode(n: number): string {
 }
 
 /**
- * Indica si el campo trampa (`website`) vino lleno: cualquier texto que no sea vacío, un espacio
- * también (como el mock). Las personas no lo ven y lo dejan en `null` o `''`.
- *
- * @param website - Valor del campo trampa.
- * @returns `true` si lo llenó un bot.
- */
-export function isHoneypotFilled(website: string | null): boolean {
-  return website !== null && website !== ''
-}
-
-/**
  * Revisa un mensaje nuevo: un contacto lleva motivo y texto y no tiene código; un arrepentimiento
  * lleva su código y no tiene motivo (lo mismo que el `CHECK` de `contact_messages`).
  *

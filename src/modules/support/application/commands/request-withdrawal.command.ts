@@ -1,7 +1,8 @@
+import { isHoneypotFilled } from '../../../../shared/domain/honeypot'
 import {
   createContactMessage,
   formatWithdrawalCode,
-  isHoneypotFilled,
+  WITHDRAWAL_CODE_MAX,
 } from '../../domain/contact-message'
 import type { ContactMessageRepository } from '../ports/contact-message.repository.port'
 import { SILENT_SUPPORT_MAIL_LOG, type SupportMailLog } from '../ports/support-mail-log.port'
@@ -24,8 +25,9 @@ export interface WithdrawalInput {
 /**
  * Registra una solicitud de arrepentimiento con su código de comprobante (`ARR-` y 6 dígitos de
  * `withdrawal_code_seq`) y la deja en la bandeja como mensaje `withdrawal`. Con el campo trampa
- * lleno igual toma un número y responde con su código, pero no guarda nada. El comprobante por
- * mail llega en B7: por ahora queda la intención en el log, sin datos personales.
+ * lleno responde el código que seguiría, sin consumirlo ni guardar nada (como el mock: el próximo
+ * real puede llevar el mismo número), así los bots no agotan la secuencia. El comprobante por mail
+ * llega en B7: por ahora queda la intención en el log, sin datos personales.
  */
 export class RequestWithdrawalCommand {
   /**
@@ -33,21 +35,28 @@ export class RequestWithdrawalCommand {
    * @param mailLog - Registro de los mails que todavía no salen.
    */
   constructor(
-    private readonly messages: Pick<ContactMessageRepository, 'nextWithdrawalNumber' | 'create'>,
+    private readonly messages: Pick<
+      ContactMessageRepository,
+      'nextWithdrawalNumber' | 'peekWithdrawalNumber' | 'create'
+    >,
     private readonly mailLog: SupportMailLog = SILENT_SUPPORT_MAIL_LOG,
   ) {}
 
   /**
-   * Toma el próximo código y guarda la solicitud, salvo que el campo trampa venga lleno.
+   * Toma el próximo código y guarda la solicitud. Con el campo trampa lleno solo mira el código
+   * que seguiría (con la secuencia agotada, el último), sin tomarlo.
    *
    * @param input - Solicitud ya validada.
    * @returns El comprobante con el código.
-   * @throws {RangeError} En español, si la secuencia ya pasó de 999.999.
+   * @throws {RangeError} En español, si la secuencia ya pasó de 999.999 (nunca con la trampa).
    * @throws {TypeError} En español, si falta el nombre o el email.
    */
   async execute(input: WithdrawalInput): Promise<WithdrawalReceipt> {
+    if (isHoneypotFilled(input.website)) {
+      const next = await this.messages.peekWithdrawalNumber()
+      return { code: formatWithdrawalCode(Math.min(next, WITHDRAWAL_CODE_MAX)) }
+    }
     const code = formatWithdrawalCode(await this.messages.nextWithdrawalNumber())
-    if (isHoneypotFilled(input.website)) return { code }
     await this.messages.create(
       createContactMessage({
         kind: 'withdrawal',

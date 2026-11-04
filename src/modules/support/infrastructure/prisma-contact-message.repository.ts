@@ -78,6 +78,24 @@ export class PrismaContactMessageRepository implements ContactMessageRepository 
     return value
   }
 
+  /**
+   * {@inheritDoc ContactMessageRepository.peekWithdrawalNumber}
+   *
+   * Lee el estado de la secuencia sin `nextval`: si ya se tomó algún número, el que sigue a
+   * `last_value`; si no, `last_value` (el `START`).
+   *
+   * @throws {Error} Si la secuencia no devuelve un valor.
+   */
+  async peekWithdrawalNumber(): Promise<number> {
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>`
+      SELECT (CASE WHEN is_called THEN last_value + 1 ELSE last_value END)::int AS n
+      FROM withdrawal_code_seq`
+    const value = rows[0]?.n
+    if (value === undefined)
+      throw new Error('La secuencia de arrepentimientos no devolvió un valor')
+    return value
+  }
+
   /** {@inheritDoc ContactMessageRepository.create} */
   async create(message: NewContactMessage): Promise<void> {
     await this.prisma.contactMessage.create({

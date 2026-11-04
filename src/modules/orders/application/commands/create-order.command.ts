@@ -1,6 +1,7 @@
 import type { SecretsPort } from '../../../../shared/application/ports/secrets.port'
 import type { Clock } from '../../../../shared/domain/clock'
 import { formatPesos } from '../../../../shared/domain/format-pesos'
+import { isHoneypotFilled } from '../../../../shared/domain/honeypot'
 import { newId } from '../../../../shared/domain/id'
 import { normalizeEmail } from '../../../identity/domain/email'
 import type { ShippingMethod } from '../../../settings/domain/store-settings.entity'
@@ -190,7 +191,7 @@ export class CreateOrderCommand {
       createdAt,
       reservedUntil: reservedUntilFor(createdAt),
     }
-    if (input.website !== null && input.website !== '') {
+    if (isHoneypotFilled(input.website)) {
       return toCreateOrderResult(placeOrder(draft, HONEYPOT_ORDER_NUMBER), token)
     }
 

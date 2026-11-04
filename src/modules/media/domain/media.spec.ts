@@ -91,6 +91,43 @@ describe('media', () => {
     expect(UNKNOWN_IMAGE_MESSAGE).toBe('La foto no existe: subila de nuevo')
   })
 
+  it('una foto que se sale de la carpeta (segmentos . o .., barras dobles o al final) da unknown_image', () => {
+    for (const publicId of [
+      'galpon/socios/../x',
+      'galpon/socios/../productos/mate',
+      'galpon/socios/..',
+      'galpon/socios/./lucas',
+      'galpon/socios/a/../../lineas/b',
+      'galpon/socios//lucas',
+      'galpon/socios/lucas/',
+      'galpon/socios/a\\..\\b',
+    ]) {
+      expect(resolveImage({ publicId, width: 800, height: 800, alt: 'Mate' }, rule())).toEqual({
+        ok: false,
+        error: {
+          field: 'partners.0.photo.publicId',
+          code: 'unknown_image',
+          message: UNKNOWN_IMAGE_MESSAGE,
+        },
+      })
+    }
+  })
+
+  it('acepta subcarpetas y puntos dentro de un nombre', () => {
+    for (const publicId of [
+      'galpon/socios/2026/lucas',
+      'galpon/socios/lucas.v2',
+      'galpon/socios/..lucas',
+    ]) {
+      expect(
+        resolveImage({ publicId, width: 800, height: 800, alt: 'Lucas' }, rule()),
+      ).toMatchObject({
+        ok: true,
+        image: { publicId },
+      })
+    }
+  })
+
   it('rechaza un uso desconocido o un campo vacío con un error en español', () => {
     const input = { publicId: 'galpon/socios/lucas', width: 800, height: 800, alt: 'Lucas' }
     expect(() =>

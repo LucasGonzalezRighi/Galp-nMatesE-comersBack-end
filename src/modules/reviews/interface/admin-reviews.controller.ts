@@ -9,6 +9,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   AdminCsrfGuard,
@@ -43,6 +44,7 @@ const REVIEW_ID_PARAM = {
  */
 @ApiTags('admin')
 @ApiExtraModels(AdminReviewPageDto)
+@SkipThrottle()
 @Controller('admin/reviews')
 export class AdminReviewsController {
   /**

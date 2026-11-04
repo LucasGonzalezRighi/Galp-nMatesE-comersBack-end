@@ -33,6 +33,10 @@ class InMemoryMessages implements ContactMessageRepository {
     return Promise.resolve(this.sequence)
   }
 
+  peekWithdrawalNumber(): Promise<number> {
+    return Promise.resolve(this.sequence + 1)
+  }
+
   create(message: NewContactMessage): Promise<void> {
     this.rows.push({
       ...message,
@@ -175,20 +179,33 @@ describe('RequestWithdrawalCommand', () => {
     ])
   })
 
-  it('con el campo trampa lleno responde un código, consume el número y no guarda nada', async () => {
+  it('con el campo trampa lleno responde el código que seguiría, sin consumirlo ni guardar nada (como el mock)', async () => {
     const messages = new InMemoryMessages()
     const log = mailLog()
     const command = new RequestWithdrawalCommand(messages, log)
 
-    await expect(command.execute({ ...WITHDRAWAL, website: 'spam' })).resolves.toEqual({
-      code: 'ARR-000001',
-    })
+    for (let i = 0; i < 3; i += 1) {
+      await expect(command.execute({ ...WITHDRAWAL, website: 'spam' })).resolves.toEqual({
+        code: 'ARR-000001',
+      })
+    }
+    expect(messages.sequence).toBe(0)
     expect(messages.rows).toEqual([])
     expect(log.lines).toEqual([])
-    await expect(command.execute(WITHDRAWAL)).resolves.toEqual({ code: 'ARR-000002' })
+    await expect(command.execute(WITHDRAWAL)).resolves.toEqual({ code: 'ARR-000001' })
     expect(log.lines).toEqual([
-      'Arrepentimiento ARR-000002 en la bandeja: el comprobante por mail llega en B7.',
+      'Arrepentimiento ARR-000001 en la bandeja: el comprobante por mail llega en B7.',
     ])
+  })
+
+  it('con la secuencia agotada, la trampa igual responde un código válido (no un 500)', async () => {
+    const messages = new InMemoryMessages()
+    messages.sequence = 999_999
+
+    await expect(
+      new RequestWithdrawalCommand(messages).execute({ ...WITHDRAWAL, website: 'spam' }),
+    ).resolves.toEqual({ code: 'ARR-999999' })
+    expect(messages.sequence).toBe(999_999)
   })
 })
 

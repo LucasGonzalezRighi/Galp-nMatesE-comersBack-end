@@ -130,7 +130,7 @@ describe('contacto, arrepentimiento y bandeja del dashboard (HTTP + Postgres + R
     expect(await rows()).toHaveLength(before)
   })
 
-  it('POST /withdrawals → 201 ARR-000001, después ARR-000002; con trampa, un código y sin fila', async () => {
+  it('POST /withdrawals → 201 ARR-000001, después ARR-000002; con trampa, el código que sigue, sin fila ni consumirlo', async () => {
     const first = await store('post', '/withdrawals', WITHDRAWAL)
     const second = await store('post', '/withdrawals', {
       ...WITHDRAWAL,
@@ -139,6 +139,9 @@ describe('contacto, arrepentimiento y bandeja del dashboard (HTTP + Postgres + R
     })
     const before = (await rows()).length
     const trapped = await store('post', '/withdrawals', { ...WITHDRAWAL, website: 'spam' })
+    const trappedAgain = await store('post', '/withdrawals', { ...WITHDRAWAL, website: ' ' })
+    const sequence = await prisma().$queryRaw<{ last_value: bigint }[]>`
+      SELECT last_value FROM withdrawal_code_seq`
 
     expect(first.status).toBe(201)
     expect(first.body).toEqual({ code: 'ARR-000001' })
@@ -146,6 +149,9 @@ describe('contacto, arrepentimiento y bandeja del dashboard (HTTP + Postgres + R
     expect(second.body).toEqual({ code: 'ARR-000002' })
     expect(trapped.status).toBe(201)
     expect(trapped.body).toEqual({ code: 'ARR-000003' })
+    expect(trappedAgain.status).toBe(201)
+    expect(trappedAgain.body).toEqual({ code: 'ARR-000003' })
+    expect(sequence).toEqual([{ last_value: 2n }])
     const saved = await rows()
     expect(saved).toHaveLength(before)
     expect(saved.filter((row) => row.kind === 'withdrawal')).toEqual([

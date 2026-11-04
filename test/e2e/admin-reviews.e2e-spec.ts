@@ -255,4 +255,52 @@ describe('reseñas nuevas y moderación del dashboard (HTTP + Postgres + Redis +
     expect(await staleCount()).toBe(staleBefore + 1)
     expect((featured.body as FeaturedReview[]).map((review) => review.id)).toContain(reviewId)
   })
+
+  it('carrera entre admins: moderatedAt se decide con el estado bloqueado en la transacción, no con el leído antes', async () => {
+    const text = 'Reseña para la carrera entre dos admins que la aprueban a la vez.'
+    expect((await visitor('post', `/products/${SLUG}/reviews`, { ...REVIEW, text })).status).toBe(
+      202,
+    )
+    const { id } = await prisma().review.findFirstOrThrow({ where: { text }, select: { id: true } })
+    const earlier = new Date('2026-01-02T03:04:05.006Z')
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    // El otro admin aprueba primero y todavía no hizo commit: la fila queda bloqueada.
+    let locked: () => void = () => undefined
+    const lockTaken = new Promise<void>((resolve) => {
+      locked = resolve
+    })
+    const otherAdmin = prisma().$transaction(
+      async (tx) => {
+        await tx.$executeRaw`
+          UPDATE reviews SET status = 'approved', moderated_at = ${earlier} WHERE id = ${id}::uuid`
+        locked()
+        await held
+      },
+      { timeout: 30_000 },
+    )
+    await lockTaken
+    // Este admin leyó la reseña pendiente (la aprobación del otro todavía no se ve) y la aprueba.
+    const patch = http('patch', `/admin/reviews/${id}`, { body: { status: 'approved' } })
+    await vi.waitFor(
+      async () => {
+        const [waiting] = await prisma().$queryRaw<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock' AND datname = current_database()`
+        expect(waiting?.n).toBeGreaterThan(0)
+      },
+      { timeout: 15_000, interval: 50 },
+    )
+    release()
+    await otherAdmin
+    const response = await patch
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ id, status: 'approved' })
+    const row = await prisma().review.findUniqueOrThrow({ where: { id } })
+    expect(row.moderatedAt).toEqual(earlier)
+  })
 })

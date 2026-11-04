@@ -7,6 +7,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   AdminCsrfGuard,
@@ -24,6 +25,7 @@ import { MediaSignatureDto, MediaSignatureInputDto } from './dto/media-signature
  */
 @ApiTags('admin')
 @ApiExtraModels(MediaSignatureInputDto, MediaSignatureDto)
+@SkipThrottle()
 @Controller('admin/media')
 export class AdminMediaController {
   /** @param signUpload - Firma de la subida. */

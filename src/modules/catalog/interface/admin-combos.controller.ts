@@ -24,6 +24,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   AdminCsrfGuard,
@@ -61,6 +62,7 @@ const COMBO_ID_PARAM = {
  */
 @ApiTags('admin')
 @ApiExtraModels(ComboDto, ComboItemDto, ComboInputDto, ComboOrderInputDto)
+@SkipThrottle()
 @Controller('admin/combos')
 export class AdminCombosController {
   /**

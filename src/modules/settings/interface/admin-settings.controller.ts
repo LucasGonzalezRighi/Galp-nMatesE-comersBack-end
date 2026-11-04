@@ -8,6 +8,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import type { SessionRecord } from '../../../shared/application/ports/session.port'
 import { CurrentSession } from '../../../shared/infrastructure/auth/current-session.decorator'
@@ -32,6 +33,7 @@ import { PublicSettingsDto } from './dto/settings.response.dto'
  */
 @ApiTags('admin')
 @ApiExtraModels(PublicSettingsDto)
+@SkipThrottle()
 @Controller('admin/settings')
 export class AdminSettingsController {
   /**

@@ -8,6 +8,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   AdminCsrfGuard,
@@ -39,6 +40,7 @@ const MESSAGE_ID_PARAM = {
  */
 @ApiTags('admin')
 @ApiExtraModels(ContactMessageDto, ContactMessagePageDto, MessageUpdateDto)
+@SkipThrottle()
 @Controller('admin/messages')
 export class AdminMessagesController {
   /**

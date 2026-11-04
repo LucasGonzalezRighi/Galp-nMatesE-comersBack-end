@@ -9,6 +9,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 
 import type { SessionRecord } from '../../../shared/application/ports/session.port'
 import { CurrentSession } from '../../../shared/infrastructure/auth/current-session.decorator'
@@ -79,6 +80,7 @@ const LEGAL_DOCUMENT_PARAM = {
  */
 @ApiTags('admin')
 @ApiExtraModels(ImageInputDto, AboutContentInputSchemaDto)
+@SkipThrottle()
 @Controller('admin/content')
 export class AdminContentController {
   /**

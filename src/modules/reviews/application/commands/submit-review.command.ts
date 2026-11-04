@@ -1,8 +1,5 @@
-import {
-  authorNameOrAnonymous,
-  createNewReview,
-  isHoneypotFilled,
-} from '../../domain/review-moderation'
+import { isHoneypotFilled } from '../../../../shared/domain/honeypot'
+import { authorNameOrAnonymous, createNewReview } from '../../domain/review-moderation'
 import type { ProductLookupPort } from '../ports/product-lookup.port'
 import type { ReviewModerationRepository } from '../ports/review-moderation.repository.port'
 import type { ReviewReceipt } from '../read-models'
