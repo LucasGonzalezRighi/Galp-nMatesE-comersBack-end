@@ -1423,3 +1423,269 @@ si el back llega antes, compara contra el contrato sin combos y falla.
   (llamadas a Mercado Pago) demora los avisos a la tienda.
 - `STOREFRONT_TAG_PATTERN` es una copia del patrón de la tienda: si la tienda cambia sus etiquetas,
   hay que actualizarlo.
+
+## B6 · Dashboard completo (2026-11-04)
+
+Plan: [`docs/superpowers/plans/2026-11-04-b6-admin.md`](superpowers/plans/2026-11-04-b6-admin.md)
+(8 tareas en 5 olas: 1 ∥ 2, 3 ∥ 4, 5, 6 ∥ 7 y el cierre). Decisiones de arquitectura en
+[ADR 0007 · dashboard completo](adr/0007-dashboard-completo.md). Con B6 el back tiene las **83
+operaciones del contrato**. Desde la ola de cueros (Task 5) el contrato salió de la rama
+`feat/ajustes-tienda` del front (worktree `../frontend-ajustes`, contrato de cueros en `6a5cd30`),
+que hoy está en el `main` local del front (`24b62ab`).
+
+### Qué quedó
+
+- **Contenidos y ajustes** (Task 1, 14 operaciones): `GET/PUT /admin/content/*` (los 7
+  contenidos) y `GET/PUT /admin/settings`. Migración `20261104151808_b6_settings_version`
+  (`settings.version` y `settings.updated_by`, `ON DELETE SET NULL`). Guardan `version + 1` y
+  `updated_by`, borran su clave de Redis después del commit y avisan a la tienda. Nosotros guarda
+  las fotos de los socios con `resolveImage`. El dominio `media` (`MEDIA_FOLDERS`, `mediaUrl`,
+  `resolveImage`) y `MEDIA_MODE` en la configuración nacieron acá.
+- **Aviso genérico y caché con versión** (Task 2): `storefrontStaleEvent(reason, tags)` en
+  `src/shared/domain/storefront-tags.ts` (con `STOREFRONT_TAG_PATTERN`, que se mudó ahí), mapeado
+  1 a 1 por `storefront-sync`. Las claves del catálogo pasan a `catalog:v{n}:…` con
+  `CachePort.incr` y `bumpCatalogCacheVersion`. `order.created`, `order.paid` y `order.expired`
+  suman `storefront.stale` (`products`, `combos`) en su transacción, y los pedidos borran las
+  claves de sus productos con la versión leída después del commit. `test/support/fake-store.ts`
+  quedó reusable.
+- **Pedidos del dashboard** (Task 3, 3 operaciones): listado con filtros y búsqueda sin acentos
+  (`search-text.ts`), detalle y `POST /admin/orders/{number}/status` con las transiciones y los
+  409 del mock (`UPDATE` condicional: dos despachos simultáneos dan 200 y 409). Cancelar libera la
+  reserva y cierra el intento activo en la misma transacción (ADR 0001, la inversa de B-45);
+  `OnOrderCancelledCommand` de `payments` hace lo de la pasarela. Eventos `order.shipped`,
+  `order.delivered` y `order.cancelled` (para los mails de B7).
+- **Contacto, arrepentimiento, bandeja y reseñas** (Task 4, 7 operaciones): módulo `support`
+  (`contact_messages`, migración `20261104154904_b6_support`, código `ARR-` + 6 dígitos de
+  `withdrawal_code_seq`), `POST /contact`, `POST /withdrawals`, la bandeja del dashboard,
+  `POST /products/{slug}/reviews` (queda pendiente) y la moderación (`GET/PATCH /admin/reviews`),
+  que sube la versión de la caché. `RootRule` en el pipe para los errores de raíz
+  ("Mandá al menos un cambio").
+- **Cueros por producto** (Task 5): `products.leathers text[]` con CHECK (migración
+  `20261104180720_b6_leathers`, que les puso los cuatro a los mates), sin virola en la tienda, el
+  carrito ni los pedidos (los viejos conservan `ferrule` en el JSON y el mapper la ignora), claves
+  de línea `…:{cuero|-}` y relacionados de hasta 30 (misma línea, mismo grupo y el resto).
+- **Productos, líneas y firma de fotos** (Task 6, 11 operaciones): `GET/POST /admin/products`,
+  `GET/PATCH /admin/products/{id}`, `…/archive`, las 5 de líneas y `POST /admin/media/signature`.
+  Migración `20261104184548_b6_admin_catalog` (`product_images.alt` y `categories.image_alt`: el
+  texto alternativo es por uso). Stock disponible, `expectedUpdatedAt` al milisegundo, slugs con
+  historial bajo un advisory lock, firma simulada o sha1 de Cloudinary y `media_assets` por
+  `publicId` sin `P2002`.
+- **Resumen** (Task 7, 1 operación): módulo `dashboard` con `PrismaDashboardReader` (solo lectura,
+  3 consultas), ventas por `paid_at` en hora de Buenos Aires, poco stock con lo disponible y
+  alertas de pago. Vence los pedidos atrasados antes de leer.
+- **Menores de las revisiones** (`3983e8d`, `d5af43c`): `@SkipThrottle()` en todos los
+  controladores del dashboard (con un test que los recorre); la trampa de `POST /withdrawals` ya no
+  consume la secuencia (`peekWithdrawalNumber`); `isHoneypotFilled` en `src/shared/domain`;
+  `moderatedAt` se decide dentro de la transacción con la fila bloqueada; un producto que no es
+  mate con cueros guardados se lee sin cueros (antes, 500); `resolveImage` rechaza segmentos `.` o
+  `..` (también con `%2e`), barras dobles o invertidas y caracteres de control.
+- **Seed y cierre** (Task 8):
+  - `import-fixtures.mjs` copia `leathers` (obligatorio) y `seed-data` se regeneró desde
+    `../frontend-ajustes`: el diff fue solo `leathers` en `products.ts` (16 mates con los cuatro,
+    11 sin) y, en `content.ts`, "Categorías", "Los más vendidos" y dos textos que ya no nombran la
+    virola. Ningún precio, slug, stock, foto, producto ni combo cambió.
+  - Productos con `upsert` por `sequence`: uno renombrado desde el dashboard vuelve al slug del
+    diseño sin duplicarse, su slug pasa al historial y el del diseño sale de ahí. Contenidos,
+    ajustes y envíos solo se crean si faltan.
+  - Este apartado, el ADR 0007 y el README (sección "Dashboard", contrato 83 de 83, seed, fotos,
+    tests).
+
+### Decisiones
+
+Rulings de la planificación (B-69 a B-85):
+
+- **B-69 · Alcance:** todo lo que faltaba, 83 de 83. Contrato del `main` del front hasta la ola de
+  cueros; después, `CONTRACT_PATH="../frontend-ajustes/docs/api/openapi.yaml"`.
+- **B-70 · Cueros:** el contrato nuevo del front, sin ventana de transición (una pestaña vieja de
+  la tienda recibe 422 hasta recargar); solo los mates; los pedidos viejos conservan la virola en
+  el JSON.
+- **B-71 · Stock:** el del dashboard es el disponible; guardar escribe `on_hand = stock + reserved`.
+- **B-72 · Caché:** claves con versión; el dashboard lee Postgres sin caché.
+- **B-73 · Aviso:** `storefront.stale { tags, reason }` en la misma transacción, con las etiquetas de
+  la tabla del README.
+- **B-74 · Fotos:** `MEDIA_MODE`, carpeta por uso, `url` armada con la nube, ninguna llamada a la
+  Admin API.
+- **B-75 · Pedidos:** literal del mock; cancelar con la opción (a) (el adaptador de `orders` cierra
+  el intento activo) y el handler de `payments` para la pasarela.
+- **B-76 · `support`:** contacto y arrepentimiento en `contact_messages`; los mails en B7.
+- **B-77 · Moderación:** sube la versión de la caché y avisa a la tienda.
+- **B-78 · Resumen:** módulo `dashboard` de solo lectura; `duplicate_payment` para toda devolución
+  que no se aprobó (es la única alerta de devoluciones del contrato).
+- **B-79 · Contenidos y ajustes:** último guardado gana; IVA redondeado a 2 decimales; el `label` de
+  los envíos se acepta y se descarta.
+- **B-80 · Validación:** 422 antes que 404 con un cuerpo inválido; los errores de raíz los da el
+  pipe.
+- **B-81 · Productos:** 409 `product_changed` antes que los 422 de la base y que el slug; slugs
+  contra los actuales y el historial; `publishedAt` en la primera publicación; cambiar el grupo de
+  una línea con productos da 422 (desvío del mock: protege combos y cueros).
+- **B-82 · Seed:** productos por `sequence`; contenidos, ajustes y envíos solo se crean.
+- **B-83 · Pospuesto:** `audit_logs` (B8), pedidos de demostración en el seed (no hacen falta) y
+  mails (B7).
+- **B-84 · Olas** y **B-85 · relacionados de hasta 30** (con la ola de cueros).
+
+Desvíos de las tareas (todos en sus reportes):
+
+- `expectedUpdatedAt` se compara leyendo el producto con `FOR UPDATE` en la transacción, en vez de
+  un `UPDATE … WHERE updated_at = …` (equivalente).
+- `POST /withdrawals` con la trampa llena devuelve el número que seguiría sin consumirlo (como el
+  mock); con la secuencia agotada la trampa no da 500.
+- Algunas specs de casos de uso de las Tasks 1 y 4 se escribieron junto con el código, sin ver el
+  RED antes.
+- Las Tasks 6 y 7 no corrieron las suites globales; la primera corrida completa de B6 fue la del
+  cierre (abajo), en verde.
+- **Task 8:** la prueba en vivo usó el back en el **3021**: el 3001 lo tenía tomado el `next` de
+  otro proyecto de Lucas (Kora), que no se tocó. La tienda y el dashboard se compilaron contra ese
+  puerto.
+
+### Versiones reales instaladas
+
+B6 no instaló nada. Para la prueba en vivo se usó lo del worktree del front: Next.js 16.4.2, Vite
+8.3.4 y Playwright 1.64.1 (Chromium headless). Docker Engine 28.4.0.
+
+### Verificación
+
+- **Suite completa en verde** (Task 8, sobre `d8541ca`, la primera corrida completa de B6):
+  - `npm run typecheck`, `npm run lint` (versiones y fronteras) y `npm run format:check`.
+  - `npm test`: 110 archivos, 1259 tests.
+  - `CONTRACT_PATH="../frontend-ajustes/docs/api/openapi.yaml" npm run test:e2e`: 26 archivos y 1
+    omitido (el del sandbox), 734 tests y 4 omitidos (309 s).
+  - `npm run contract:check`, con ese `CONTRACT_PATH` y sin él (el `main` local del front es el
+    mismo commit): 3 archivos, 454 tests y 1 omitido. **83 operaciones implementadas de 83, 0
+    pendientes**, sin diferencias.
+- **Review Focus del plan, cubierto con E2E:**
+  1. **Stock disponible:** el Coquito (`on_hand` 2) con un pedido que reserva 2 da `stock` 0, sale
+     en `?stock=out` y en el resumen con 0; un `PATCH` con `stock` 5 deja `on_hand` 7 y `reserved` 2
+     (`admin-catalog`, `admin-dashboard`).
+  2. **Guardar y verlo al instante:** con la ficha cacheada, cambiar nombre y slug manda un solo
+     aviso con las 5 etiquetas y el `GET` por el slug nuevo trae el nombre nuevo; un 422, 403 o 409
+     no avisa (`admin-catalog`).
+  3. **Cancelar:** con el intento `none`, 200, `paymentStatus: cancelled`, reserva liberada,
+     `cancelled_at`, historial `admin`, `order.cancelled` y `storefront.stale`; con `pending`, 409
+     `payment_in_progress` sin tocar nada (`admin-orders`).
+  4. **Cueros de punta a punta** (`orders`, "cueros por producto").
+  5. **La moderación llega a los listados:** aprobar una reseña del Imperial Premium cacheado da
+     `rating.count` 4 y la tienda falsa recibe las 4 etiquetas (`admin-reviews`).
+- **Seed** (TDD): RED con dos casos nuevos en `seed.e2e-spec.ts` (renombrar un producto y volver a
+  sembrar fallaba con `P2002` en `products_sequence_key`; un contenido, un ajuste y un envío
+  editados se pisaban) y GREEN con 13 de 13.
+- **Prueba en vivo con la tienda y el dashboard (Task 8):**
+  - Back compilado (`node dist/main`) en el **3021** con `MP_MODE=simulated`,
+    `MEDIA_MODE=simulated`, `STORE_ORIGIN=http://localhost:4320`,
+    `ADMIN_ORIGIN=http://localhost:5320` y `STORE_REVALIDATE_SECRET` igual al `REVALIDATE_SECRET`
+    de la tienda (64 hex inventados, en un archivo fuera del repo), sobre el Postgres y el Redis de
+    compose, migrado y sembrado con el seed nuevo.
+  - Tienda (`next start --port 4320`) y dashboard (`vite preview --port 5320 --strictPort`)
+    compilados en modo `live` desde `../frontend-ajustes` (`24b62ab`), con el entorno en la misma
+    línea y sin `.env.local`.
+  - Script de Playwright `live-b6.mjs` en el workspace; capturas `b6-01…26` en
+    `.superpowers/sdd/2026-11-04-b6-admin/captures/` (git ignora esa carpeta):
+    - **Cueros y stock** (lo que pidió Lucas): antes, las fichas del Imperial Criollo, el Imperial
+      Térmico y el Ranchero Manchas Blancas con los cuatro cueros y compra (`b6-01…03`). En el
+      dashboard: el Criollo con `[Negro, Crudo]` y stock 0 (`b6-04`), el Térmico solo con Crudo y
+      el Ranchero sin cueros (`b6-05`); los tres `PATCH` 200 y tres `storefront.stale`
+      `product.updated` con `products`, `product:{slug}`, `categories` y `combos`, publicados y
+      regenerados por la tienda a medida que se guardaban (uno cada 2 s). Después (`b6-07…10`): el Criollo con dos muestras (Negro y
+      Crudo), "Sin stock por ahora" y "Consultar por mail" en lugar de "Agregar al carrito" y
+      "Comprar ahora"; el Térmico con una sola muestra (Crudo); el Ranchero sin selector; en el
+      listado de Imperiales, el Criollo con "Sin stock" y el botón de agregar deshabilitado. Por
+      API, el back también lo rechaza: la cotización del Criollo da `sold_out`, el Térmico con
+      Negro da 422 "Ese cuero no está disponible para este mate." y sin `options` 422 "Elegí el
+      cuero del mate.".
+    - **Título del inicio:** "Seis líneas para cada ronda" (`b6-11`) → en Contenido → Inicio,
+      "Categorías" (y "Los más vendidos" en los destacados) → `PUT` 200 (`b6-12`) → el inicio lo
+      mostró a los 3,5 s (`b6-13`).
+    - **Reseña:** enviada desde la ficha del Imperial Premium (`POST` 202 `pending`, `b6-14`),
+      pendiente en el dashboard (`b6-15`), Aprobar (`b6-16`) → la ficha la mostró a los 2,3 s, con
+      4 aprobadas (`b6-17`).
+    - **Contacto:** enviado desde Contacto (`POST /contact` 202, `b6-18`) → en Mensajes "Sin leer";
+      al abrirlo queda leído (`b6-19`).
+    - **Compra** `GLP-10020`: el Ranchero sin cueros (línea con `options: null` y `detail` vacío),
+      retiro, Mercado Pago (`b6-20`) → simulador → Aprobar → confirmado (`b6-21`) → en el
+      dashboard, pagado (`b6-22`) → "Pasar a preparación" → "Marcar como despachado" con Andreani y
+      seguimiento (`b6-23`). Historial: `pending_payment` (cliente), `paid` (pasarela),
+      `preparing` y `shipped` (admin).
+    - **Cancelación** `GLP-10021`: el Térmico con Crudo (`detail` "Cuero crudo"), sin pagar
+      (inventario 12/0 → 12/1) → "Cancelar pedido" con confirmación (`b6-24`, `b6-25`) →
+      `cancelled`, `cancelled_at`, reserva `released`, inventario 12/0, historial
+      `pending_payment → cancelled` (admin), `order.cancelled` y el aviso `products`, `combos`. El
+      pedido no tenía intento de pago (no se llegó a "Pagar"), así que `payment_status` quedó en
+      `none`, como dice el contrato.
+    - **Resumen** (`b6-26`): ventas de hoy $31.999, poco stock con el Criollo y la Galleta sin
+      stock y el Coquito con 2, mensajes sin leer y sin alertas de pago.
+  - **Bug de la tienda encontrado (no del back):** después del aviso de los tres productos, la
+    tienda respondió **500** en `/producto/[slug]` y `/tienda/[linea]` (`b6-06`, página en
+    blanco), con "Route "/producto/[slug]": Next.js encountered uncached or runtime data during
+    prerendering" (`NEXT_STATIC_GEN_BAILOUT`) en su log, hasta reiniciar `next start`. El inicio,
+    `/kit`, `/contacto` y `/nosotros` siguieron en 200. Reproducido sin el back, reiniciando la
+    tienda y mandándole a mano una etiqueta por vez a `POST /api/revalidate`: `categories` y
+    `settings` la rompen; `products`, `product:{slug}`, `combos`, `content:home`,
+    `content:footer`, `reviews:featured` y `reviews:{slug}` no. El back manda esas etiquetas porque
+    son del contrato (B-73) y la tienda las acepta. Para seguir, se reinició la tienda y se le
+    mandó el mismo aviso sin `categories`; con eso las fichas mostraron lo guardado en el
+    dashboard. Los recorridos que siguieron no mandan ni `categories` ni `settings`.
+  - **Logs:** ningún `warn` ni `error` en el back; los 4xx fueron los esperados (`GET /me` y
+    `/admin/auth/me` sin sesión, las dos cotizaciones con cuero equivocado a propósito y un
+    `GET /products/no-existe`). El secreto no aparece en el log del back ni en los de la tienda o el
+    dashboard.
+  - **Al cierre:** `npm run db:seed` devolvió los tres mates a los cuatro cueros y stock 12. Los
+    títulos "Categorías" y "Los más vendidos" quedaron, porque el seed ya no pisa los contenidos.
+    `GLP-10020` (despachado), `GLP-10021` (cancelado), la reseña aprobada y dos mensajes de contacto
+    (uno sin leer, de una primera corrida que cortó un error del script) quedan en la base de
+    compose. No quedan procesos en el 3021, el 4320 ni el 5320, ni contenedores de compose. El
+    front sigue sin cambios y sin `.env.local`; los builds del worktree (`apps/store/.next`,
+    `apps/admin/dist`) quedan en modo `live`, apuntando al 3021, ignorados por git.
+
+### Commits
+
+| Commit    | Qué                                                                                                  |
+| --------- | ---------------------------------------------------------------------------------------------------- |
+| `f58d65a` | README: conteo de operaciones y reintentos del aviso a la tienda (antes del plan)                    |
+| `0bbcba5` | Plan de B6                                                                                           |
+| `c9e219e` | Evento `storefront.stale` (Task 2)                                                                   |
+| `e53692e` | Aviso genérico, caché del catálogo con versión y aviso de stock de los pedidos (Task 2)              |
+| `310ebf6` | Contenidos y ajustes del dashboard (Task 1)                                                          |
+| `b940162` | Contacto, arrepentimiento, bandeja, reseñas nuevas y moderación (Task 4)                             |
+| `0c47d79` | Pedidos del dashboard con cancelación (Task 3)                                                       |
+| `bdbcd9c` | Cueros por producto, sin virola, relacionados de hasta 30 (Task 5)                                   |
+| `c506639` | Resumen del dashboard (Task 7)                                                                       |
+| `c2cfdc6` | Productos, líneas y firma de fotos del dashboard (Task 6)                                            |
+| `3983e8d` | Menores de las revisiones: límites, trampa sin consumir código, fotos, moderación, no-mate con cuero |
+| `d5af43c` | `resolveImage` rechaza puntos con `%2e` y caracteres de control                                      |
+| `d8541ca` | Seed: cueros y títulos del front, productos por `sequence`, contenidos que no se pisan (Task 8)      |
+| (este)    | Esta bitácora, el ADR 0007 y el README (Task 8)                                                      |
+
+**Para que la CI del back pase:** Lucas pushea primero el `main` del front (con los cueros,
+`24b62ab`) y después el `main` del back. La CI clona el `main` remoto del front para el contrato.
+
+### Lo que queda para B7 en adelante
+
+**Para el front (antes de producción):**
+
+- El 500 de `/producto/[slug]` y `/tienda/[linea]` después de regenerar `categories` o `settings`
+  (arriba). Con el back de B6, cualquier guardado de un producto, de una línea o de los ajustes
+  rompe esas páginas hasta reiniciar la tienda.
+
+**Para B7 (mails):**
+
+- Consumir con handlers del despachador del outbox: `order.paid` (confirmación), `order.shipped`
+  (con empresa y seguimiento), `order.delivered`, `order.cancelled`, el arrepentimiento (con su
+  código `ARR-…`) y el contacto. Hoy `support` solo loguea la intención (`SupportMailLog`) y la
+  recuperación de contraseña sigue en el log.
+
+**Para B8 (`audit_logs` y producción):**
+
+- `audit_logs` de cada escritura del dashboard (quién, qué, antes y después). Hoy quedan
+  `order_status_history` (`actor: admin`) y `updated_by`/`version` en contenidos y ajustes.
+- `MEDIA_MODE=cloudinary` con las tres `CLOUDINARY_*` (obligatorio en `production`) y la
+  contraseña del admin semilla.
+
+**Menores aceptados:**
+
+- `catalog:version` sin TTL: si Redis lo desaloja vuelve a 0 y pueden reaparecer claves `v0` viejas
+  hasta 60 s.
+- Las posiciones de líneas y combos se calculan sin lock (`max + 1`): con un solo admin alcanza.
+- El slug anterior del aviso de un producto sale de una lectura previa a la transacción: un rename
+  simultáneo podría avisar un slug viejo (ventana de milisegundos).
+- Entradas de Redis de antes del deploy (sin `leathers`) se leen hasta que vencen (60 s).
+- Una pestaña de la tienda abierta antes del cambio de cueros manda `ferrule` y recibe 422 hasta
+  recargar (B-70).

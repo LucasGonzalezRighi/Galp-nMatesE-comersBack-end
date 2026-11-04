@@ -10,8 +10,9 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
   [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md),
   [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md),
   [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md),
-  [ADR 0005 · pagos con Mercado Pago](docs/adr/0005-pagos-con-mercado-pago.md) y
-  [ADR 0006 · combos y aviso a la tienda](docs/adr/0006-combos-y-aviso-a-la-tienda.md).
+  [ADR 0005 · pagos con Mercado Pago](docs/adr/0005-pagos-con-mercado-pago.md),
+  [ADR 0006 · combos y aviso a la tienda](docs/adr/0006-combos-y-aviso-a-la-tienda.md) y
+  [ADR 0007 · dashboard completo](docs/adr/0007-dashboard-completo.md).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -36,9 +37,10 @@ credenciales (las cookies de sesión del admin). La tienda no lo necesita: su se
 y reescribe `/api/v1/*` hacia él, así que el navegador siempre habla con la tienda. Un pedido desde
 otro origen no recibe cabeceras CORS y el navegador lo bloquea.
 
-**Aviso a la tienda:** cada guardado de combos del dashboard le pide a la tienda (en `STORE_ORIGIN`)
-que regenere la etiqueta `combos`, con el secreto `STORE_REVALIDATE_SECRET`. La variable, el detalle
-y la prueba en vivo están en "Combos y aviso a la tienda".
+**Aviso a la tienda:** cada guardado del dashboard (y cada pedido creado, pagado, vencido o
+cancelado) le pide a la tienda (en `STORE_ORIGIN`) que regenere sus etiquetas, con el secreto
+`STORE_REVALIDATE_SECRET`. La variable y el mecanismo están en "Combos y aviso a la tienda"; las
+etiquetas de cada escritura, en "Dashboard".
 
 ## Puesta en marcha
 
@@ -74,10 +76,17 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
   vuelve a migrar (después, `npm run db:seed`).
 - **Cliente de Prisma** en `src/generated/prisma` (no se versiona): lo genera `postinstall`, o
   `npm run db:generate` después de cambiar `prisma/schema.prisma`.
-- **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos, 18 reseñas
-  (10 destacadas), 7 contenidos, 5 combos (4 publicados), ajustes y 3 envíos, los mismos datos de
-  las fixtures del front, y el admin semilla (ver "Cuenta y admin"). Es idempotente (`upsert` por
-  `slug`/`key`; el admin solo se crea si falta): correrlo dos veces deja lo mismo.
+- **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos (los 16 mates con
+  los cuatro cueros), 18 reseñas (10 destacadas), 7 contenidos, 5 combos (4 publicados), ajustes y
+  3 envíos, los mismos datos de las fixtures del front, y el admin semilla (ver "Cuenta y admin").
+  Es idempotente: correrlo dos veces deja lo mismo.
+  - Líneas, productos, reseñas y combos se pisan con los valores del diseño. Los productos se
+    buscan por `sequence` (el código "N°07"): uno renombrado desde el dashboard vuelve al slug del
+    diseño sin duplicarse, y el slug del panel pasa al historial (la tienda lo redirige).
+  - Contenidos, ajustes y envíos **solo se crean si faltan**: un seed nuevo nunca pisa lo que se
+    guardó desde el dashboard. Una base sembrada antes de B6 conserva los títulos viejos del
+    inicio ("Seis líneas para cada ronda", "Los más elegidos de la ronda") hasta que se editen en
+    el dashboard (Contenido → Inicio) o se borre la fila y se vuelva a sembrar.
   - Los combos se guardan con un UUID v5 de su clave del mock: un seed nuevo les devuelve el
     nombre, el precio, el estado, la posición y las piezas de las fixtures. Los combos creados desde
     el dashboard no los toca.
@@ -89,24 +98,28 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 `npm run contract:check` arma la app (sin Docker), genera el Swagger y lo compara, normalizado,
 con `../frontend/docs/api/openapi.yaml` (o `CONTRACT_PATH`). Falla si una operación implementada
 difiere del contrato o si Swagger expone una ruta que no está en `IMPLEMENTED_PATHS`
-(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 47
-implementadas y 36 pendientes de 83). Compara rutas, parámetros, respuestas, `security` y
-`requestBody`. Además corre los casos compartidos de validación del front
-(`validation-cases.json`, al lado del `openapi.yaml`) contra los DTOs de identidad, del checkout
-(contacto y envío), del documento de quien paga con tarjeta y de los combos del dashboard (alta,
-edición y orden) (`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan los
-mismos errores en los dos lados.
+(`test/contract/openapi.contract.spec.ts` y las listas por tarea de `test/contract/b6/`), y lista
+las operaciones pendientes (desde B6, **83 implementadas de 83** y ninguna pendiente). Compara
+rutas, parámetros, respuestas, `security` y `requestBody`. Además corre los casos compartidos de
+validación del front (`validation-cases.json`, al lado del `openapi.yaml`) contra los DTOs de
+identidad, del checkout (contacto y envío), del documento de quien paga con tarjeta y de los
+combos del dashboard (alta, edición y orden) y, desde B6, los del resto del dashboard (productos,
+líneas, fotos, pedidos, reseñas, mensajes, contenidos y ajustes) y los formularios públicos de
+contacto, arrepentimiento y reseña (`test/contract/validation-cases.contract.spec.ts`): las mismas
+entradas dan los mismos errores en los dos lados.
 
 - **Otro contrato:** `CONTRACT_PATH` apunta a otro `openapi.yaml` (los casos de validación se
   leen del `validation-cases.json` de esa misma carpeta). Sirve para probar el back contra una
   rama del front que todavía no está en `main`, por ejemplo desde un worktree:
   `CONTRACT_PATH="../frontend-inicio-combos/docs/api/openapi.yaml" npm run contract:check`. Así
   se construyó B5c, antes de que el front mergeara los combos.
-- **Combos y la CI:** el `main` local del front ya tiene los combos (`063c091`), así que
-  `npm run contract:check` pasa sin `CONTRACT_PATH`. La CI clona el `main` **remoto** del front:
-  hasta que ese `main` tenga los combos, el contrato de la CI falla (por ejemplo, no encuentra los
-  casos de validación de combos). Por eso se pushea primero el `main` del front y después el del
-  back.
+- **Cueros y la CI:** B6 se construyó con
+  `CONTRACT_PATH="../frontend-ajustes/docs/api/openapi.yaml"` (la rama `feat/ajustes-tienda` del
+  front, con los cueros por producto). Hoy el `main` local del front ya la tiene (`24b62ab`), así
+  que `npm run contract:check` también pasa sin `CONTRACT_PATH`; si `../frontend` no está en ese
+  `main`, usá el `CONTRACT_PATH` del worktree. La CI clona el `main` **remoto** del front: hasta
+  que ese `main` tenga los cueros, el contrato de la CI falla. Por eso se pushea primero el `main`
+  del front y después el del back (lo mismo pasó con los combos).
 
 Para ver las diferencias de una ruta: `node scripts/openapi-diff.mjs products/{slug}` (en Git Bash,
 sin `/` inicial o entre comillas, para que no la convierta en una ruta de Windows).
@@ -148,9 +161,11 @@ E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada pieza en
    pedidos". Al terminar, cerrá `next start` y `npm run dev`, y `npm run db:down` si no vas a
    seguir.
 
-Qué falla todavía en modo `live`, y en qué pieza llega:
-
-- **Contacto, arrepentimiento y reseñas nuevas (B7).**
+Desde B6 también funcionan contacto, arrepentimiento y reseñas nuevas (los mails que avisan llegan
+en B7; hoy el back loguea la intención). Lo que sí falla en modo `live` es de la tienda: después de
+que el back le avisa `categories` o `settings` (cualquier guardado de un producto, una línea o los
+ajustes), `/producto/[slug]` y `/tienda/[linea]` responden 500 hasta reiniciar `next start` (ver
+"Dashboard").
 
 El pago con tarjeta dentro de la tienda no es una falla del back, pero en local no se completa. Con
 la clave pública de mentira, los Secure Fields reales cargan, pero Mercado Pago no reconoce la
@@ -215,9 +230,8 @@ cookies `__Host-` y un token CSRF por sesión
     "No pudimos conectar, probá de nuevo".
   - Ingreso, recarga con la sesión y cierre de sesión funcionan, y "Mi cuenta" carga (el cambio de
     contraseña lo cubre el E2E).
-  - Desde B5c, **Combos** funciona contra el back (ver "Combos y aviso a la tienda"). Las demás
-    pantallas con datos (Resumen, Pedidos, Productos, Líneas, Contenido, Reseñas, Mensajes y
-    Ajustes) muestran "No pudimos cargar…": sus rutas `/admin/*` dan 404 hasta B6.
+  - Desde B6 **todas las pantallas** funcionan contra el back (ver "Dashboard"): Resumen, Pedidos,
+    Productos, Líneas, Combos, Contenido, Reseñas, Mensajes y Ajustes.
 
 ## Pedidos y stock
 
@@ -560,18 +574,82 @@ puertos propios, sin tocar el `next dev` del 3000 ni el `vite dev` del 5173):
    orden del inicio igual.
 6. Al terminar: cerrar `next start`, `vite preview` y `npm start`, y `npm run db:down`.
 
-Hasta B6 el diálogo de un combo muestra "No pudimos cargar los productos." en las piezas:
-las lista con `GET /admin/products`, que todavía da 404. El nombre, la descripción, el precio y el
-estado se guardan igual, pero un combo nuevo o un cambio de piezas desde el dashboard espera a B6
-(por API funcionan).
+Desde B6 el diálogo de un combo lista las piezas con `GET /admin/products`, así que un combo nuevo o
+un cambio de piezas también se hace desde el dashboard. El aviso de las demás escrituras es
+genérico (`storefront.stale`, ver "Dashboard"); `combo.changed` sigue andando igual.
+
+## Dashboard
+
+Desde B6 el back tiene las 83 operaciones del contrato: todo el dashboard y los formularios
+públicos que faltaban ([ADR 0007](docs/adr/0007-dashboard-completo.md)). Todas las rutas
+`/admin/*` piden la sesión del admin y las escrituras, además, `X-CSRF-Token`. Salvo el ingreso,
+no cuentan para el límite de pedidos por IP (`@SkipThrottle`).
+
+| Rutas                                                                              | Módulo      | Qué hacen                                                                                                                           |
+| ---------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /admin/dashboard/summary`                                                     | `dashboard` | Ventas de hoy y de 7 días (hora de Buenos Aires), para despachar, reseñas y mensajes pendientes, alertas de pago y poco stock.      |
+| `GET/POST /admin/products`, `GET/PATCH /admin/products/{id}`, `…/{id}/archive`     | `catalog`   | Productos en cualquier estado, con stock disponible, cueros, fotos, `expectedUpdatedAt` (409) y slugs anteriores que redirigen.     |
+| `GET/POST /admin/categories`, `PATCH/DELETE /admin/categories/{id}`, `PUT …/order` | `catalog`   | Líneas: alta, edición, borrado y orden. Cambiar el grupo de una línea con productos da 422.                                         |
+| `POST /admin/media/signature`                                                      | `media`     | Firma de la subida a Cloudinary (`MEDIA_MODE`; ver "Fotos").                                                                        |
+| `GET /admin/orders`, `GET /admin/orders/{number}`, `POST …/{number}/status`        | `orders`    | Listado (filtros, búsqueda sin acentos, páginas de 20), detalle y cambio de estado: preparación, despachado, entregado o cancelado. |
+| `GET /admin/reviews`, `PATCH /admin/reviews/{id}`                                  | `reviews`   | Moderación: aprobar, ocultar y destacar en el inicio.                                                                               |
+| `GET /admin/messages`, `PATCH /admin/messages/{id}`                                | `support`   | Bandeja de contacto y arrepentimiento; leído o no.                                                                                  |
+| `GET/PUT /admin/content/…` (inicio, nosotros, preguntas, pie, pestañas, legales)   | `content`   | Los 7 contenidos (12 operaciones). Último guardado gana.                                                                            |
+| `GET/PUT /admin/settings`                                                          | `settings`  | Ajustes y envíos (el IVA se redondea a 2 decimales).                                                                                |
+| `POST /contact`, `POST /withdrawals`, `POST /products/{slug}/reviews`              | públicas    | Contacto, arrepentimiento (código `ARR-` + 6 dígitos) y reseña nueva (queda pendiente), con campo trampa (`website`).               |
+
+- **Stock:** el dashboard ve y guarda las unidades **disponibles** (`on_hand − reserved`); guardar
+  escribe `on_hand = stock + reserved`. Con stock 0 la tienda muestra "Sin stock" y no deja
+  agregarlo al carrito (la ficha ofrece "Consultar por mail" y el botón de la tarjeta queda
+  deshabilitado), y el back lo rechaza en la cotización (`sold_out`).
+- **Cueros:** solo los mates (`leathers`, de 0 a 4, en orden canónico). Con uno solo, la ficha
+  muestra esa muestra; sin ninguno, no hay selector y el carrito manda `options: null`. Un cuero que
+  el mate no ofrece da 422 "Ese cuero no está disponible para este mate.".
+- **Cancelar** un pedido `pending_payment` libera la reserva, cierra el intento de pago activo (si
+  hay uno; si no, `paymentStatus` queda `none`) y la pasarela lo resuelve después (handler de
+  `order.cancelled` en `payments`). Con un pago en curso, 409 `payment_in_progress`.
+- **Aviso a la tienda** (`storefront.stale`, en la misma transacción de la escritura; un 4xx no
+  avisa nada):
+
+  | Escritura                                  | Etiquetas                                                                      |
+  | ------------------------------------------ | ------------------------------------------------------------------------------ |
+  | Producto (alta, edición, archivo)          | `products`, `product:{slug}` (y el anterior si cambió), `categories`, `combos` |
+  | Línea (alta, edición, borrado, orden)      | `categories`, `products`                                                       |
+  | Contenido `{key}`                          | `content:{key}` (`product-tabs` suma `products`)                               |
+  | Ajustes                                    | `settings`, `products`, `combos`                                               |
+  | Moderación de una reseña                   | `reviews:featured`, `reviews:{slug}`, `product:{slug}`, `products`             |
+  | Pedido creado, pagado, vencido o cancelado | `products`, `combos`                                                           |
+
+  En el log del back queda, por ejemplo,
+  `La tienda regeneró products, product:mate-imperial-criollo, categories, combos (evento storefront.stale)`.
+  La caché del catálogo en Redis lleva versión (`catalog:v{n}:…`): cada escritura de productos o
+  líneas y cada moderación la sube, así la tienda nunca relee del back un dato viejo.
+
+- **Bug conocido de la tienda** (front `24b62ab`, Next 16.4.2): después de regenerar `categories` o
+  `settings`, la tienda compilada responde **500** en `/producto/[slug]` y `/tienda/[linea]`
+  ("Next.js encountered uncached or runtime data during prerendering",
+  `NEXT_STATIC_GEN_BAILOUT`) hasta que se reinicia `next start`. El inicio y las demás páginas
+  siguen bien, y `products`, `product:{slug}`, `combos`, `content:*` y `reviews:*` no la rompen. Se
+  reproduce sin el back, con un `POST /api/revalidate` a la tienda con `{"tags":["categories"]}`. El
+  arreglo es del front.
+
+**Probarlo en vivo** (así se probó B6): igual que en "Combos y aviso a la tienda", con
+`MEDIA_MODE=simulated` en el back, la tienda en el 4320 y el dashboard en el 5320, compilados
+desde el mismo commit del front. Si el 3001 está ocupado (en la compu de Lucas lo puede tomar otro
+`next`), arrancá el back con un `PORT` libre y compilá la tienda y el dashboard con `API_BASE_URL` y
+`VITE_API_BASE_URL` en ese puerto. Al terminar, `npm run db:seed` devuelve los productos al diseño
+(los contenidos y los ajustes guardados quedan).
 
 ## Fotos (Cloudinary)
 
-Desde B6 las fotos del dashboard (socios de Nosotros y, después, productos y líneas) se guardan
-sin llamar a la Admin API de Cloudinary: una foto se acepta si su `publicId` está en la carpeta de
-su uso (`galpon/productos/`, `galpon/lineas/`, `galpon/socios/`, `galpon/sitio/`) o si es la que
-el recurso ya tiene, y la `url` se arma con la nube. Si no, 422 `unknown_image` "La foto no
-existe: subila de nuevo". Las variables (detalle en `.env.example`):
+Desde B6 las fotos del dashboard (productos, líneas y socios de Nosotros) se guardan sin llamar a la
+Admin API de Cloudinary: `POST /admin/media/signature` firma la subida (en `simulated`, la firma
+del mock), y al guardar una foto se acepta si su `publicId` está en la carpeta de su uso
+(`galpon/productos/`, `galpon/lineas/`, `galpon/socios/`, `galpon/sitio/`, sin segmentos `.` o
+`..` ni caracteres de control) o si es la que el recurso ya tiene, y la `url` se arma con la nube.
+Si no, 422 `unknown_image` "La foto no existe: subila de nuevo". El texto alternativo es por uso.
+Con `MEDIA_MODE=simulated` la firma es falsa: el dashboard no puede subir fotos nuevas a
+Cloudinary, pero guarda las que el producto ya tiene. Las variables (detalle en `.env.example`):
 
 | Variable                | Por defecto | Notas                                                                                                      |
 | ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
@@ -619,8 +697,13 @@ existe: subila de nuevo". Las variables (detalle en `.env.example`):
   los combos por HTTP (lectura de la tienda, dashboard con sesión y CSRF, orden y borrado con
   renumeración), el aviso a una tienda falsa (un solo `POST /api/revalidate` por guardado,
   reintento con 500 y ninguno con 401) y el combo como línea del carrito y del pedido (stock
-  compartido, piezas en el orden del combo, combo roto → 409 y nunca 500). El E2E del sandbox se
-  omite sin `MP_ACCESS_TOKEN`. Incluyen también el contrato y los casos compartidos de
+  compartido, piezas en el orden del combo, combo roto → 409 y nunca 500). Desde B6, el dashboard
+  completo por HTTP (productos con stock disponible, `expectedUpdatedAt` y slugs con historial;
+  líneas; firma de fotos en los dos modos; pedidos con cancelación y la pasarela; reseñas;
+  mensajes; contenidos; ajustes; resumen), contacto y arrepentimiento, `storefront.stale` con la
+  tienda falsa (las etiquetas exactas de cada escritura, nada en un 4xx), la caché con versión, los
+  cueros de punta a punta y el seed (un rename no duplica; contenidos y ajustes no se pisan). El E2E
+  del sandbox se omite sin `MP_ACCESS_TOKEN`. Incluyen también el contrato y los casos compartidos de
   validación. Corren de a un archivo.
 - **Verificación completa**, la misma que corre la CI:
 
