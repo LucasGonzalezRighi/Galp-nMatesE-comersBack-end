@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule } from './config/config.module'
 import { CatalogModule } from './modules/catalog/catalog.module'
 import { ContentModule } from './modules/content/content.module'
+import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { HealthModule } from './modules/health/health.module'
 import { IdentityModule } from './modules/identity/identity.module'
 import { OrdersModule } from './modules/orders/orders.module'
@@ -35,6 +36,7 @@ import { SharedModule } from './shared/shared.module'
     OrdersModule,
     PaymentsModule,
     SupportModule,
+    DashboardModule,
     StorefrontSyncModule,
   ],
 })
