@@ -307,7 +307,7 @@ diseño está en el [ADR 0005](docs/adr/0005-pagos-con-mercado-pago.md).
 
 ### Cómo cobra
 
-Son cinco operaciones del contrato (41 de 77 implementadas). Las cuatro rutas de pago aceptan
+Son cinco operaciones del contrato. Las cuatro rutas de pago aceptan
 solo el `X-Order-Token` del pedido: sin token, con un token ajeno o con un pedido inexistente
 responden el mismo 404, y no usan la sesión ni `X-CSRF-Token`.
 
@@ -510,8 +510,8 @@ precio final menor que la suma de las piezas. Viven en el módulo `catalog`, sin
   del back queda `La tienda regeneró combos (evento combo.changed)` (contexto
   `StorefrontRevalidateProcessor`).
   - Un 4xx del dashboard (validación, 404, CSRF) no avisa nada.
-  - Con la tienda caída o respondiendo 5xx, la cola `storefront-revalidate` reintenta 8 veces
-    (unos 2 minutos). Con 401 (secreto distinto) o 422 (etiqueta que la tienda no conoce) no
+  - Con la tienda caída o respondiendo 5xx, la cola `storefront-revalidate` hace 8 intentos en
+    total (unos 2 minutos). Con 401 (secreto distinto) o 422 (etiqueta que la tienda no conoce) no
     reintenta, y el back lo avisa en el log. La escritura del dashboard nunca falla por la tienda.
   - Sin `STORE_REVALIDATE_SECRET` no se avisa nada (un aviso al arrancar) y la tienda se pone al
     día cuando vence su caché (`cacheLife('hours')`). Por eso el `.env` de desarrollo no lo trae:
