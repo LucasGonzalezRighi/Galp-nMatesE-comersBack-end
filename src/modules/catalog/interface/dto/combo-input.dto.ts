@@ -28,6 +28,7 @@ import {
   RawValue,
   Trimmed,
 } from '../../../identity/interface/dto/identity-fields'
+import { canonicalId } from '../../../../shared/domain/id'
 import { ApiSchemaProperty } from '../../../../shared/infrastructure/http/openapi'
 import { EachItem, type ItemRule } from '../../../../shared/infrastructure/http/validation.pipe'
 import type { ComboFields } from '../../application/ports/combo.repository.port'
@@ -103,13 +104,15 @@ function Validations(...rules: PropertyDecorator[]): PropertyDecorator {
 const ID_ITEM_SCHEMA = { type: 'string', minLength: 1, maxLength: ID_MAX_LENGTH } as const
 
 /**
- * Lista cruda del JSON con cada texto recortado (lo que no es texto queda como vino y la
- * validación lo rechaza). Sin la conversión implícita del pipe global.
+ * Lista cruda del JSON con cada texto recortado y, si es un UUID, en minúsculas
+ * ({@link canonicalId}: así un producto repetido con otras mayúsculas también es "repetido"); lo
+ * que no es texto queda como vino y la validación lo rechaza. Sin la conversión implícita del
+ * pipe global.
  */
 function trimmedItems({ obj, key }: TransformFnParams): unknown {
   const value: unknown = (obj as Record<string, unknown>)[key]
   return Array.isArray(value)
-    ? value.map((item: unknown) => (typeof item === 'string' ? item.trim() : item))
+    ? value.map((item: unknown) => (typeof item === 'string' ? canonicalId(item.trim()) : item))
     : value
 }
 

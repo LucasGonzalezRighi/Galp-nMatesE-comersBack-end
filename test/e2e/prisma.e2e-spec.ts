@@ -570,6 +570,22 @@ describe('prisma', () => {
     await expect(db.webhookEvent.create({ data: event })).rejects.toMatchObject({ code: 'P2002' })
   })
 
+  /**
+   * Línea y mate propios de un caso de combos (slugs con `key`), así cada `it` crea lo que usa.
+   *
+   * @param key - Sufijo de los slugs, distinto en cada caso.
+   */
+  async function comboCatalog(key: string) {
+    const db = prisma()
+    const category = await db.category.create({
+      data: { slug: `linea-${key}`, name: `Línea ${key}`, group: 'mate', blurb: 'B', position: 9 },
+    })
+    const mate = await db.product.create({
+      data: { slug: `mate-${key}`, categoryId: category.id, name: `Mate ${key}`, description: 'D' },
+    })
+    return { category, mate }
+  }
+
   it('la migración b5c crea combos y sus piezas, y suma combo a line_type', async () => {
     const db = prisma()
     const lineTypes = await db.$queryRaw<
@@ -581,12 +597,7 @@ describe('prisma', () => {
     >`SELECT unnest(enum_range(NULL::combo_status))::text AS value`
     expect(comboStatuses.map((s) => s.value)).toEqual(['draft', 'published'])
 
-    const category = await db.category.create({
-      data: { slug: 'linea-combos', name: 'Línea combos', group: 'mate', blurb: 'B', position: 9 },
-    })
-    const product = await db.product.create({
-      data: { slug: 'mate-combo', categoryId: category.id, name: 'Mate combo', description: 'D' },
-    })
+    const { mate: product } = await comboCatalog('combo')
     const order = await db.order.create({ data: orderData('GLP-10010') })
     const line = await db.orderItem.create({
       data: {
@@ -624,6 +635,7 @@ describe('prisma', () => {
 
   it('los CHECK de combos rechazan precio y posiciones fuera de rango', async () => {
     const db = prisma()
+    const { mate: product } = await comboCatalog('combo-checks')
     const combo = { name: 'Combo', description: 'D', priceArs: 61999, position: 1 }
 
     for (const priceArs of [0, 100_000_000]) {
@@ -637,7 +649,6 @@ describe('prisma', () => {
 
     const saved = await db.combo.create({ data: { ...combo, priceArs: 99_999_999 } })
     expect(saved.status).toBe('draft')
-    const product = await db.product.findUniqueOrThrow({ where: { slug: 'mate-combo' } })
     for (const position of [0, 4]) {
       await expect(
         db.comboItem.create({ data: { comboId: saved.id, position, productId: product.id } }),
@@ -653,11 +664,10 @@ describe('prisma', () => {
 
   it('un producto que está en un combo no se borra; borrar el combo borra sus piezas', async () => {
     const db = prisma()
-    const category = await db.category.findUniqueOrThrow({ where: { slug: 'linea-combos' } })
+    const { category, mate } = await comboCatalog('combo-borrado')
     const yerba = await db.product.create({
       data: { slug: 'yerba-combo', categoryId: category.id, name: 'Yerba combo', description: 'D' },
     })
-    const mate = await db.product.findUniqueOrThrow({ where: { slug: 'mate-combo' } })
     const combo = await db.combo.create({
       data: {
         name: 'Mate y yerba',

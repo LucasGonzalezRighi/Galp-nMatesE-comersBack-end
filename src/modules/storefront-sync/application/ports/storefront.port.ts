@@ -5,12 +5,15 @@ export interface StorefrontRevalidated {
   tags: string[]
 }
 
-/** La tienda rechazó el pedido para siempre (secreto o etiqueta inválidos): reintentar no sirve. */
+/**
+ * La tienda rechazó el pedido para siempre (secreto o etiqueta inválidos, o una redirección que no
+ * se sigue): reintentar no sirve.
+ */
 export interface StorefrontRejected {
   kind: 'rejected'
-  /** Estado HTTP de la respuesta (4xx). */
+  /** Estado HTTP de la respuesta (4xx, o 3xx si redirigió). */
   status: number
-  /** El `error` del cuerpo de la tienda, o un texto genérico si no vino. */
+  /** El `error` del cuerpo de la tienda, o un texto propio si no vino o si redirigió. */
   reason: string
 }
 

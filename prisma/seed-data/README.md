@@ -22,7 +22,7 @@ FIXTURES_PATH=/ruta/a/fixtures/index.ts node scripts/import-fixtures.mjs
 
 El script carga las fixtures con `tsx`, las pasa a términos del back y reescribe estos archivos formateados con Prettier. Revisá el diff y commitealo: el seed no importa nada del front cuando corre.
 
-`FIXTURE_COMBOS` es opcional: si las fixtures no lo exportan (el front antes de los combos), `combos.ts` sale con `SEED_COMBOS = []` y el resumen lo dice. Los combos del diseño están en la rama `feat/inicio-combos` del front:
+`FIXTURE_COMBOS` es opcional: si las fixtures no lo exportan (el front antes de los combos), `combos.ts` sale con `SEED_COMBOS = []` y el resumen lo dice. Los combos del diseño llegan con la rama `feat/inicio-combos` del front. Con esa rama mergeada en `../frontend`, alcanza con `node scripts/import-fixtures.mjs`, sin `FIXTURES_PATH`. Mientras no esté mergeada, apuntá `FIXTURES_PATH` a las fixtures del worktree de esa rama (hoy `../frontend-inicio-combos`, que desaparece con el merge):
 
 ```sh
 FIXTURES_PATH="../frontend-inicio-combos/packages/api-client/src/mock/fixtures/index.ts" node scripts/import-fixtures.mjs

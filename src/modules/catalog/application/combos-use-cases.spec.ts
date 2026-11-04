@@ -133,6 +133,11 @@ const CAMIONERO_Y_CANARIAS = combo({
   position: 2,
 })
 
+/** Igualdad de ids como la de una columna `uuid` de Postgres: sin distinguir mayúsculas. */
+function sameId(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
 /** Combos en memoria, con los eventos que guardaría el outbox. */
 class InMemoryComboRepository implements ComboRepository {
   /** Eventos `combo.changed` de las escrituras que se hicieron. */
@@ -154,7 +159,9 @@ class InMemoryComboRepository implements ComboRepository {
   private stored(record: ComboRecord): StoredCombo {
     return {
       combo: { ...record, productIds: [...record.productIds] },
-      pieces: record.productIds.flatMap((id) => this.products.filter((item) => item.id === id)),
+      pieces: record.productIds.flatMap((id) =>
+        this.products.filter((item) => sameId(item.id, id)),
+      ),
     }
   }
 
@@ -168,12 +175,12 @@ class InMemoryComboRepository implements ComboRepository {
   }
 
   findById(id: string): Promise<StoredCombo | null> {
-    const found = this.combos.find((item) => item.id === id)
+    const found = this.combos.find((item) => sameId(item.id, id))
     return Promise.resolve(found === undefined ? null : this.stored(found))
   }
 
   findProducts(ids: readonly string[]): Promise<Product[]> {
-    return Promise.resolve(this.products.filter((item) => ids.includes(item.id)))
+    return Promise.resolve(this.products.filter((item) => ids.some((id) => sameId(item.id, id))))
   }
 
   listIds(): Promise<string[]> {
@@ -189,7 +196,7 @@ class InMemoryComboRepository implements ComboRepository {
   }
 
   update(id: string, fields: ComboFields, event: NewDomainEvent): Promise<StoredCombo | null> {
-    const found = this.combos.find((item) => item.id === id)
+    const found = this.combos.find((item) => sameId(item.id, id))
     if (found === undefined) return Promise.resolve(null)
     Object.assign(found, fields, { productIds: [...fields.productIds] })
     this.events.push(event)
@@ -197,7 +204,7 @@ class InMemoryComboRepository implements ComboRepository {
   }
 
   delete(id: string, event: NewDomainEvent): Promise<boolean> {
-    const index = this.combos.findIndex((item) => item.id === id)
+    const index = this.combos.findIndex((item) => sameId(item.id, id))
     if (index === -1) return Promise.resolve(false)
     this.combos.splice(index, 1)
     this.ordered().forEach((item, position) => {
@@ -209,7 +216,7 @@ class InMemoryComboRepository implements ComboRepository {
 
   reorder(ids: readonly string[], event: NewDomainEvent): Promise<void> {
     ids.forEach((id, index) => {
-      const found = this.combos.find((item) => item.id === id)
+      const found = this.combos.find((item) => sameId(item.id, id))
       if (found !== undefined) found.position = index + 1
     })
     this.events.push(event)
@@ -617,5 +624,86 @@ describe('ReorderCombosCommand (PUT /admin/combos/order)', () => {
     expect(errors).toEqual([{ field: 'ids', code: 'invalid_value', message: ORDER_INCOMPLETE }])
     expect(repository.positions()).toEqual({ duo: 1, camionero: 2, tercero: 3 })
     expect(repository.events).toEqual([])
+  })
+})
+
+describe('ids en mayúsculas (un UUID no distingue mayúsculas, como la columna uuid)', () => {
+  const MATE_ID = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a01'
+  const BOMBILLA_ID = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a02'
+  const PRIMERO = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4b01'
+  const SEGUNDO = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4b02'
+  const MATE = product({ id: MATE_ID, slug: 'mate-uuid', priceArs: 30000 })
+  const BOMBILLA = product({
+    id: BOMBILLA_ID,
+    slug: 'bombilla-uuid',
+    priceArs: 20000,
+    category: BOMBILLAS,
+  })
+  const FIELDS: ComboFields = {
+    ...DUO_FIELDS,
+    productIds: [MATE_ID.toUpperCase(), BOMBILLA_ID.toUpperCase()],
+    priceArs: 45000,
+  }
+  let repository: InMemoryComboRepository
+
+  beforeEach(() => {
+    repository = new InMemoryComboRepository(
+      [...PRODUCTS, MATE, BOMBILLA],
+      [
+        combo({ id: PRIMERO, position: 1, productIds: [MATE_ID, BOMBILLA_ID], priceArs: 45000 }),
+        combo({ id: SEGUNDO, position: 2, productIds: [MATE_ID, BOMBILLA_ID], priceArs: 44000 }),
+      ],
+    )
+  })
+
+  it('POST con productIds de productos que existen, en mayúsculas: lo crea y los guarda en minúsculas', async () => {
+    const created = await new CreateComboCommand(repository, new FixedPriceDisplay()).execute(
+      FIELDS,
+    )
+
+    expect(created.items.map(({ productId }) => productId)).toEqual([MATE_ID, BOMBILLA_ID])
+    expect((await repository.findById(created.id))?.combo.productIds).toEqual([
+      MATE_ID,
+      BOMBILLA_ID,
+    ])
+  })
+
+  it('PATCH con el id y los productIds en mayúsculas: lo modifica y el evento lleva el id en minúsculas', async () => {
+    const updated = await new UpdateComboCommand(repository, new FixedPriceDisplay()).execute(
+      SEGUNDO.toUpperCase(),
+      { ...FIELDS, name: 'Cambiado' },
+    )
+
+    expect(updated).toMatchObject({ id: SEGUNDO, name: 'Cambiado', position: 2 })
+    expect((await repository.findById(SEGUNDO))?.combo.productIds).toEqual([MATE_ID, BOMBILLA_ID])
+    expect(repository.events).toMatchObject([
+      { aggregateId: SEGUNDO, payload: { comboId: SEGUNDO } },
+    ])
+  })
+
+  it('DELETE con el id en mayúsculas: lo borra y el evento lleva el id en minúsculas', async () => {
+    await new DeleteComboCommand(repository).execute(PRIMERO.toUpperCase())
+
+    expect(repository.positions()).toEqual({ [SEGUNDO]: 1 })
+    expect(repository.events).toMatchObject([
+      { aggregateId: PRIMERO, payload: { comboId: PRIMERO } },
+    ])
+  })
+
+  it('PUT /order con los ids en mayúsculas: los ordena', async () => {
+    await new ReorderCombosCommand(repository).execute([
+      SEGUNDO.toUpperCase(),
+      PRIMERO.toUpperCase(),
+    ])
+
+    expect(repository.positions()).toEqual({ [SEGUNDO]: 1, [PRIMERO]: 2 })
+  })
+
+  it('el mismo combo dos veces (una en mayúsculas) sigue siendo un orden inválido', async () => {
+    const errors = await validationErrors(
+      new ReorderCombosCommand(repository).execute([PRIMERO, PRIMERO.toUpperCase()]),
+    )
+
+    expect(errors).toEqual([{ field: 'ids', code: 'invalid_value', message: ORDER_INCOMPLETE }])
   })
 })

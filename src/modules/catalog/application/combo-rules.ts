@@ -1,4 +1,5 @@
 import type { FieldError } from '../../../shared/domain/change-notice'
+import { canonicalId } from '../../../shared/domain/id'
 import {
   COMBO_MAX_ITEMS,
   COMBO_MIN_ITEMS,
@@ -21,6 +22,18 @@ export const COMBO_MESSAGES = {
 
 /** Tope de un precio en pesos (`Pesos` del contrato). */
 const MAX_PESOS = 99_999_999
+
+/**
+ * Los datos del combo con los ids de productos en su forma canónica ({@link canonicalId}): un UUID
+ * en mayúsculas es el mismo producto y se compara y se guarda en minúsculas, como lo devuelve la
+ * base. Las reglas de este archivo comparan ids exactos: los casos de uso las llaman después.
+ *
+ * @param fields - Datos del combo.
+ * @returns Una copia con `productIds` canónicos.
+ */
+export function canonicalComboFields(fields: ComboFields): ComboFields {
+  return { ...fields, productIds: fields.productIds.map(canonicalId) }
+}
 
 /**
  * Revisa que los datos del combo tengan la forma que ya validó el DTO: los casos de uso no
@@ -55,7 +68,7 @@ export function assertComboFields(fields: ComboFields): void {
  * queda por debajo de la suma de sus precios de lista da `priceArs` `price_not_below_sum`. Vale
  * también para los borradores.
  *
- * @param fields - Datos del combo.
+ * @param fields - Datos del combo, con los ids canónicos ({@link canonicalComboFields}).
  * @param products - Los productos que existen de `fields.productIds`, en cualquier estado.
  * @returns Los errores por campo, en ese orden; vacío si el combo se puede guardar.
  */
@@ -97,7 +110,7 @@ export function comboFieldErrors(fields: ComboFields, products: readonly Product
 /**
  * Valida un orden nuevo (regla 7 del mock): tiene que traer todos los combos, una vez cada uno.
  *
- * @param ids - Ids del orden nuevo.
+ * @param ids - Ids del orden nuevo, canónicos ({@link canonicalId}).
  * @param currentIds - Ids de todos los combos guardados.
  * @returns `[]` si sirve; si no, el error de `ids` con `invalid_value`.
  */

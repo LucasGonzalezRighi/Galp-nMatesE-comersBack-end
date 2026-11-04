@@ -91,8 +91,12 @@ function reviewSeedId(review: SeedReview): string {
  *
  * @param combo - Combo del seed.
  * @returns El UUID v5 del combo.
+ * @throws {TypeError} En español, si la clave está vacía o solo tiene espacios.
  */
 export function comboSeedId(combo: Pick<SeedCombo, 'key'>): string {
+  if (combo.key.trim() === '') {
+    throw new TypeError('La clave del combo del seed no puede estar vacía')
+  }
   return uuidV5(COMBO_NAMESPACE, combo.key)
 }
 

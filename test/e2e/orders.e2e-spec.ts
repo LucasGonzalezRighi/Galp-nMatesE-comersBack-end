@@ -719,6 +719,22 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       })
     })
 
+    it('POST /cart/quote de "Dúo Imperial" (lleva mate) con options null → 422 en items.0.options', async () => {
+      const response = await send(newJar(), 'post', '/cart/quote', {
+        body: { items: [comboLine(duoId, 1, null)] },
+      })
+
+      expect(response.status).toBe(422)
+      expect(response.body).toMatchObject({ type: 'validation_error' })
+      expect((response.body as { errors: unknown }).errors).toEqual([
+        {
+          field: 'items.0.options',
+          code: 'required',
+          message: 'Elegí el cuero y la virola del mate.',
+        },
+      ])
+    })
+
     it('POST /shipping/quote acepta un combo', async () => {
       const response = await send(newJar(), 'post', '/shipping/quote', {
         body: { method: 'home', postalCode: 'C1043', items: [comboLine(duoId)] },

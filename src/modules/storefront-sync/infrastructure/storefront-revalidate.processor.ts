@@ -16,8 +16,9 @@ import {
 /**
  * Worker de la cola `storefront-revalidate`: cada job le pide a la tienda que regenere sus
  * etiquetas ({@link StorefrontPort}). Si la tienda las regenera, lo loguea; si rechaza el pedido
- * (secreto o etiqueta inválidos), avisa y falla con `UnrecoverableError` (reintentar no lo
- * arregla); si la falla es pasajera, relanza y BullMQ reintenta (8 intentos, backoff exponencial).
+ * (secreto o etiqueta inválidos, o una redirección), avisa y falla con `UnrecoverableError`
+ * (reintentar no lo arregla); si la falla es pasajera, relanza y BullMQ reintenta (8 intentos,
+ * backoff exponencial).
  * Si se agotan, la tienda se pone al día sola por tiempo.
  */
 @Processor(STOREFRONT_REVALIDATE_QUEUE)

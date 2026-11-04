@@ -110,6 +110,26 @@ describe('HttpStorefrontAdapter', () => {
     })
   })
 
+  it.each([301, 307])(
+    '%i → rejected sin seguir la redirección (el secreto no viaja a otro destino)',
+    async (status) => {
+      const { adapter, fetchFn } = adapterWith(
+        new Response(null, {
+          status,
+          headers: { location: 'https://otro.example.com/api/revalidate' },
+        }),
+      )
+
+      await expect(adapter.revalidate(['combos'])).resolves.toEqual({
+        kind: 'rejected',
+        status,
+        reason: 'La tienda respondió con una redirección (revisá STORE_ORIGIN).',
+      })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+      expect(fetchFn.mock.calls[0]?.[1]?.redirect).toBe('manual')
+    },
+  )
+
   it.each([500, 503, 408, 429])('%i → lanza (BullMQ reintenta)', async (status) => {
     const { adapter } = adapterWith(Response.json({ error: 'caída' }, { status }))
 

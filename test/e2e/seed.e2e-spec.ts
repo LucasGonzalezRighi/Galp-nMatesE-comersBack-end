@@ -324,3 +324,18 @@ describe('seed', () => {
     expect(printed).not.toContain('mate-imperial-premium')
   })
 })
+
+describe('comboSeedId (sin base)', () => {
+  it('es un UUID v5 fijo por clave', () => {
+    const id = comboSeedId({ key: 'cmb-duo-imperial' })
+
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(comboSeedId({ key: 'cmb-duo-imperial' })).toBe(id)
+    expect(comboSeedId({ key: 'cmb-torpedo-completo' })).not.toBe(id)
+  })
+
+  it.each(['', '   '])('con la clave %j lanza un TypeError en español', (key) => {
+    expect(() => comboSeedId({ key })).toThrow(TypeError)
+    expect(() => comboSeedId({ key })).toThrow('La clave del combo del seed no puede estar vacía')
+  })
+})

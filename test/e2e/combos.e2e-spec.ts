@@ -292,10 +292,17 @@ describe('combos de la tienda y del dashboard (HTTP + Postgres + Redis + tienda 
   })
 
   describe('guards y validación: un 4xx no escribe ni avisa a la tienda', () => {
-    it('sin sesión → 401; sin CSRF → 403 en cada escritura', async () => {
+    it('sin sesión → 401 en cada ruta del dashboard; sin CSRF → 403 en cada escritura', async () => {
       const before = await comboEvents()
 
-      expect((await anonymous('post', '/admin/combos', { body: duoBody() })).status).toBe(401)
+      const anonymousCalls = [
+        await anonymous('get', '/admin/combos'),
+        await anonymous('post', '/admin/combos', { body: duoBody() }),
+        await anonymous('put', '/admin/combos/order', { body: { ids: [DUO] } }),
+        await anonymous('patch', `/admin/combos/${DUO}`, { body: duoBody() }),
+        await anonymous('delete', `/admin/combos/${DUO}`),
+      ]
+      expect(anonymousCalls.map(({ status }) => status)).toEqual([401, 401, 401, 401, 401])
       const withoutCsrf = { csrf: false } as const
       expect(
         (await http('post', '/admin/combos', { ...withoutCsrf, body: duoBody() })).status,
@@ -379,6 +386,23 @@ describe('combos de la tienda y del dashboard (HTTP + Postgres + Redis + tienda 
           field: 'priceArs',
           code: 'price_not_below_sum',
           message: 'El precio del combo tiene que ser menor que la suma de los productos ($68.998)',
+        },
+      ])
+    })
+
+    it('un producto repetido con otras mayúsculas también es repetido → 422 en productIds', async () => {
+      const imperial = product('mate-imperial-premium')
+
+      const response = await http('post', '/admin/combos', {
+        body: duoBody({ productIds: [imperial.toUpperCase(), imperial] }),
+      })
+
+      expect(response.status).toBe(422)
+      expect((response.body as { errors: unknown }).errors).toEqual([
+        {
+          field: 'productIds',
+          code: 'array_unique',
+          message: 'Cada producto tiene que aparecer una sola vez',
         },
       ])
     })
@@ -598,6 +622,57 @@ describe('combos de la tienda y del dashboard (HTTP + Postgres + Redis + tienda 
       // Pasado el backoff (1 s), no hubo un segundo intento.
       await new Promise((resolve) => setTimeout(resolve, 1_500))
       expect(storeRequests).toEqual([])
+    })
+  })
+
+  describe('ids en mayúsculas: un UUID existente es el mismo y se guarda en minúsculas', () => {
+    it('POST y PATCH con productIds en mayúsculas → 201 y 200; PUT /order en mayúsculas → 204', async () => {
+      const curvo = product('bombillon-premium-curvo')
+      const canarias = product('yerba-canarias-1-kg')
+      const upper = [curvo.toUpperCase(), canarias.toUpperCase()]
+
+      const created = await http('post', '/admin/combos', {
+        body: duoBody({ name: 'Curvo y Canarias', productIds: upper, priceArs: 34999 }),
+      })
+
+      expect(created.status).toBe(201)
+      const { id } = created.body as ComboView
+      expect((created.body as ComboView).items.map(({ productId }) => productId)).toEqual([
+        curvo,
+        canarias,
+      ])
+      await expectStoreNotified()
+
+      const updated = await http('patch', `/admin/combos/${id.toUpperCase()}`, {
+        body: duoBody({
+          name: 'Canarias y Curvo',
+          productIds: [...upper].reverse(),
+          priceArs: 33000,
+        }),
+      })
+
+      expect(updated.status).toBe(200)
+      expect(updated.body).toMatchObject({ id, name: 'Canarias y Curvo' })
+      const items = await prisma().comboItem.findMany({
+        where: { comboId: id },
+        orderBy: { position: 'asc' },
+      })
+      expect(items.map(({ productId }) => productId)).toEqual([canarias, curvo])
+      const event = await prisma().outboxEvent.findFirstOrThrow({
+        where: { type: 'combo.changed' },
+        orderBy: { occurredAt: 'desc' },
+      })
+      expect(event).toMatchObject({ aggregateId: id, payload: { comboId: id, change: 'updated' } })
+      await expectStoreNotified()
+
+      const reversed = [...(await positions())].reverse()
+      const reordered = await http('put', '/admin/combos/order', {
+        body: { ids: reversed.map((comboId) => comboId.toUpperCase()) },
+      })
+
+      expect(reordered.status).toBe(204)
+      expect(await positions()).toEqual(reversed)
+      await expectStoreNotified()
     })
   })
 })

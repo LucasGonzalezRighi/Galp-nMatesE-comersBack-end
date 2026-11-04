@@ -10,6 +10,9 @@ const MAX_REASON_LENGTH = 300
 /** Estados 4xx que son pasajeros: se reintentan como un 5xx. */
 const TRANSIENT_CLIENT_STATUSES = new Set([408, 429])
 
+/** Motivo del rechazo de una redirección: no se sigue (el secreto iría a otro destino). */
+const STOREFRONT_REDIRECT_REASON = 'La tienda respondió con una redirección (revisá STORE_ORIGIN).'
+
 /** Configuración de {@link HttpStorefrontAdapter}. */
 export interface HttpStorefrontAdapterOptions {
   /** `STORE_ORIGIN`: el pedido va a `/api/revalidate` de ese origen. */
@@ -41,8 +44,9 @@ async function reasonOf(response: Response): Promise<string> {
  * {@link StorefrontPort} por HTTP: `POST ${STORE_ORIGIN}/api/revalidate` con la cabecera
  * `x-revalidate-secret` y `{ "tags": [...] }`, con timeout de {@link STOREFRONT_TIMEOUT_MS}.
  * Un 2xx es `revalidated`; un 4xx (salvo 408 y 429) es `rejected` con el `error` del cuerpo; un
- * 5xx, 408, 429, un error de red o el timeout lanzan (se reintenta). No loguea nada y sus errores
- * nunca llevan el secreto.
+ * 3xx no se sigue (`redirect: 'manual'`: el secreto no viaja a otro destino) y es `rejected`,
+ * porque reintentar no lo arregla; un 5xx, 408, 429, un error de red o el timeout lanzan (se
+ * reintenta). No loguea nada y sus errores nunca llevan el secreto.
  */
 export class HttpStorefrontAdapter implements StorefrontPort {
   private readonly url: URL
@@ -91,6 +95,7 @@ export class HttpStorefrontAdapter implements StorefrontPort {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-revalidate-secret': this.secret },
         body: JSON.stringify({ tags }),
+        redirect: 'manual',
         signal: AbortSignal.timeout(STOREFRONT_TIMEOUT_MS),
       })
     } catch (error) {
@@ -113,6 +118,10 @@ export class HttpStorefrontAdapter implements StorefrontPort {
     // El cuerpo no hace falta: se descarta para liberar la conexión.
     await response.body?.cancel().catch(() => undefined)
     if (response.ok) return { kind: 'revalidated', tags: [...tags] }
+    // Node devuelve el 3xx tal cual; un `fetch` de navegador, una respuesta `opaqueredirect`.
+    if ((status >= 300 && status < 400) || response.type === 'opaqueredirect') {
+      return { kind: 'rejected', status, reason: STOREFRONT_REDIRECT_REASON }
+    }
     throw new Error(
       `La tienda respondió ${String(status)} al pedido de regenerar ${tags.join(', ')}`,
     )

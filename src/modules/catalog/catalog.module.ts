@@ -42,8 +42,9 @@ import { ProductsController } from './interface/products.controller'
  * outbox para avisar a la tienda. El precio sin IVA sale de `settings` y las pestañas de
  * `content`.
  *
- * Sirve `GET /categories`, `GET /products…`, `GET /combos` y `/admin/combos…`. Exporta las queries y {@link PRODUCT_REPOSITORY}
- * (para que otros módulos, como `reviews`, resuelvan un producto por slug).
+ * Sirve `GET /categories`, `GET /products…`, `GET /combos` y `/admin/combos…`. Exporta las
+ * queries y {@link PRODUCT_REPOSITORY} (para que otros módulos, como `reviews`, resuelvan un
+ * producto por slug).
  */
 @Module({
   imports: [SettingsModule, ContentModule],
