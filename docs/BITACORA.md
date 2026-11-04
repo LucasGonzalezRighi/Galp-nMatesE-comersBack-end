@@ -1195,3 +1195,231 @@ https://*.mercadopago.com https://*.mercadolibre.com https:` no admite
     "concilia").
   - `createApp({ gateway })` levanta una segunda app, con sus workers, sobre las mismas colas
     (posible fuente de flakiness).
+
+## B5c · Combos y aviso a la tienda (2026-11-03)
+
+Plan: [`docs/superpowers/plans/2026-11-03-b5c-combos.md`](superpowers/plans/2026-11-03-b5c-combos.md)
+(5 tareas en 3 olas: 1 ∥ 2, 3 ∥ 4 y el cierre). Decisiones de arquitectura en
+[ADR 0006 · combos y aviso a la tienda](adr/0006-combos-y-aviso-a-la-tienda.md). El contrato salió
+de la rama `feat/inicio-combos` del front (worktree `../frontend-inicio-combos`), que Lucas ya
+mergeó en el `main` local del front (`063c091`).
+
+### Qué quedó
+
+- **Esquema, seed y dominio** (Task 1):
+  - Migración `20261103231832_b5c_combos`: enums `combo_status` y `line_type` + `combo`, tablas
+    `combos` y `combo_items`, y `order_item_components.position`. A mano: `combos_price_ars_check`
+    (1 a 99.999.999), `combos_position_check` (≥ 1), `combo_items_position_check` (1 a 3) y el
+    relleno de `position` de los kits viejos por rol (mate 1, bombilla 2, yerba 3). Ninguna
+    sentencia usa el valor `'combo'` (Postgres no deja usarlo en la transacción que lo agrega).
+  - `scripts/import-fixtures.mjs` lee `FIXTURE_COMBOS` si las fixtures lo exportan (si no,
+    `SEED_COMBOS = []`) y genera `prisma/seed-data/combos.ts`: 5 combos, 4 publicados.
+    `seedCombos` hace `upsert` por un UUID v5 de la clave del mock y no toca los combos del
+    dashboard.
+  - Dominio en `catalog/domain/combo.entity.ts` (`comboLineAmounts`, `hasDistinctGroups`,
+    `comboHasMate`, el mensaje del precio con la suma) y `combo-errors.ts`. `formatPesos` se mudó a
+    `src/shared/domain/format-pesos.ts`.
+- **Despachador del outbox y aviso a la tienda** (Task 2):
+  - `OutboxHandlerRegistry` y `OutboxDispatcherProcessor` en `src/shared/infrastructure/outbox/`,
+    con `closeWorker` y `redisAnswers` en `src/shared/infrastructure/redis/close-worker.ts`.
+    `payments` pasó a `OrderExpiredOutboxHandler` (el viejo `OutboxEventsProcessor` se borró; sus
+    tests se mudaron con los mismos nombres).
+  - Módulo `storefront-sync`: `STOREFRONT_TAG_PATTERN`, `StorefrontPort`, `HttpStorefrontAdapter`
+    (5 s; sin seguir redirecciones), la cola `storefront-revalidate` (8 intentos, backoff
+    exponencial desde 1 s, `jobId` = id del evento), `StorefrontOutboxHandler` y
+    `StorefrontRevalidateProcessor` (rechazo → `UnrecoverableError`).
+  - `STORE_REVALIDATE_SECRET` (mínimo 32; opcional fuera de `production`, con un aviso al
+    arrancar si falta; obligatorio en `production`).
+- **Combos en el catálogo** (Task 3):
+  - Casos de uso con `useFactory` (`ListCombosQuery`, `ListAdminCombosQuery`, `CreateComboCommand`,
+    `UpdateComboCommand`, `DeleteComboCommand` y `ReorderCombosCommand`), `combo-views.ts` (la vista
+    del mock), `combo-rules.ts` (las reglas 1 a 7 del mock) y `PrismaComboRepository`, sin caché.
+  - `CombosController` (`GET /combos`, sin límite por IP) y `AdminCombosController` (sesión de
+    admin; las escrituras también con CSRF). Cada escritura guarda `combo.changed` en su
+    transacción.
+  - `EachItem` en el pipe de validación: un error por elemento en `productIds.N` e `ids.N`
+    ("Requerido"), compartido por HTTP y por los casos de validación del contrato (Ruling B-64).
+  - Contrato: **47 operaciones implementadas de 83** y los casos de `comboFormSchema` y
+    `comboOrderSchema`.
+- **El combo como línea** (Task 4): `ComboCartItem` y la rama combo de `priceCart` (la del mock con
+  las diferencias del plan), `findCombosForCart` en `CatalogProductsAdapter` (sin caché),
+  `order_item_components.position` al guardar y `toLine` ordenando por `position` y después por
+  grupo. En el contrato, `ComboCartItemInput`, el tercer `oneOf` de `CartItemInput` y
+  `OrderLine.kitItems.minItems: 2`.
+- **Menores de la revisión** (`460a88f`): el adaptador de la tienda no sigue redirecciones (un 3xx
+  es un rechazo), los UUID en mayúsculas del dashboard se pasan a minúsculas, `comboSeedId` valida
+  la clave, los E2E de Prisma no dependen entre sí, el 401 sin sesión en todas las rutas de
+  `/admin/combos`, el 422 de `options` de un combo con mate por HTTP, TSDoc y el README del seed.
+- **Docs** (Task 5): este apartado, el ADR 0006 y el README ("Combos y aviso a la tienda", el
+  contrato con `CONTRACT_PATH`, el orden de los push para la CI, el seed y los tests).
+
+### Decisiones
+
+Rulings de la planificación (B-59 a B-68):
+
+- **B-59 · Contrato:** el del worktree, por `CONTRACT_PATH`, con su `validation-cases.json`. Donde
+  el contrato solo da un ejemplo, manda el mock.
+- **B-60 · Modelo:** el de la investigación, sin único en `combos.position` (los listados ordenan
+  por `position` y después por `created_at`), con la PK de `order_item_components` sin cambios y
+  **sin `combo_id` en `order_items`**: la línea es una copia.
+- **B-61 · Dónde y sin caché:** en `catalog`, con repositorio propio y sin Redis. Un id que no es
+  UUID es "no existe".
+- **B-62 · Vista:** la de `toCombo` del mock. `GET /combos` = publicados con todas sus piezas
+  publicadas y con precio (los agotados salen con `isSoldOut`); `GET /admin/combos` = todos.
+- **B-63 · Dashboard:** las reglas del mock, literal; alta en `max + 1`; `PATCH` conserva la
+  posición; `DELETE` renumera; el orden tiene que traer todos los combos una vez.
+- **B-64 · Errores por índice:** `EachItem`, sin cambiar ningún otro DTO.
+- **B-65 · Carrito y pedido:** combo inexistente, en borrador, con una pieza que no se vende o con
+  piezas de grupos repetidos → `unavailable` (nunca un 500); `price_changed` contra el precio del
+  combo, con `productId: null`; stock compartido; `kitItems` en el orden del combo.
+- **B-66 · Aviso a la tienda:** `combo.changed` en la misma transacción, despachador compartido con
+  handlers registrados en el constructor y `storefront-sync` con su propia cola.
+- **B-67 · Seed:** `FIXTURE_COMBOS` opcional, UUID v5 por clave.
+- **B-68 · Olas:** las tareas paralelas tocaron solo sus archivos; las diferencias de contrato de la
+  otra tarea se anotaron sin arreglarlas.
+
+Desvíos de las tareas (todos en sus reportes):
+
+- `isComboForSale` y `isPurchasable` también exigen piezas de grupos distintos (el mock no lo mira):
+  un combo así no sale en `GET /combos` y en `/admin/combos` sale con `isPurchasable: false`.
+- Un combo con menos de 2 o más de 3 piezas vendibles da `unavailable` en la cotización (la base no
+  lo permite, pero sin el chequeo `comboLineAmounts` tiraría un 500).
+- `netPriceArs` del combo con un `netPriceOf` local, para que `catalog` no dependa de
+  `orders/domain`.
+- El repositorio lee el combo con sus piezas **después** del commit: con `include` anidado dentro
+  de la transacción, Prisma 7 manda consultas en paralelo por la misma conexión y `pg` avisa un
+  `DeprecationWarning`.
+- Un caso válido de `validation-cases.json` sin `output` solo tiene que pasar (como dice el README
+  del contrato); antes se comparaba con `{}`.
+- `DeleteComboCommand` responde 404 con un id en blanco, y un `ids` que no es lista da "Requerido".
+
+### Versiones reales instaladas
+
+B5c no instaló nada. Para la prueba en vivo se usó lo que ya tenía el worktree del front: Next.js
+16.4.2, Vite 8.3.4 y Playwright 1.64.1 (Chromium headless). Docker Engine 28.4.0.
+
+### Verificación
+
+- **Suite completa en verde** (Task 5, sobre `460a88f` más estas docs):
+  - `npm run typecheck`, `npm run lint` (versiones y fronteras) y `npm run format:check`.
+  - `npm test`: 87 archivos, 903 tests.
+  - `npm run test:e2e`: 18 archivos y 1 omitido (el del sandbox), 463 tests y 4 omitidos (207 s).
+  - `npm run contract:check`, con `CONTRACT_PATH="../frontend-inicio-combos/docs/api/openapi.yaml"`
+    y sin él (el `main` local del front ya tiene los combos): 3 archivos, 244 tests y 1 omitido.
+    **47 operaciones implementadas y 36 pendientes de 83**, sin diferencias.
+- **Review Focus del plan, cubierto con tests:**
+  1. **Stock compartido:** "Dúo Imperial" ×10 y el Mate Imperial suelto ×5 con stock 12 → la línea
+     suelta queda `quantity_reduced` a 2, y el pedido reserva 12 del mate y 10 del bombillón.
+  2. **Combo roto después de guardado:** con una pieza archivada o movida a otra línea del mismo
+     grupo, `GET /combos` no lo muestra, `/admin/combos` lo muestra con `isPurchasable: false`, la
+     cotización da `unavailable` y `POST /orders` responde 409 `stock_changed`, nunca 500.
+  3. **Guardar y verlo al instante:** con una tienda falsa (`node:http`), cada alta, edición, orden
+     y borrado manda un solo `POST /api/revalidate` con `{"tags":["combos"]}` y el secreto; con 500
+     se reintenta; con 401 no (job `failed` con un intento); un 401, 403, 404 o 422 del dashboard
+     no deja ningún `combo.changed`.
+  4. **Orden de las piezas:** un combo `[yerba, mate]` sale así en `GET /combos`, en el `detail`
+     de la cotización y en los `kitItems` del pedido; un kit viejo sigue mate, bombilla, yerba.
+  5. **Orden y borrado:** un orden con un id de más, de menos, repetido o que no es UUID → 422 sin
+     cambios; borrar el segundo de cuatro deja 1, 2, 3.
+- **Prueba en vivo con la tienda y el dashboard (Task 5):**
+  - Back compilado (`node dist/main`) en el 3001 con `MP_MODE=simulated`,
+    `STORE_ORIGIN=http://localhost:4320`, `ADMIN_ORIGIN=http://localhost:5320` y
+    `STORE_REVALIDATE_SECRET` igual al `REVALIDATE_SECRET` de la tienda (64 hex inventados para la
+    prueba, en un archivo fuera del repo), sobre el Postgres y el Redis de compose, migrado y
+    sembrado.
+  - Tienda y dashboard compilados en modo `live` desde `../frontend-inicio-combos` (el mismo
+    commit que el `main` del front), con el entorno en la misma línea y sin `.env.local`:
+    `next start --port 4320` y `vite preview --port 5320 --strictPort`. El `next dev` del 3000 y
+    el `vite dev` del 5173 de Lucas no se tocaron.
+  - Antes de involucrar al back, `POST http://localhost:4320/api/revalidate` respondió
+    `{"revalidated":["combos"]}` con el secreto y 401 "El secreto de revalidación no es válido."
+    con otro.
+  - Script de Playwright `live-combos.mjs` en el workspace: **9 de 9 pasos en verde**. Capturas en
+    `.superpowers/sdd/2026-11-03-b5c-combos/captures/` (git ignora esa carpeta):
+    - **Precio desde el dashboard:**
+      - El inicio de la tienda mostraba los 4 combos publicados y "Dúo Imperial" a $61.999
+        (`b5c-01-tienda-antes.png`).
+      - Ingreso con el admin semilla y pantalla Combos con los 5 combos ("Galleta y Canarias" en
+        borrador y sin stock) (`b5c-02-dashboard-combos.png`).
+      - "Acciones de Dúo Imperial" → Editar → precio 59999 (`b5c-03-dashboard-editar-precio.png`)
+        → Guardar → `PATCH` 200 (`priceArs` 59999, `savingsArs` 8999) y "Cambios guardados."
+        (`b5c-04-dashboard-cambios-guardados.png`). En la base, un `combo.changed` `updated`
+        publicado.
+      - **La primera recarga del inicio, a los 1,7 s del guardado, ya mostró $59.999** con "Ahorrás
+        $8.999" (`b5c-05-tienda-despues.png`), y el log del back tenía
+        `La tienda regeneró combos (evento combo.changed)` (`StorefrontRevalidateProcessor`).
+    - **Orden desde el dashboard:** "Subir Camionero y Canarias" → `PUT /admin/combos/order` 204 y
+      "Orden guardado.". La recarga a los 0,5 s todavía mostraba el orden viejo (la tienda sirve lo
+      anterior mientras se regenera) y la de los 2,2 s ya empezaba por "Camionero y Canarias"
+      (`b5c-06-tienda-orden-nuevo.png`), con una segunda línea "La tienda regeneró combos".
+    - **Compra de un combo** (invitada, `GLP-10019`):
+      - "Dúo Imperial" con cuero Marrón y virola Acero desde la tarjeta del inicio. El carrito
+        muestra "Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón · Acero", $59.999
+        y "Ahorrás $8.999" (`b5c-07-carrito-con-el-combo.png`).
+      - Checkout con retiro y "Mercado Pago" → `POST /orders` 201 con una línea `combo`
+        (`unitPriceArs` 68.998, `kitSavingsArs` 8.999, `totalArs` 59.999, `options` Marrón/Acero)
+        (`b5c-08-checkout-pagar-con-mercado-pago.png`). Inventario de las dos piezas: 12/0 → 12/1.
+      - Simulador del back (`b5c-09-simulador-del-back.png`) → Aprobar → "Tu pedido GLP-10019 está
+        confirmado.", con "Dúo Imperial", sus piezas y el ahorro (`b5c-10-resultado-aprobado.png`).
+      - `GET /orders/GLP-10019`: `paid`/`approved`, línea `combo` con `productSlug: null`, el
+        `detail`, las `options` y `kitItems` Mate Imperial Premium ($39.999) y Bombillón Premium
+        Curvo ($28.999), en el orden del combo. En la base, `order_item_components` con `position`
+        1 (mate) y 2 (bombilla), reservas `committed` e inventario 11/0 de cada pieza.
+  - **Lo que el front no deja hacer todavía** (no es del back): el diálogo "Editar combo" muestra
+    "No pudimos cargar los productos." en las piezas, porque las lista con `GET /admin/products`
+    (404 hasta B6). El precio, el nombre, la descripción y el estado se guardan igual; crear un
+    combo o cambiarle las piezas desde el dashboard espera a B6. Los demás 4xx de la prueba son los
+    esperados: `GET /me` 401 (invitada), `GET /admin/auth/me` 401 antes del ingreso y
+    `/admin/dashboard/summary` y `/admin/settings` 404 (B6).
+  - **Logs:** ningún `warn` ni `error` en el back. El secreto no aparece ni en el log del back ni
+    en el de la tienda.
+  - **No se probó en vivo** (lo cubren los E2E con la tienda falsa): la tienda caída con reintentos
+    y el secreto equivocado del lado del back. Tampoco qué sirve la tienda después de un
+    `next start` nuevo (pregunta 6 de la investigación).
+  - **Al cierre:**
+    - Un `npm run db:seed` devolvió los combos a la semilla ("Dúo Imperial" $61.999 y el orden
+      original). `GLP-10019` queda pagado en la base de compose.
+    - No quedan procesos en el 3001, el 4320 ni el 5320, ni contenedores de compose.
+    - Los dos fronts sin cambios y sin `.env.local`. Los builds de `apps/store/.next` y
+      `apps/admin/dist` del worktree quedan en modo `live`, ignorados por git.
+
+### Commits
+
+| Commit    | Qué                                                                                   |
+| --------- | ------------------------------------------------------------------------------------- |
+| `3be34b9` | Plan de B5c                                                                           |
+| `8ede063` | Combos y sus piezas, línea de pedido combo, seed de combos y dominio (Task 1)         |
+| `0988392` | Despachador compartido del outbox y aviso a la tienda (`storefront-sync`) (Task 2)    |
+| `ce23105` | El combo como línea del carrito y del pedido, con la reserva de cada pieza (Task 4)   |
+| `67561c0` | Combos para la tienda y el dashboard, con aviso a la tienda al guardar (Task 3)       |
+| `460a88f` | Menores de la revisión: redirecciones, ids en mayúsculas, 401 en todas las rutas, E2E |
+| (este)    | Esta bitácora, el ADR 0006 y el README (Task 5)                                       |
+
+**Para que la CI del back pase:** Lucas pushea primero el `main` del front (con los combos,
+`063c091`) y después el `main` del back. La CI clona el `main` remoto del front para el contrato;
+si el back llega antes, compara contra el contrato sin combos y falla.
+
+### Lo que queda para B6 en adelante
+
+**Para B6 (admin):**
+
+- `GET /admin/products`: el diálogo de combos lo usa para listar las piezas. Con él se pueden crear
+  combos y cambiarles las piezas desde el dashboard.
+- Avisar `products` a la tienda con los cambios de stock y de precio: los combos y los productos
+  del inicio muestran el agotado y la cantidad máxima de la última regeneración (hoy, una compra
+  no regenera nada hasta que vence la caché de la tienda). El despachador ya admite un handler más
+  por tipo de evento (`order.created`, `order.expired`, `order.paid`).
+- Ver qué sirve la tienda después de un `next start` nuevo (el prerender del build o lo último
+  regenerado) y si hace falta un "regenerar todo" al arrancar.
+
+**Menores aceptados:**
+
+- `max + 1` y el reordenamiento no toman un lock: dos altas simultáneas pueden compartir
+  `position` (desempata `created_at`, y el próximo orden o borrado lo corrige). Con un solo admin
+  alcanza.
+- El relleno de `order_item_components.position` de la migración no tiene test (las migraciones se
+  aplican sobre una base vacía).
+- El despachador del outbox corre con concurrencia 1 para todos los tipos: un `order.expired` lento
+  (llamadas a Mercado Pago) demora los avisos a la tienda.
+- `STOREFRONT_TAG_PATTERN` es una copia del patrón de la tienda: si la tienda cambia sus etiquetas,
+  hay que actualizarlo.

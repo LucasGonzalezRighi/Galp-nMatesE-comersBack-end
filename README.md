@@ -9,8 +9,9 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 - **Decisiones de arquitectura:** [ADR 0001 · monolito hexagonal](docs/adr/0001-nest-hexagonal-monolito.md),
   [ADR 0002 · Prisma 7 con `pg`](docs/adr/0002-prisma-7-driver-adapter-pg.md),
   [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md),
-  [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md) y
-  [ADR 0005 · pagos con Mercado Pago](docs/adr/0005-pagos-con-mercado-pago.md).
+  [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md),
+  [ADR 0005 · pagos con Mercado Pago](docs/adr/0005-pagos-con-mercado-pago.md) y
+  [ADR 0006 · combos y aviso a la tienda](docs/adr/0006-combos-y-aviso-a-la-tienda.md).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -35,12 +36,9 @@ credenciales (las cookies de sesión del admin). La tienda no lo necesita: su se
 y reescribe `/api/v1/*` hacia él, así que el navegador siempre habla con la tienda. Un pedido desde
 otro origen no recibe cabeceras CORS y el navegador lo bloquea.
 
-**Aviso a la tienda:** cada guardado de combos del dashboard le pide a la tienda que regenere la
-etiqueta `combos` (`POST ${STORE_ORIGIN}/api/revalidate`, por la cola `storefront-revalidate`).
-
-| Variable                  | Por defecto | Notas                                                                                                                                                                         |
-| ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STORE_REVALIDATE_SECRET` | (sin valor) | El mismo `REVALIDATE_SECRET` de la tienda (32 caracteres o más). Obligatorio en `production`; sin él no se le avisa nada y la tienda se regenera por tiempo. Nunca se loguea. |
+**Aviso a la tienda:** cada guardado de combos del dashboard le pide a la tienda (en `STORE_ORIGIN`)
+que regenere la etiqueta `combos`, con el secreto `STORE_REVALIDATE_SECRET`. La variable, el detalle
+y la prueba en vivo están en "Combos y aviso a la tienda".
 
 ## Puesta en marcha
 
@@ -77,9 +75,12 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 - **Cliente de Prisma** en `src/generated/prisma` (no se versiona): lo genera `postinstall`, o
   `npm run db:generate` después de cambiar `prisma/schema.prisma`.
 - **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos, 18 reseñas
-  (10 destacadas), 7 contenidos, ajustes y 3 envíos, los mismos datos de las fixtures del front, y
-  el admin semilla (ver "Cuenta y admin"). Es idempotente (`upsert` por `slug`/`key`; el admin
-  solo se crea si falta): correrlo dos veces deja lo mismo.
+  (10 destacadas), 7 contenidos, 5 combos (4 publicados), ajustes y 3 envíos, los mismos datos de
+  las fixtures del front, y el admin semilla (ver "Cuenta y admin"). Es idempotente (`upsert` por
+  `slug`/`key`; el admin solo se crea si falta): correrlo dos veces deja lo mismo.
+  - Los combos se guardan con un UUID v5 de su clave del mock: un seed nuevo les devuelve el
+    nombre, el precio, el estado, la posición y las piezas de las fixtures. Los combos creados desde
+    el dashboard no los toca.
 - Los datos salen de `prisma/seed-data/`, que se regenera desde las fixtures del front con
   `node scripts/import-fixtures.mjs` (ver [`prisma/seed-data/README.md`](prisma/seed-data/README.md)).
 
@@ -88,13 +89,24 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 `npm run contract:check` arma la app (sin Docker), genera el Swagger y lo compara, normalizado,
 con `../frontend/docs/api/openapi.yaml` (o `CONTRACT_PATH`). Falla si una operación implementada
 difiere del contrato o si Swagger expone una ruta que no está en `IMPLEMENTED_PATHS`
-(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 41
-implementadas y 36 pendientes de 77). Compara rutas, parámetros, respuestas, `security` y
+(`test/contract/openapi.contract.spec.ts`), y lista las operaciones pendientes (hoy, 47
+implementadas y 36 pendientes de 83). Compara rutas, parámetros, respuestas, `security` y
 `requestBody`. Además corre los casos compartidos de validación del front
-(`../frontend/docs/api/validation-cases.json`) contra los DTOs de identidad, del checkout
-(contacto y envío) y del documento de quien paga con tarjeta
-(`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan los mismos errores
-en los dos lados.
+(`validation-cases.json`, al lado del `openapi.yaml`) contra los DTOs de identidad, del checkout
+(contacto y envío), del documento de quien paga con tarjeta y de los combos del dashboard (alta,
+edición y orden) (`test/contract/validation-cases.contract.spec.ts`): las mismas entradas dan los
+mismos errores en los dos lados.
+
+- **Otro contrato:** `CONTRACT_PATH` apunta a otro `openapi.yaml` (los casos de validación se
+  leen del `validation-cases.json` de esa misma carpeta). Sirve para probar el back contra una
+  rama del front que todavía no está en `main`, por ejemplo desde un worktree:
+  `CONTRACT_PATH="../frontend-inicio-combos/docs/api/openapi.yaml" npm run contract:check`. Así
+  se construyó B5c, antes de que el front mergeara los combos.
+- **Combos y la CI:** el `main` local del front ya tiene los combos (`063c091`), así que
+  `npm run contract:check` pasa sin `CONTRACT_PATH`. La CI clona el `main` **remoto** del front:
+  hasta que ese `main` tenga los combos, el contrato de la CI falla (por ejemplo, no encuentra los
+  casos de validación de combos). Por eso se pushea primero el `main` del front y después el del
+  back.
 
 Para ver las diferencias de una ruta: `node scripts/openapi-diff.mjs products/{slug}` (en Git Bash,
 sin `/` inicial o entre comillas, para que no la convierta en una ruta de Windows).
@@ -203,8 +215,9 @@ cookies `__Host-` y un token CSRF por sesión
     "No pudimos conectar, probá de nuevo".
   - Ingreso, recarga con la sesión y cierre de sesión funcionan, y "Mi cuenta" carga (el cambio de
     contraseña lo cubre el E2E).
-  - Todas las pantallas con datos (Resumen, Pedidos, Productos, Líneas, Contenido, Reseñas,
-    Mensajes y Ajustes) muestran "No pudimos cargar…": sus rutas `/admin/*` dan 404 hasta B6.
+  - Desde B5c, **Combos** funciona contra el back (ver "Combos y aviso a la tienda"). Las demás
+    pantallas con datos (Resumen, Pedidos, Productos, Líneas, Contenido, Reseñas, Mensajes y
+    Ajustes) muestran "No pudimos cargar…": sus rutas `/admin/*` dan 404 hasta B6.
 
 ## Pedidos y stock
 
@@ -465,6 +478,93 @@ Qué falta confirmar con el sandbox:
 - El desafío 3DS real: Mercado Pago pide un `POST` del `creq` a `external_resource_url`, y el
   contrato solo lleva `challenge.url`.
 
+## Combos y aviso a la tienda
+
+Desde B5c el back tiene los combos del contrato: 2 o 3 productos fijos, de grupos distintos, con un
+precio final menor que la suma de las piezas. Viven en el módulo `catalog`, sin caché de Redis
+([ADR 0006](docs/adr/0006-combos-y-aviso-a-la-tienda.md)).
+
+| Ruta                        | Quién                  | Qué hace                                                                                      |
+| --------------------------- | ---------------------- | --------------------------------------------------------------------------------------------- |
+| `GET /combos`               | Tienda, sin sesión     | Los publicados con todas sus piezas publicadas y con precio, por posición (agotados también). |
+| `GET /admin/combos`         | Admin                  | Todos, por posición, con `isPurchasable` y los derivados.                                     |
+| `POST /admin/combos`        | Admin + `X-CSRF-Token` | Alta al final de la lista (201).                                                              |
+| `PATCH /admin/combos/{id}`  | Admin + `X-CSRF-Token` | Reemplaza todo y conserva la posición (200).                                                  |
+| `DELETE /admin/combos/{id}` | Admin + `X-CSRF-Token` | Borra y renumera 1..n (204). Los pedidos guardan su copia.                                    |
+| `PUT /admin/combos/order`   | Admin + `X-CSRF-Token` | Nuevo orden; tiene que traer todos los combos, una vez cada uno (204).                        |
+
+- **Reglas del dashboard** (las del mock, en el mismo orden): primero el cuerpo, con los mensajes
+  del formulario del front; después, cada pieza que no está publicada o no tiene precio
+  (`productIds.N`, `product_unavailable`); y solo si todas sirven, piezas de grupos repetidos
+  (`duplicate_group`) y un precio que no es menor que la suma (`price_not_below_sum`, también en
+  borradores). Un id que no existe o no es un UUID da 404 "No existe ese combo.".
+- **En el carrito y el pedido** el combo es una línea `type: 'combo'` con `comboId`, la cantidad y,
+  si lleva mate, el cuero y la virola. Se cobra el precio del combo, con el ahorro contra la suma
+  de las piezas. El stock de cada pieza se comparte con las otras líneas y la reserva suma cada
+  pieza. Un combo borrado, en borrador o con una pieza que ya no se vende da `unavailable` en la
+  cotización y 409 `stock_changed` al crear el pedido. La línea guardada es una copia, sin
+  `combo_id`: `kitItems` trae las piezas en el orden del combo.
+- **Aviso a la tienda:** cada alta, edición, borrado u orden agrega `combo.changed` al outbox en la
+  misma transacción. El relay lo publica (hasta unos 2 s) y `storefront-sync` hace
+  `POST ${STORE_ORIGIN}/api/revalidate` con `x-revalidate-secret` y `{"tags":["combos"]}`. En el log
+  del back queda `La tienda regeneró combos (evento combo.changed)` (contexto
+  `StorefrontRevalidateProcessor`).
+  - Un 4xx del dashboard (validación, 404, CSRF) no avisa nada.
+  - Con la tienda caída o respondiendo 5xx, la cola `storefront-revalidate` reintenta 8 veces
+    (unos 2 minutos). Con 401 (secreto distinto) o 422 (etiqueta que la tienda no conoce) no
+    reintenta, y el back lo avisa en el log. La escritura del dashboard nunca falla por la tienda.
+  - Sin `STORE_REVALIDATE_SECRET` no se avisa nada (un aviso al arrancar) y la tienda se pone al
+    día cuando vence su caché (`cacheLife('hours')`). Por eso el `.env` de desarrollo no lo trae:
+    el `next dev` del 3000 está en modo de prueba y respondería 401.
+
+| Variable                  | Por defecto | Notas                                                                                                                                                                         |
+| ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STORE_REVALIDATE_SECRET` | (sin valor) | El mismo `REVALIDATE_SECRET` de la tienda (32 caracteres o más). Obligatorio en `production`; sin él no se le avisa nada y la tienda se regenera por tiempo. Nunca se loguea. |
+
+**Probarlo en vivo** (así se probó B5c; las dos apps salen del mismo commit del front y van en
+puertos propios, sin tocar el `next dev` del 3000 ni el `vite dev` del 5173):
+
+1. Un secreto de 32 caracteres o más, el mismo para los dos lados (no se commitea ni se pega en
+   ningún lado):
+   `SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")`.
+2. Acá: `npm run db:up`, `npm run db:migrate`, `npm run db:seed`, `npm run build` y
+
+   ```bash
+   STORE_ORIGIN=http://localhost:4320 ADMIN_ORIGIN=http://localhost:5320 MP_MODE=simulated \
+     STORE_REVALIDATE_SECRET=$SECRET npm start
+   ```
+
+3. Desde el front, con el back andando y el entorno en la misma línea (sin `.env.local`):
+
+   ```bash
+   API_MODE=live NEXT_PUBLIC_API_MODE=live API_BASE_URL=http://localhost:3001 \
+     NEXT_PUBLIC_SITE_URL=http://localhost:4320 REVALIDATE_SECRET=$SECRET \
+     NEXT_PUBLIC_MP_PUBLIC_KEY=TEST-00000000-0000-0000-0000-000000000000 \
+     npm run build -w @galpon/store
+   # después, con el mismo entorno y desde apps/store:
+   # node ../../node_modules/next/dist/bin/next start --port 4320
+
+   VITE_API_MODE=live VITE_API_BASE_URL=http://localhost:3001 VITE_STORE_URL=http://localhost:4320 \
+     npm run build -w @galpon/admin
+   # después, con el mismo entorno (sin VITE_API_BASE_URL la CSP bloquea el back), desde apps/admin:
+   # npx vite preview --port 5320 --strictPort
+   ```
+
+4. Chequeo de la tienda sola:
+   `curl -s -X POST http://localhost:4320/api/revalidate -H "x-revalidate-secret: $SECRET" -H 'content-type: application/json' -d '{"tags":["combos"]}'`
+   tiene que dar `{"revalidated":["combos"]}`.
+5. En `http://localhost:5320`, entrar con el admin semilla, ir a **Combos**, "Acciones de …" →
+   Editar, cambiar el precio y Guardar ("Cambios guardados."). La recarga siguiente del inicio de
+   `http://localhost:4320` ya muestra el precio nuevo (la tienda sirve lo anterior mientras se
+   regenera: si no se ve en la primera, en la segunda sí). "Subir" o "Bajar" un combo cambia el
+   orden del inicio igual.
+6. Al terminar: cerrar `next start`, `vite preview` y `npm start`, y `npm run db:down`.
+
+Hasta B6 el diálogo de un combo muestra "No pudimos cargar los productos." en las piezas:
+las lista con `GET /admin/products`, que todavía da 404. El nombre, la descripción, el precio y el
+estado se guardan igual, pero un combo nuevo o un cambio de piezas desde el dashboard espera a B6
+(por API funcionan).
+
 ## Scripts
 
 | Script                   | Qué hace                                                                          |
@@ -500,8 +600,12 @@ Qué falta confirmar con el sandbox:
   10 compras simultáneas sobre 5 unidades, vencimiento al leer y dueño correcto). Desde B5, el
   repositorio de pagos (un solo intento activo, `FOR UPDATE`, `payment_status` en la misma
   transacción) y las rutas de pago, el simulador y el webhook firmado por HTTP, con la pasarela
-  simulada (cobro doble, avisos repetidos o desordenados, stock confirmado una vez). El E2E del
-  sandbox se omite sin `MP_ACCESS_TOKEN`. Incluyen también el contrato y los casos compartidos de
+  simulada (cobro doble, avisos repetidos o desordenados, stock confirmado una vez). Desde B5c,
+  los combos por HTTP (lectura de la tienda, dashboard con sesión y CSRF, orden y borrado con
+  renumeración), el aviso a una tienda falsa (un solo `POST /api/revalidate` por guardado,
+  reintento con 500 y ninguno con 401) y el combo como línea del carrito y del pedido (stock
+  compartido, piezas en el orden del combo, combo roto → 409 y nunca 500). El E2E del sandbox se
+  omite sin `MP_ACCESS_TOKEN`. Incluyen también el contrato y los casos compartidos de
   validación. Corren de a un archivo.
 - **Verificación completa**, la misma que corre la CI:
 
@@ -516,7 +620,9 @@ formato, unitarios, build, migraciones + seed dos veces contra los servicios `po
 `redis:8`, E2E con Testcontainers y contrato. Clona el front al lado (`frontend/`, rama por
 defecto de `LucasGonzalezRighi/Galp-nMatesE-comersFront-End`) para leer el `openapi.yaml`. Si ese
 repo es privado, hay que cargar el secreto `FRONTEND_REPO_TOKEN` (token de solo lectura de ese
-repo) en el repo del back.
+repo) en el repo del back. Cuando el contrato cambia en el front (como con los combos), se pushea
+primero el `main` del front y después el del back: si no, la CI del back compara contra el
+contrato viejo y falla.
 
 ## Calidad
 
