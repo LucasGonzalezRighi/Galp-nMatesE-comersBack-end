@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { NewDomainEvent } from '../../../shared/domain/domain-event'
 import { ComboNotFoundError, ComboValidationError } from '../domain/combo-errors'
 import type { ComboRecord } from '../domain/combo.entity'
-import { Product, type ProductProps } from '../domain/product.entity'
+import { LEATHERS, Product, type ProductProps } from '../domain/product.entity'
 import { CreateComboCommand } from './commands/create-combo.command'
 import { DeleteComboCommand } from './commands/delete-combo.command'
 import { ReorderCombosCommand } from './commands/reorder-combos.command'
@@ -21,8 +21,12 @@ const YERBAS = { id: 'c-yer', slug: 'yerbas', name: 'Yerbas', group: 'yerba' } a
 
 const IMAGE = { publicId: 'galpon/imperial', url: '/imperial.jpg', width: 10, height: 10, alt: 'x' }
 
-/** Producto publicado con precio y 12 unidades, salvo lo que cambie el caso. */
+/**
+ * Producto publicado con precio y 12 unidades (los mates con los cuatro cueros), salvo lo que
+ * cambie el caso.
+ */
 function product(overrides: Partial<ProductProps> & Pick<ProductProps, 'id' | 'slug'>): Product {
+  const group = (overrides.category ?? IMPERIALES).group
   return Product.create({
     sequence: 1,
     name: `Producto ${overrides.slug}`,
@@ -35,6 +39,7 @@ function product(overrides: Partial<ProductProps> & Pick<ProductProps, 'id' | 's
     inventory: { onHand: 12, reserved: 0 },
     tabsOverride: null,
     rating: { average: 0, count: 0 },
+    leathers: group === 'mate' ? [...LEATHERS] : [],
     ...overrides,
   })
 }
@@ -273,6 +278,7 @@ describe('ListCombosQuery (GET /combos)', () => {
           slug: 'mate-imperial-premium',
           name: 'Mate Imperial Premium',
           group: 'mate',
+          leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
           unitPriceArs: 39999,
           isPurchasable: true,
           maxQuantity: 12,
@@ -283,6 +289,7 @@ describe('ListCombosQuery (GET /combos)', () => {
           slug: 'bombillon-premium-curvo',
           name: 'Bombillón Premium Curvo',
           group: 'bombilla',
+          leathers: [],
           unitPriceArs: 28999,
           isPurchasable: true,
           maxQuantity: 12,

@@ -347,6 +347,10 @@ model Product {
   featured     Boolean       @default(false)
   /// Textos propios de las pestañas Materiales y Cuidado, o `null` para usar los del grupo.
   tabsOverride Json?         @map("tabs_override")
+  /// Cueros que ofrece (`Leather`), en el orden Negro, Marrón, Crudo, Borravino; vacío sin selector.
+  /// Solo los mates llevan cueros (lo cuida la app); el CHECK `products_leathers_check` (escrito a
+  /// mano en la migración) solo admite esos cuatro valores.
+  leathers     String[]      @default([])
   publishedAt  DateTime?     @map("published_at") @db.Timestamptz(3)
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -555,8 +559,9 @@ model OrderItem {
   unitPriceArs  Int      @map("unit_price_ars")
   kitSavingsArs Int      @map("kit_savings_ars")
   totalArs      Int      @map("total_ars")
-  /// Cuero y virola (`{ leather, ferrule }`) de un mate, de un kit o de un combo con mate; `null`
-  /// en el resto.
+  /// Cuero elegido (`{ leather }`) de un mate, del mate de un kit o del mate de un combo; `null` si
+  /// la línea no tiene cuero. Los pedidos anteriores a B6 guardan también `ferrule`, que se ignora
+  /// al leer (la virola quedó en `detail`).
   options       Json?
   position      Int
 

@@ -98,6 +98,27 @@ describe('prisma', () => {
     expect(second.sequence).toBe(product.sequence + 1)
   })
 
+  it('la migración b6 suma products.leathers: vacía por defecto y un CHECK con los cuatro cueros', async () => {
+    const db = prisma()
+    const category = await db.category.create({
+      data: { slug: 'cueros', name: 'Cueros', group: 'mate', blurb: 'B', position: 8 },
+    })
+    const base = { categoryId: category.id, name: 'Mate C', description: 'D' }
+
+    const plain = await db.product.create({ data: { ...base, slug: 'mate-sin-cueros' } })
+    expect(plain.leathers).toEqual([])
+    const two = await db.product.create({
+      data: { ...base, slug: 'mate-dos-cueros', leathers: ['Negro', 'Crudo'] },
+    })
+    expect(two.leathers).toEqual(['Negro', 'Crudo'])
+    await expect(
+      db.product.create({ data: { ...base, slug: 'mate-rosa', leathers: ['Negro', 'Rosa'] } }),
+    ).rejects.toThrow(/products_leathers_check/)
+    await expect(
+      db.$executeRaw`UPDATE "products" SET "leathers" = NULL WHERE "id" = ${plain.id}::uuid`,
+    ).rejects.toThrow(/products_leathers_check/)
+  })
+
   it('los emails de usuarios y clientes son citext', async () => {
     const columns = await prisma().$queryRaw<
       { table_name: string; data_type: string; udt_name: string }[]

@@ -1,4 +1,4 @@
-import { isProductGroup, type ProductGroup } from './category.entity'
+import { isProductGroup, PRODUCT_GROUPS, type ProductGroup } from './category.entity'
 import { Inventory, type InventoryProps } from './inventory.entity'
 import { createProductImage, type ProductImage } from './product-image.entity'
 
@@ -10,18 +10,45 @@ export const PRODUCT_STATUSES = ['draft', 'published', 'archived'] as const
 /** Estado de publicación de un producto. */
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number]
 
-/** Colores de cuero que se pueden elegir en un mate. */
+/** Colores de cuero que puede ofrecer un mate, en el orden en que se muestran (`Leather`). */
 export const LEATHERS = ['Negro', 'Marrón', 'Crudo', 'Borravino'] as const
 
-/** Virolas que se pueden elegir en un mate. */
-export const FERRULES = ['Alpaca lisa', 'Alpaca cincelada', 'Acero'] as const
+/** Color de cuero de un mate (`Leather` del contrato). */
+export type Leather = (typeof LEATHERS)[number]
 
-/** Opciones de compra de un mate (`ProductOptions` del contrato). */
-export interface ProductOptions {
-  /** Colores de cuero. */
-  leathers: (typeof LEATHERS)[number][]
-  /** Virolas. */
-  ferrules: (typeof FERRULES)[number][]
+/**
+ * Indica si un texto es uno de los cueros de {@link LEATHERS}.
+ *
+ * @param value - Texto a revisar; se compara exacto, con mayúsculas y acentos.
+ * @returns `true` si es un {@link Leather}.
+ */
+export function isLeather(value: string): value is Leather {
+  return (LEATHERS as readonly string[]).includes(value)
+}
+
+/**
+ * Deja los cueros de un producto en el orden de {@link LEATHERS}, como se guardan.
+ *
+ * @param leathers - Cueros en cualquier orden (no se modifica).
+ * @returns Una lista nueva en el orden canónico.
+ * @throws {TypeError} En español, si no es una lista.
+ * @throws {RangeError} En español, si un valor no es un cuero o si hay uno repetido.
+ * @example
+ * normalizeLeathers(['Borravino', 'Negro']) // ["Negro", "Borravino"]
+ */
+export function normalizeLeathers(leathers: readonly Leather[]): Leather[] {
+  if (!Array.isArray(leathers)) {
+    throw new TypeError('Los cueros del producto tienen que ser una lista.')
+  }
+  const seen = new Set<string>()
+  for (const leather of leathers as readonly string[]) {
+    if (!isLeather(leather)) {
+      throw new RangeError(`"${leather}" no es un cuero; los cueros son ${LEATHERS.join(', ')}.`)
+    }
+    if (seen.has(leather)) throw new RangeError(`El cuero ${leather} está repetido.`)
+    seen.add(leather)
+  }
+  return LEATHERS.filter((leather) => seen.has(leather))
 }
 
 /** Línea a la que pertenece un producto, con lo que muestran los listados. */
@@ -102,6 +129,11 @@ export interface ProductProps {
   tabsOverride: TabsOverride | null
   /** Calificación con las reseñas aprobadas. */
   rating: ProductRating
+  /**
+   * Cueros que ofrece, en el orden de {@link LEATHERS}; vacío si no tiene selector de cuero
+   * (siempre vacío fuera de los mates).
+   */
+  leathers: Leather[]
 }
 
 /** Revisa que un texto obligatorio no esté vacío. */
@@ -124,7 +156,8 @@ export class Product {
    * @throws {TypeError} En español, si falta el id, el slug, el nombre o la línea, o el estado o
    *   el grupo no existen.
    * @throws {RangeError} En español, si el correlativo, el precio, el stock, las fotos o la
-   *   calificación están fuera de rango.
+   *   calificación están fuera de rango, si un cuero no existe o está repetido, o si un producto
+   *   que no es mate trae cueros (solo los mates llevan cuero).
    */
   static create(props: ProductProps): Product {
     assertText(props.id, 'Un producto necesita su id.')
@@ -158,6 +191,12 @@ export class Product {
         `La cantidad de reseñas tiene que ser un entero desde 0; se recibió ${String(count)}.`,
       )
     }
+    const leathers = normalizeLeathers(props.leathers)
+    if (props.category.group !== 'mate' && leathers.length > 0) {
+      throw new RangeError(
+        `Solo los mates llevan cuero: ${props.slug} es del grupo ${props.category.group}.`,
+      )
+    }
     const inventory = Inventory.create(props.inventory)
     return new Product(
       {
@@ -167,6 +206,7 @@ export class Product {
         inventory: inventory.toProps(),
         tabsOverride: props.tabsOverride === null ? null : { ...props.tabsOverride },
         rating: { average, count },
+        leathers,
       },
       inventory,
     )
@@ -232,9 +272,9 @@ export class Product {
     return price === null ? null : Math.round(price / (1 + vatRatePercent / 100))
   }
 
-  /** Opciones de compra: cueros y virolas en los mates, `null` en el resto. */
-  options(): ProductOptions | null {
-    return this.group === 'mate' ? { leathers: [...LEATHERS], ferrules: [...FERRULES] } : null
+  /** Cueros que el cliente puede elegir (copia), en el orden de {@link LEATHERS}; vacío si no hay. */
+  leathers(): Leather[] {
+    return [...this.props.leathers]
   }
 
   /** Foto principal (la primera de la galería), o `null` sin fotos. */
@@ -268,6 +308,7 @@ export class Product {
       inventory: { ...this.props.inventory },
       tabsOverride: this.props.tabsOverride === null ? null : { ...this.props.tabsOverride },
       rating: { ...this.props.rating },
+      leathers: [...this.props.leathers],
     }
   }
 }
@@ -283,12 +324,13 @@ export interface RelatableProduct {
 }
 
 /**
- * Elige los productos relacionados con uno, como el contrato y el front (`selectRelated`):
- * primero los de la misma línea (sin el propio) y después los del mismo grupo en otras líneas,
- * cada tramo en el orden recibido. Nunca incluye otro grupo.
+ * Elige los productos relacionados con uno, como el contrato y el front (`selectRelated`). Nunca
+ * incluye al propio producto. Van en tres tramos: primero los de la misma línea, después los del
+ * mismo grupo en otras líneas y después el resto por grupo, en el orden de
+ * {@link PRODUCT_GROUPS} (mate, bombilla, yerba). Cada tramo sigue el orden recibido.
  *
  * @param product - Producto del que se buscan relacionados.
- * @param catalog - Candidatos, en el orden del catálogo.
+ * @param catalog - Candidatos de todos los grupos, en el orden del catálogo.
  * @param limit - Máximo de relacionados (entero desde 0).
  * @returns Hasta `limit` productos.
  * @throws {RangeError} En español, si el límite no es un entero desde 0.
@@ -303,10 +345,12 @@ export function selectRelated<T extends RelatableProduct>(
       `El límite de relacionados tiene que ser un entero desde 0; se recibió ${String(limit)}.`,
     )
   }
-  const sameGroup = catalog.filter(
-    (other) => other.id !== product.id && other.group === product.group,
-  )
+  const others = catalog.filter((other) => other.id !== product.id)
+  const sameGroup = others.filter((other) => other.group === product.group)
   const sameLine = sameGroup.filter((other) => other.categoryId === product.categoryId)
   const otherLines = sameGroup.filter((other) => other.categoryId !== product.categoryId)
-  return [...sameLine, ...otherLines].slice(0, limit)
+  const rest = PRODUCT_GROUPS.filter((group) => group !== product.group).flatMap((group) =>
+    others.filter((other) => other.group === group),
+  )
+  return [...sameLine, ...otherLines, ...rest].slice(0, limit)
 }

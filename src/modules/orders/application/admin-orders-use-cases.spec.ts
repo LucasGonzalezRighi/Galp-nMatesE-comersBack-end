@@ -74,7 +74,7 @@ function setup() {
           type: 'product',
           productId: imperialPremium.id,
           quantity: 1,
-          options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+          options: { leather: 'Negro' },
         },
       ],
       paymentMethod: 'mp_redirect',

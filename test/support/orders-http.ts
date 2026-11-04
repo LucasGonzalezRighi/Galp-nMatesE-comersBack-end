@@ -12,8 +12,8 @@ import { call, type Jar, newJar } from './http'
 /** Línea del carrito como la manda la tienda. */
 export type CartLine = Record<string, unknown>
 
-/** Cuero y virola de un mate. */
-export const MATE_OPTIONS = { leather: 'Negro', ferrule: 'Alpaca cincelada' }
+/** Cuero de un mate (`CartItemOptions`). */
+export const MATE_OPTIONS = { leather: 'Negro' }
 
 /** Dirección de domicilio completa (el envío a domicilio cuesta 6500 en el seed). */
 export const HOME_ADDRESS = {
@@ -47,7 +47,7 @@ export function mateLine(id: string, quantity = 1): CartLine {
  *
  * @param id - Id del combo.
  * @param quantity - Cantidad de combos (por defecto 1).
- * @param options - Cuero y virola del mate (por defecto {@link MATE_OPTIONS}).
+ * @param options - Cuero del mate (por defecto {@link MATE_OPTIONS}).
  * @returns La línea del carrito.
  */
 export function comboLine(

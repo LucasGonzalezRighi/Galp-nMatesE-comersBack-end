@@ -5,7 +5,6 @@ import type { ProductGroup } from '../../catalog/domain/category.entity'
 import {
   COMBO_MAX_ITEMS,
   COMBO_MIN_ITEMS,
-  comboHasMate,
   type ComboLineAmounts,
   comboLineAmounts,
   type ComboStatus,
@@ -17,8 +16,8 @@ import {
   type CartItemOptions,
   cartLineKey,
   type ComboCartItem,
-  KIT_FERRULE,
   KIT_LINE_NAME,
+  type Leather,
   leatherLabel,
   MAX_CART_LINES,
 } from './cart-line'
@@ -34,8 +33,11 @@ export const MISSING_PRODUCT_NAME = 'Producto no disponible'
 /** Nombre de una línea cuyo combo no existe. */
 export const MISSING_COMBO_NAME = 'Combo no disponible'
 
-/** Mensaje de un mate (suelto o dentro de un combo) que llega sin cuero ni virola. */
-const MISSING_OPTIONS_MESSAGE = 'Elegí el cuero y la virola del mate.'
+/** Mensaje de un mate que ofrece cueros (suelto, en un kit o en un combo) y llega sin cuero. */
+export const MISSING_LEATHER_MESSAGE = 'Elegí el cuero del mate.'
+
+/** Mensaje de un mate que llega con un cuero que no ofrece. */
+export const LEATHER_NOT_OFFERED_MESSAGE = 'Ese cuero no está disponible para este mate.'
 
 /** Producto como lo necesita la cotización. */
 export interface PricedProduct {
@@ -47,6 +49,8 @@ export interface PricedProduct {
   name: string
   /** Grupo de su línea (mate, bombilla o yerba). */
   group: ProductGroup
+  /** Cueros que ofrece (vacío si no tiene selector de cuero, siempre fuera de los mates). */
+  leathers: readonly Leather[]
   /** Precio de lista, o `null` si es "a consultar" (no se vende). */
   priceArs: number | null
   /** Si está publicado. */
@@ -148,7 +152,7 @@ export interface OrderLineDraft {
   type: LineType
   /** Nombre del producto, `Kit` o el del combo. */
   name: string
-  /** Opciones elegidas (en un kit o un combo, además las piezas); vacío si no hay. */
+  /** Cuero elegido (en un kit o un combo, además las piezas); vacío si no hay. */
   detail: string
   /** Unidades compradas (ya reducidas al stock). */
   quantity: number
@@ -162,7 +166,7 @@ export interface OrderLineDraft {
   productId: string | null
   /** Slug del producto suelto; `null` en un kit o un combo. */
   productSlug: string | null
-  /** Cuero y virola de un mate, del kit o del mate del combo; `null` en los demás. */
+  /** Cuero de un mate, del mate del kit o del mate del combo; `null` si la línea no tiene cuero. */
   options: CartItemOptions | null
   /** Las piezas de un kit (3) o de un combo (2 o 3, en su orden); `null` en un producto suelto. */
   kitItems: OrderKitItemDraft[] | null
@@ -188,7 +192,10 @@ export interface PricedCart {
   stockChanges: ChangeNotice[]
   /** Avisos de las líneas `price_changed`. */
   priceChanges: ChangeNotice[]
-  /** Mates que llegaron sin cuero ni virola (`items.{i}.options`). */
+  /**
+   * Cueros que faltan o que el mate no ofrece (`items.{i}.options`, `items.{i}.options.leather` o,
+   * en un kit, `items.{i}.leather`).
+   */
   optionErrors: FieldError[]
 }
 
@@ -282,15 +289,55 @@ interface PricingState {
   stockChanges: ChangeNotice[]
   /** Avisos de precio. */
   priceChanges: ChangeNotice[]
-  /** Mates sin cuero ni virola. */
+  /** Cueros que faltan o que el mate no ofrece. */
   optionErrors: FieldError[]
+}
+
+/**
+ * Cuero que vale para una línea: el que mandó la tienda, si el mate lo ofrece.
+ *
+ * @param sent - Cuero que mandó la tienda, o `null`.
+ * @param offered - Cueros que ofrece el mate (vacío si no es un mate o no tiene selector).
+ * @returns `sent` si está en `offered`; si no, `null` (sin cueros, el que llegue se ignora).
+ */
+function offeredLeather(sent: Leather | null, offered: readonly Leather[]): Leather | null {
+  return sent !== null && offered.includes(sent) ? sent : null
+}
+
+/**
+ * Error del cuero de una línea, con las reglas de `quoteCart` del contrato y del mock.
+ *
+ * @param sent - Cuero que mandó la tienda, o `null`.
+ * @param offered - Cueros que ofrece el mate.
+ * @param fields - Campo del error si falta el cuero y si el mate no lo ofrece.
+ * @returns El error (`required` o `leather_not_offered`), o `null` si el mate no ofrece cueros o
+ *   el cuero es uno de los suyos.
+ */
+function leatherError(
+  sent: Leather | null,
+  offered: readonly Leather[],
+  fields: { missing: string; notOffered: string },
+): FieldError | null {
+  if (offered.length === 0) return null
+  if (sent === null) {
+    return { field: fields.missing, code: 'required', message: MISSING_LEATHER_MESSAGE }
+  }
+  if (!offered.includes(sent)) {
+    return {
+      field: fields.notOffered,
+      code: 'leather_not_offered',
+      message: LEATHER_NOT_OFFERED_MESSAGE,
+    }
+  }
+  return null
 }
 
 /**
  * Cotiza una línea de combo con las reglas de `ComboCartItemInput` del contrato y del mock:
  * combo inexistente o en borrador, una pieza que no se vende o piezas que ya no son de grupos
- * distintos → `unavailable` (con el nombre del combo); combo con mate sin cuero ni virola → error
- * en `items.{i}.options`; stock de cada pieza compartido con las demás líneas; importes de
+ * distintos → `unavailable` (con el nombre del combo); mate con cueros sin cuero → error en
+ * `items.{i}.options`, y con uno que no ofrece → en `items.{i}.options.leather`; la clave repite
+ * lo que mandó la tienda; stock de cada pieza compartido con las demás líneas; importes de
  * {@link comboLineAmounts}; `price_changed` contra el precio del combo, con `productId` `null`.
  *
  * @param item - Línea de combo.
@@ -311,22 +358,20 @@ function priceComboItem(
 ): ComboLineAmounts | null {
   const { vatRatePercent, showNetPrice } = settings
   const found = (combo?.productIds ?? []).map((id) => products.get(id))
-  const hasMate = comboHasMate(
-    found.flatMap((product) => (product === undefined ? [] : [product.group])),
-  )
-  // Sin el combo no se sabe si lleva mate: la clave conserva lo que mandó la tienda.
-  const keepsOptions = combo === undefined || hasMate
-  const options = keepsOptions ? item.options : null
+  // Los cueros del mate del combo (`comboMateLeathers` del front); vacío si no lleva mate.
+  const offered = found.find((product) => product?.group === 'mate')?.leathers ?? []
+  const sent = item.options?.leather ?? null
+  const leather = offeredLeather(sent, offered)
   const name = combo?.name ?? MISSING_COMBO_NAME
   const pieceNames = found.map((product) => product?.name ?? MISSING_PRODUCT_NAME).join(' + ')
   const base = {
-    key: cartLineKey(item, keepsOptions),
+    key: cartLineKey(item),
     type: item.type,
     name,
     detail:
-      options === null || pieceNames === ''
+      leather === null || pieceNames === ''
         ? pieceNames
-        : `${pieceNames} · ${leatherLabel(options.leather)} · ${options.ferrule}`,
+        : `${pieceNames} · ${leatherLabel(leather)}`,
   }
   const blocked = (issue: 'unavailable' | 'sold_out', notice: ChangeNotice): null => {
     state.quoteLines.push(blockedLine(base, issue, showNetPrice))
@@ -351,13 +396,11 @@ function priceComboItem(
   ) {
     return unavailable(null)
   }
-  if (hasMate && options === null) {
-    state.optionErrors.push({
-      field: `items.${String(index)}.options`,
-      code: 'required',
-      message: MISSING_OPTIONS_MESSAGE,
-    })
-  }
+  const error = leatherError(sent, offered, {
+    missing: `items.${String(index)}.options`,
+    notOffered: `items.${String(index)}.options.leather`,
+  })
+  if (error !== null) state.optionErrors.push(error)
 
   const rooms = pieces.map((product) => roomFor(product, state.accepted))
   const room = Math.min(...rooms)
@@ -406,7 +449,7 @@ function priceComboItem(
     totalArs: amounts.totalArs,
     productId: null,
     productSlug: null,
-    options,
+    options: leather === null ? null : { leather },
     kitItems: pieces.map((product, position) => ({
       role: product.group,
       position: position + 1,
@@ -450,7 +493,10 @@ function assertPricingInput(items: readonly CartItem[], settings: PricingSetting
  * stock compartidos por producto entre todas las líneas (sueltas y piezas de kits y de combos).
  * Una línea con problemas no hace fallar la cotización: se informa en `issue` y en los avisos.
  *
- * - Pieza inexistente, no publicada, sin precio o de otro grupo → `unavailable`.
+ * - Pieza inexistente, no publicada, sin precio o de otro grupo → `unavailable` (sin error de cuero).
+ * - Producto suelto o mate del kit que ofrece cueros: sin cuero → error `required`; con uno que no
+ *   ofrece → `leather_not_offered`. Sin cueros ofrecidos, el cuero que llegue se ignora. La clave
+ *   repite siempre lo que mandó la tienda.
  * - Combo inexistente, en borrador o con piezas que ya no son de grupos distintos → `unavailable`.
  * - Sin lugar → `sold_out`; con menos lugar que lo pedido → `quantity_reduced` (se cotiza el máximo).
  * - `expectedUnitPriceArs` distinto del vigente (en un combo, de su precio) → `price_changed`
@@ -510,27 +556,24 @@ export function priceCart(
       const product = products.get(id)
       return isSellable(product, group) ? product : undefined
     })
+    // El producto suelto o el mate del kit: sus cueros son los que se pueden elegir.
     const first = found[0]
-    const isMate = item.type === 'product' && first?.group === 'mate'
-    const options = item.type === 'product' && isMate ? item.options : null
-    if (isMate && options === null && sellable[0] !== undefined) {
-      optionErrors.push({
-        field: `items.${String(index)}.options`,
-        code: 'required',
-        message: MISSING_OPTIONS_MESSAGE,
-      })
-    }
+    const offered = first?.leathers ?? []
+    const sent = item.type === 'kit' ? item.leather : (item.options?.leather ?? null)
+    const leather = offeredLeather(sent, offered)
+    const leatherText = leather === null ? '' : leatherLabel(leather)
+    const pieceNames = found.map((product) => product?.name ?? MISSING_PRODUCT_NAME).join(' + ')
     const name = item.type === 'kit' ? KIT_LINE_NAME : (first?.name ?? MISSING_PRODUCT_NAME)
     const base = {
-      key: cartLineKey(item, isMate),
+      key: cartLineKey(item),
       type: item.type,
       name,
       detail:
-        item.type === 'kit'
-          ? `${found.map((product) => product?.name ?? MISSING_PRODUCT_NAME).join(' + ')} · ${leatherLabel(item.leather)}`
-          : options === null
-            ? ''
-            : `${leatherLabel(options.leather)} · ${options.ferrule}`,
+        item.type !== 'kit'
+          ? leatherText
+          : leather === null
+            ? pieceNames
+            : `${pieceNames} · ${leatherText}`,
     }
 
     const missing = sellable.findIndex((product) => product === undefined)
@@ -543,6 +586,14 @@ export function priceCart(
       })
       return
     }
+    // Sin error de cuero en una línea que no se vende: va después de `unavailable`.
+    const field =
+      item.type === 'kit' ? `items.${String(index)}.leather` : `items.${String(index)}.options`
+    const error = leatherError(sent, offered, {
+      missing: field,
+      notOffered: item.type === 'kit' ? field : `${field}.leather`,
+    })
+    if (error !== null) optionErrors.push(error)
     const sold = sellable.filter((product) => product !== undefined)
     const rooms = sold.map((product) => roomFor(product, accepted))
     const room = Math.min(...rooms)
@@ -604,7 +655,7 @@ export function priceCart(
       totalArs: total,
       productId: single?.id ?? null,
       productSlug: single?.slug ?? null,
-      options: item.type === 'kit' ? { leather: item.leather, ferrule: KIT_FERRULE } : options,
+      options: leather === null ? null : { leather },
       kitItems:
         item.type === 'kit'
           ? sold.map((product, position) => ({

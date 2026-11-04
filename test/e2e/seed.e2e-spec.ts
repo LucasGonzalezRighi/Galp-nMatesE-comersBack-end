@@ -118,6 +118,17 @@ describe('seed', () => {
       if (category !== undefined) byGroup[category.group] += row._count._all
     }
     expect(byGroup).toEqual({ mate: 16, bombilla: 8, yerba: 3 })
+    // Los 16 mates con los cuatro cueros y las bombillas y las yerbas sin (como la migración b6).
+    const withLeathers = await db().product.findMany({
+      select: { leathers: true, category: { select: { group: true } } },
+    })
+    const leathersOf = (group: string): string[][] =>
+      withLeathers.filter((p) => p.category.group === group).map((p) => p.leathers)
+    expect(leathersOf('mate')).toEqual(
+      Array.from({ length: 16 }, () => ['Negro', 'Marrón', 'Crudo', 'Borravino']),
+    )
+    expect(leathersOf('bombilla')).toEqual(Array.from({ length: 8 }, () => []))
+    expect(leathersOf('yerba')).toEqual(Array.from({ length: 3 }, () => []))
     expect(categories.map((c) => c.slug)).toEqual([
       'imperiales',
       'torpedos',

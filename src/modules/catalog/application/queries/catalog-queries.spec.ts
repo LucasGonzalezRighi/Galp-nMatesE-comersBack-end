@@ -8,9 +8,9 @@ import type {
   ProductRepository,
 } from '../ports/product.repository.port'
 import type { ProductTabsPort, ProductTabsTexts } from '../ports/product-tabs.port'
-import { Product, type ProductProps } from '../../domain/product.entity'
+import { LEATHERS, Product, type ProductProps } from '../../domain/product.entity'
 import { GetProductQuery } from './get-product.query'
-import { GetRelatedProductsQuery } from './get-related-products.query'
+import { GetRelatedProductsQuery, RELATED_PRODUCTS_LIMIT } from './get-related-products.query'
 import { ListCategoriesQuery } from './list-categories.query'
 import { ListProductsQuery } from './list-products.query'
 
@@ -18,10 +18,11 @@ const IMPERIALES = { id: 'c1', slug: 'imperiales', name: 'Imperiales', group: 'm
 const TORPEDOS = { id: 'c2', slug: 'torpedos', name: 'Torpedos', group: 'mate' } as const
 const YERBAS = { id: 'c3', slug: 'yerbas', name: 'Yerbas', group: 'yerba' } as const
 
-/** Producto publicado del catálogo de prueba. */
+/** Producto publicado del catálogo de prueba: los mates con los cuatro cueros, el resto sin. */
 function product(
   overrides: Partial<ProductProps> & Pick<ProductProps, 'id' | 'sequence'>,
 ): Product {
+  const group = (overrides.category ?? IMPERIALES).group
   return Product.create({
     slug: `producto-${overrides.id}`,
     name: `Producto ${overrides.id}`,
@@ -36,6 +37,7 @@ function product(
     inventory: { onHand: 5, reserved: 0 },
     tabsOverride: null,
     rating: { average: 0, count: 0 },
+    leathers: group === 'mate' ? [...LEATHERS] : [],
     ...overrides,
   })
 }
@@ -113,6 +115,7 @@ describe('ListProductsQuery', () => {
       categorySlug: 'imperiales',
       categoryName: 'Imperiales',
       group: 'mate',
+      leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
       priceArs: 12100,
       netPriceArs: 10000,
       isPurchasable: true,
@@ -172,11 +175,12 @@ describe('ListProductsQuery', () => {
 })
 
 describe('GetProductQuery', () => {
-  it('arma la ficha con fotos, opciones y pestañas combinadas con las del grupo', async () => {
+  it('arma la ficha con fotos, cueros y pestañas combinadas con las del grupo, sin options', async () => {
     const withOverride = product({
       id: 'z',
       sequence: 9,
       tabsOverride: { materials: 'Cuero propio.', care: null },
+      leathers: ['Crudo', 'Negro'],
     })
     const query = new GetProductQuery(new InMemoryProductRepository([withOverride]), WITH_NET, tabs)
 
@@ -184,7 +188,8 @@ describe('GetProductQuery', () => {
 
     expect(detail).toMatchObject({ id: 'z', code: 'N°09', netPriceArs: 10000 })
     expect(detail?.images).toHaveLength(1)
-    expect(detail?.options?.leathers).toEqual(['Negro', 'Marrón', 'Crudo', 'Borravino'])
+    expect(detail?.leathers).toEqual(['Negro', 'Crudo'])
+    expect(detail).not.toHaveProperty('options')
     expect(detail?.tabs).toEqual({
       descriptionNote: 'Pieza artesanal.',
       materials: 'Cuero propio.',
@@ -199,19 +204,32 @@ describe('GetProductQuery', () => {
     await expect(query.execute('')).rejects.toThrow(/slug/)
   })
 
-  it('no ofrece opciones fuera de los mates', async () => {
+  it('no ofrece cueros fuera de los mates', async () => {
     const query = new GetProductQuery(new InMemoryProductRepository(CATALOG), WITH_NET, tabs)
     const yerba = await query.execute('producto-d')
-    expect(yerba).toMatchObject({ options: null, isSoldOut: true, maxQuantity: 0 })
+    expect(yerba).toMatchObject({ leathers: [], isSoldOut: true, maxQuantity: 0 })
     expect(yerba?.tabs.materials).toBe('1 kg.')
   })
 })
 
 describe('GetRelatedProductsQuery', () => {
-  it('devuelve hasta 4 del mismo grupo, primero los de la misma línea y sin el propio', async () => {
+  it('devuelve la misma línea, el mismo grupo y después el resto por grupo, sin el propio', async () => {
     const query = new GetRelatedProductsQuery(new InMemoryProductRepository(CATALOG), WITH_NET)
     const related = await query.execute('producto-a')
-    expect(related?.map(({ id }) => id)).toEqual(['c', 'f', 'b', 'e'])
+    expect(related?.map(({ id }) => id)).toEqual(['c', 'f', 'b', 'e', 'd'])
+    expect(related?.[0]?.leathers).toEqual(['Negro', 'Marrón', 'Crudo', 'Borravino'])
+    expect(related?.[4]?.leathers).toEqual([])
+  })
+
+  it('corta en 30 relacionados', async () => {
+    expect(RELATED_PRODUCTS_LIMIT).toBe(30)
+    const many = Array.from({ length: 35 }, (_, index) =>
+      product({ id: `m${String(index)}`, sequence: index + 1 }),
+    )
+    const query = new GetRelatedProductsQuery(new InMemoryProductRepository(many), WITH_NET)
+    const related = await query.execute('producto-m0')
+    expect(related).toHaveLength(30)
+    expect(related?.[0]?.id).toBe('m1')
   })
 
   it('devuelve null si el producto no existe', async () => {

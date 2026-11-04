@@ -1,3 +1,4 @@
+import { LEATHERS } from '../../src/modules/catalog/domain/product.entity'
 import { normalizeSearchText } from '../../src/modules/catalog/domain/search-text'
 import type {
   AdminOrderFilter,
@@ -58,7 +59,8 @@ import { err, ok, type Result } from '../../src/shared/domain/result'
 
 /**
  * Productos de prueba con los nombres, slugs y precios del seed (`prisma/seed-data/products.ts`).
- * `available` es el stock libre (`on_hand − reserved`); los ids son legibles, no UUID.
+ * `available` es el stock libre (`on_hand − reserved`); los mates ofrecen los cuatro cueros, como
+ * en el seed, y el resto ninguno; los ids son legibles, no UUID.
  */
 export const PRODUCTS = {
   imperialPremium: {
@@ -66,6 +68,7 @@ export const PRODUCTS = {
     slug: 'mate-imperial-premium',
     name: 'Mate Imperial Premium',
     group: 'mate',
+    leathers: [...LEATHERS],
     priceArs: 39999,
     published: true,
     available: 12,
@@ -75,6 +78,7 @@ export const PRODUCTS = {
     slug: 'mate-coquito-criollo',
     name: 'Mate Coquito Criollo',
     group: 'mate',
+    leathers: [...LEATHERS],
     priceArs: 28999,
     published: true,
     available: 2,
@@ -84,6 +88,7 @@ export const PRODUCTS = {
     slug: 'mate-galleta',
     name: 'Mate Galleta',
     group: 'mate',
+    leathers: [...LEATHERS],
     priceArs: 27999,
     published: true,
     available: 0,
@@ -93,6 +98,7 @@ export const PRODUCTS = {
     slug: 'mate-torpedo-linea-acero',
     name: 'Mate Torpedo Línea Acero',
     group: 'mate',
+    leathers: [...LEATHERS],
     priceArs: null,
     published: true,
     available: 12,
@@ -102,6 +108,7 @@ export const PRODUCTS = {
     slug: 'bombillon-100-alpaca',
     name: 'Bombillón 100% Alpaca',
     group: 'bombilla',
+    leathers: [],
     priceArs: 25999,
     published: true,
     available: 12,
@@ -111,6 +118,7 @@ export const PRODUCTS = {
     slug: 'bombillon-premium-curvo',
     name: 'Bombillón Premium Curvo',
     group: 'bombilla',
+    leathers: [],
     priceArs: 28999,
     published: true,
     available: 12,
@@ -120,6 +128,7 @@ export const PRODUCTS = {
     slug: 'yerba-canarias-1-kg',
     name: 'Yerba Canarias 1 kg',
     group: 'yerba',
+    leathers: [],
     priceArs: 9999,
     published: true,
     available: 12,

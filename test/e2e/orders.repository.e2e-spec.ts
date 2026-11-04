@@ -68,8 +68,8 @@ interface SeedProductRef {
 const createdEvents = (order: Order) => [orderCreatedEvent(order)]
 const expiredEvents = (order: Order) => [orderExpiredEvent(order)]
 
-/** Cuero y virola de un mate pedido suelto. */
-const MATE_OPTIONS: CartItemOptions = { leather: 'Negro', ferrule: 'Alpaca cincelada' }
+/** Cuero de un mate pedido suelto. */
+const MATE_OPTIONS: CartItemOptions = { leather: 'Negro' }
 
 /** Un minuto en milisegundos. */
 const MINUTE = 60_000
@@ -257,7 +257,7 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         ['kit', 1, null],
       ])
       expect(row.items[0]?.options).toEqual(MATE_OPTIONS)
-      expect(row.items[1]?.options).toEqual({ leather: 'Negro', ferrule: 'Alpaca cincelada' })
+      expect(row.items[1]?.options).toEqual({ leather: 'Negro' })
       expect(row.items[1]?.components.map((piece) => piece.role).sort()).toEqual([
         'bombilla',
         'mate',
@@ -419,6 +419,7 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
             slug: coquito.slug,
             name: coquito.name,
             group: 'mate',
+            leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
             priceArs: coquito.priceArs,
             published: false,
             available: 2,

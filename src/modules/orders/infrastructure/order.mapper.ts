@@ -1,8 +1,8 @@
 import { Prisma } from '../../../generated/prisma/client'
 import { PRODUCT_GROUPS } from '../../catalog/domain/category.entity'
-import { FERRULES, LEATHERS } from '../../catalog/domain/product.entity'
+import { isLeather } from '../../catalog/domain/product.entity'
 import { isProvince } from '../../identity/domain/province'
-import type { CartItemOptions, Ferrule, Leather } from '../domain/cart-line'
+import type { CartItemOptions } from '../domain/cart-line'
 import type { Order, OrderPaymentInfo } from '../domain/order.entity'
 import type { OrderKitItemDraft, OrderLineDraft } from '../domain/pricing'
 import type { ShippingAddress } from '../domain/shipping'
@@ -49,14 +49,6 @@ function text(json: Prisma.JsonObject, field: string): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function isLeather(value: string | undefined): value is Leather {
-  return value !== undefined && (LEATHERS as readonly string[]).includes(value)
-}
-
-function isFerrule(value: string | undefined): value is Ferrule {
-  return value !== undefined && (FERRULES as readonly string[]).includes(value)
-}
-
 /**
  * Lee el destino guardado en `orders.shipping_address` (jsonb).
  *
@@ -90,21 +82,21 @@ export function toShippingAddress(json: Prisma.JsonValue): ShippingAddress | nul
 }
 
 /**
- * Lee las opciones guardadas en `order_items.options` (jsonb).
+ * Lee el cuero guardado en `order_items.options` (jsonb). Los pedidos anteriores a los cueros por
+ * producto guardan `{ leather, ferrule }`: la virola se ignora (quedó en `detail`).
  *
  * @param json - Valor de la columna.
- * @returns Cuero y virola, o `null`.
- * @throws {TypeError} En español, si el JSON no es un cuero y una virola del catálogo.
+ * @returns El cuero (`{ leather }`), o `null`.
+ * @throws {TypeError} En español, si el JSON no trae un cuero del catálogo.
  */
 export function toCartItemOptions(json: Prisma.JsonValue): CartItemOptions | null {
   if (json === null) return null
   const object = jsonObject(json)
   const leather = object === null ? undefined : text(object, 'leather')
-  const ferrule = object === null ? undefined : text(object, 'ferrule')
-  if (!isLeather(leather) || !isFerrule(ferrule)) {
+  if (leather === undefined || !isLeather(leather)) {
     throw new TypeError('Las opciones guardadas en la línea del pedido no son válidas')
   }
-  return { leather, ferrule }
+  return { leather }
 }
 
 /**
@@ -121,16 +113,16 @@ export function shippingAddressJson(
 }
 
 /**
- * Valor para escribir las opciones de una línea en la columna jsonb `options`.
+ * Valor para escribir el cuero de una línea en la columna jsonb `options`.
  *
- * @param options - Cuero y virola, o `null`.
- * @returns El objeto JSON, o `Prisma.DbNull`.
+ * @param options - Cuero elegido, o `null`.
+ * @returns El objeto JSON (`{ leather }`), o `Prisma.DbNull`.
  */
 export function cartItemOptionsJson(
   options: CartItemOptions | null,
 ): Prisma.InputJsonObject | typeof Prisma.DbNull {
   if (options === null) return Prisma.DbNull
-  return { leather: options.leather, ferrule: options.ferrule }
+  return { leather: options.leather }
 }
 
 /**

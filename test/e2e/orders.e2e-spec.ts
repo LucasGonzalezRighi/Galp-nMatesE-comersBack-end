@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import type request from 'supertest'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { comboSeedId, seed } from '../../prisma/seed'
 import type {
@@ -10,6 +10,7 @@ import type {
   OrderSummaryPageView,
   OrderView,
 } from '../../src/modules/orders/application/read-models'
+import { bumpCatalogCacheVersion } from '../../src/modules/catalog/infrastructure/catalog-cache'
 import { OrderExpirationSweep } from '../../src/modules/orders/infrastructure/order-expiration.sweep'
 import { SETTINGS_CACHE_KEY } from '../../src/modules/settings/infrastructure/cached-settings.repository'
 import { CACHE_PORT, type CachePort } from '../../src/shared/application/ports/cache.port'
@@ -140,10 +141,10 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       expect(response.body).toEqual({
         lines: [
           {
-            key: `product:${mate.id}:Negro:Alpaca cincelada`,
+            key: `product:${mate.id}:Negro`,
             type: 'product',
             name: 'Mate Imperial Premium',
-            detail: 'Cuero negro · Alpaca cincelada',
+            detail: 'Cuero negro',
             unitPriceArs: 39999,
             netUnitPriceArs: 33057,
             kitSavingsArs: 0,
@@ -152,10 +153,10 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
             issue: null,
           },
           {
-            key: `product:${galleta.id}:Negro:Alpaca cincelada`,
+            key: `product:${galleta.id}:Negro`,
             type: 'product',
             name: galleta.name,
-            detail: 'Cuero negro · Alpaca cincelada',
+            detail: 'Cuero negro',
             unitPriceArs: 0,
             netUnitPriceArs: 0,
             kitSavingsArs: 0,
@@ -272,7 +273,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           type: 'product',
           name: 'Mate Imperial Premium',
-          detail: 'Cuero negro · Alpaca cincelada',
+          detail: 'Cuero negro',
           quantity: 1,
           unitPriceArs: 39999,
           kitSavingsArs: 0,
@@ -657,11 +658,116 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
     })
   })
 
+  describe('cueros por producto (Review Focus 4)', () => {
+    /** Cueros de fábrica de un mate (el seed y la migración). */
+    const ALL_LEATHERS = ['Negro', 'Marrón', 'Crudo', 'Borravino']
+
+    /** Sube la versión de la caché del catálogo, como lo hará el `PATCH` del dashboard (Task 6). */
+    async function bumpCatalog(): Promise<void> {
+      if (app === undefined) throw new Error('La app no arrancó')
+      await bumpCatalogCacheVersion(app.get<CachePort>(CACHE_PORT))
+    }
+
+    afterEach(async () => {
+      await prisma().product.update({ where: { id: coquito.id }, data: { leathers: ALL_LEATHERS } })
+      await bumpCatalog()
+    })
+
+    it('un mate con [Negro, Crudo]: la ficha y el listado los traen y la cotización los respeta', async () => {
+      await prisma().product.update({
+        where: { id: coquito.id },
+        data: { leathers: ['Negro', 'Crudo'] },
+      })
+      await bumpCatalog()
+
+      const detail = await send(newJar(), 'get', '/products/mate-coquito-criollo')
+      const list = await send(newJar(), 'get', `/products?ids=${coquito.id},${bombilla.id}`)
+      expect(detail.status).toBe(200)
+      expect(detail.body).toMatchObject({ leathers: ['Negro', 'Crudo'] })
+      expect(detail.body).not.toHaveProperty('options')
+      const items = (list.body as { items: { id: string; leathers: string[] }[] }).items
+      expect(items.map(({ id, leathers }) => [id, leathers])).toEqual(
+        expect.arrayContaining([
+          [coquito.id, ['Negro', 'Crudo']],
+          [bombilla.id, []],
+        ]),
+      )
+
+      const missing = await send(newJar(), 'post', '/cart/quote', {
+        body: { items: [{ type: 'product', productId: coquito.id, quantity: 1, options: null }] },
+      })
+      expect(missing.status).toBe(422)
+      expect((missing.body as { errors: unknown }).errors).toEqual([
+        { field: 'items.0.options', code: 'required', message: 'Elegí el cuero del mate.' },
+      ])
+
+      const brown = await send(newJar(), 'post', '/cart/quote', {
+        body: { items: [{ ...mateLine(coquito.id), options: { leather: 'Marrón' } }] },
+      })
+      expect(brown.status).toBe(422)
+      expect((brown.body as { errors: unknown }).errors).toEqual([
+        {
+          field: 'items.0.options.leather',
+          code: 'leather_not_offered',
+          message: 'Ese cuero no está disponible para este mate.',
+        },
+      ])
+
+      const result = await quote([
+        { ...mateLine(coquito.id), options: { leather: 'Crudo' } },
+        { type: 'product', productId: bombilla.id, quantity: 1, options: { leather: 'Negro' } },
+      ])
+      expect(result.lines.map(({ key, detail }) => [key, detail])).toEqual([
+        [`product:${coquito.id}:Crudo`, 'Cuero crudo'],
+        [`product:${bombilla.id}:Negro`, ''],
+      ])
+    })
+
+    it('la virola de antes en options → 422 en items.0.options.ferrule (pestaña vieja)', async () => {
+      const response = await send(newJar(), 'post', '/cart/quote', {
+        body: {
+          items: [{ ...mateLine(mate.id), options: { leather: 'Negro', ferrule: 'Acero' } }],
+        },
+      })
+
+      expect(response.status).toBe(422)
+      expect(firstError(response)).toEqual({
+        field: 'items.0.options.ferrule',
+        code: 'unrecognized_key',
+        message: 'Este campo no está permitido.',
+      })
+    })
+
+    it('un pedido viejo con { leather, ferrule } se lee con { leather } y la virola sigue en detail', async () => {
+      const { order, orderToken } = await createdOrder(
+        newJar(),
+        await orderBody([mateLine(mate.id)], 'virola-vieja@ejemplo.com'),
+      )
+      await prisma().orderItem.updateMany({
+        where: { order: { number: order.number } },
+        data: {
+          options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+          detail: 'Cuero negro · Alpaca cincelada',
+        },
+      })
+
+      const read = await send(newJar(), 'get', `/orders/${order.number}`, {
+        headers: { 'X-Order-Token': orderToken },
+      })
+
+      expect(read.status).toBe(200)
+      expect((read.body as OrderView).lines[0]).toMatchObject({
+        detail: 'Cuero negro · Alpaca cincelada',
+        options: { leather: 'Negro' },
+      })
+    })
+  })
+
   describe('combos', () => {
     /** "Dúo Imperial" del seed: Mate Imperial Premium ($39.999) + Bombillón Premium Curvo ($28.999). */
     const duoId = comboSeedId({ key: 'cmb-duo-imperial' })
-    /** Opciones del ejemplo del mock. */
-    const BROWN = { leather: 'Marrón', ferrule: 'Acero' }
+    /** Cuero del ejemplo del mock. */
+    const BROWN = { leather: 'Marrón' }
     let curvo: SeedProduct
 
     /** Deja `available` unidades libres sin tocar lo reservado por los pedidos anteriores. */
@@ -688,10 +794,10 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       expect(result).toEqual({
         lines: [
           {
-            key: `combo:${duoId}:Marrón:Acero`,
+            key: `combo:${duoId}:Marrón`,
             type: 'combo',
             name: 'Dúo Imperial',
-            detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón · Acero',
+            detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
             unitPriceArs: 68998,
             netUnitPriceArs: 51239,
             kitSavingsArs: 13998,
@@ -700,7 +806,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
             issue: null,
           },
           {
-            key: 'combo:cmb-duo-imperial:Negro:Alpaca cincelada',
+            key: 'combo:cmb-duo-imperial:Negro',
             type: 'combo',
             name: 'Combo no disponible',
             detail: '',
@@ -730,7 +836,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           field: 'items.0.options',
           code: 'required',
-          message: 'Elegí el cuero y la virola del mate.',
+          message: 'Elegí el cuero del mate.',
         },
       ])
     })
@@ -759,7 +865,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           type: 'combo',
           name: 'Dúo Imperial',
-          detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón · Acero',
+          detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
           quantity: 1,
           unitPriceArs: 68998,
           kitSavingsArs: 6999,
@@ -904,7 +1010,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         })
 
         expect(result.lines[0]?.detail).toBe(
-          'Yerba Canarias 1 kg + Mate Imperial Premium · Cuero negro · Alpaca cincelada',
+          'Yerba Canarias 1 kg + Mate Imperial Premium · Cuero negro',
         )
         expect(read.status).toBe(200)
         expect((read.body as OrderView).lines[0]?.kitItems?.map((piece) => piece.slug)).toEqual([

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
+import { isLeather } from '../../catalog/domain/product.entity'
 import type { ProductCatalogPort } from '../application/ports/product-catalog.port'
 import type { PricedCombo, PricedProduct } from '../domain/pricing'
 import { UUID_PATTERN } from './order.mapper'
@@ -45,6 +46,7 @@ export class CatalogProductsAdapter implements ProductCatalogPort {
         name: true,
         priceArs: true,
         status: true,
+        leathers: true,
         category: { select: { group: true } },
         inventory: { select: { onHand: true, reserved: true } },
       },
@@ -54,6 +56,8 @@ export class CatalogProductsAdapter implements ProductCatalogPort {
       slug: row.slug,
       name: row.name,
       group: row.category.group,
+      // El CHECK `products_leathers_check` solo deja cueros de `Leather`.
+      leathers: row.leathers.filter(isLeather),
       priceArs: row.priceArs,
       published: row.status === 'published',
       available: Math.max(0, (row.inventory?.onHand ?? 0) - (row.inventory?.reserved ?? 0)),

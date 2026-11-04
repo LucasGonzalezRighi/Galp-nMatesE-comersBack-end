@@ -130,7 +130,7 @@ export function comboLineAmounts(
 
 /**
  * Indica si los productos de un combo son de grupos distintos (a lo sumo un mate, una bombilla y
- * una yerba), que es la regla para guardarlo: así cada combo tiene un solo cuero y una sola virola.
+ * una yerba), que es la regla para guardarlo: así cada combo tiene a lo sumo un cuero.
  *
  * @param groups - Grupo de cada producto del combo.
  * @returns `true` si ningún grupo se repite.
@@ -143,7 +143,7 @@ export function hasDistinctGroups(groups: readonly ProductGroup[]): boolean {
 }
 
 /**
- * Indica si el combo lleva un mate: solo entonces el cliente elige cuero y virola.
+ * Indica si el combo lleva un mate. El cliente elige cuero solo si ese mate ofrece cueros.
  *
  * @param groups - Grupo de cada producto del combo.
  * @returns `true` si alguna pieza es un mate.

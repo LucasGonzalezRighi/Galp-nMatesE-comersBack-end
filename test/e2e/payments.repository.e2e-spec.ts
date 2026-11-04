@@ -58,8 +58,8 @@ import { FixedClock } from '../support/clock'
 import { startContainers, type TestContainers } from '../support/containers'
 import { FakeGateway, simToken } from '../support/payments'
 
-/** Cuero y virola de un mate pedido suelto. */
-const MATE_OPTIONS = { leather: 'Negro', ferrule: 'Alpaca cincelada' } as const
+/** Cuero de un mate pedido suelto. */
+const MATE_OPTIONS = { leather: 'Negro' } as const
 
 /** Un minuto en milisegundos. */
 const MINUTE = 60_000

@@ -22,6 +22,7 @@ export function toProductSummary(product: Product, prices: PriceDisplay): Produc
     categorySlug: props.category.slug,
     categoryName: props.category.name,
     group: props.category.group,
+    leathers: product.leathers(),
     priceArs: props.priceArs,
     netPriceArs: prices.showNetPrice ? product.netPriceArs(prices.vatRatePercent) : null,
     isPurchasable: product.isPurchasable(),
@@ -39,7 +40,7 @@ export function toProductSummary(product: Product, prices: PriceDisplay): Produc
  * @param product - Producto publicado.
  * @param prices - Si se muestra el precio sin IVA y con qué alícuota.
  * @param tabs - Pestañas de cada grupo y texto de envíos.
- * @returns La ficha con fotos, pestañas combinadas y opciones (solo en los mates).
+ * @returns La ficha con fotos y pestañas combinadas (los cueros vienen del resumen).
  */
 export function toProductDetail(
   product: Product,
@@ -50,6 +51,5 @@ export function toProductDetail(
     ...toProductSummary(product, prices),
     images: product.toProps().images,
     tabs: product.tabs(tabs[product.group], tabs.shipping),
-    options: product.options(),
   }
 }

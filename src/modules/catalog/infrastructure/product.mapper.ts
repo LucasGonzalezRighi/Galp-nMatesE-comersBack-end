@@ -1,6 +1,6 @@
 import type { Prisma } from '../../../generated/prisma/client'
 import { summarizeRatings } from '../../reviews/domain/rating'
-import { Product, type TabsOverride } from '../domain/product.entity'
+import { isLeather, type Leather, Product, type TabsOverride } from '../domain/product.entity'
 
 /**
  * Relaciones que se leen con cada producto: la línea, las fotos por posición, el stock y las
@@ -40,6 +40,20 @@ export function toTabsOverride(json: Prisma.JsonValue): TabsOverride | null {
 }
 
 /**
+ * Lee la columna `leathers` (`text[]`, con un CHECK que solo admite los de `Leather`).
+ *
+ * @param values - Valores guardados.
+ * @returns Los cueros, tal cual (el producto los valida y los ordena).
+ * @throws {TypeError} En español, si alguno no es un cuero.
+ */
+export function toLeathers(values: readonly string[]): Leather[] {
+  return values.map((value) => {
+    if (!isLeather(value)) throw new TypeError(`El cuero "${value}" guardado no existe.`)
+    return value
+  })
+}
+
+/**
  * Pasa una fila de Prisma al producto del dominio. `rating` y los decimales se convierten a
  * `number`; sin fila de stock, el producto queda sin unidades.
  *
@@ -62,5 +76,6 @@ export function toProduct(row: ProductRow): Product {
     inventory: row.inventory ?? { onHand: 0, reserved: 0 },
     tabsOverride: toTabsOverride(row.tabsOverride),
     rating: summarizeRatings(row.reviews.map(({ rating }) => rating.toNumber())),
+    leathers: toLeathers(row.leathers),
   })
 }

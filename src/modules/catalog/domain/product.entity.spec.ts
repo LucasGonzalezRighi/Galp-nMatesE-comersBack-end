@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  LEATHERS,
   MAX_QUANTITY_PER_PRODUCT,
+  normalizeLeathers,
   Product,
   type ProductProps,
   selectRelated,
@@ -26,9 +28,17 @@ function productProps(overrides: Partial<ProductProps> = {}): ProductProps {
     inventory: { onHand: 12, reserved: 0 },
     tabsOverride: null,
     rating: { average: 14 / 3, count: 3 },
+    leathers: [...LEATHERS],
     ...overrides,
   }
 }
+
+const BOMBILLONES = {
+  id: 'c2',
+  slug: 'bombillones',
+  name: 'Bombillones',
+  group: 'bombilla',
+} as const
 
 describe('Product', () => {
   it('arma el código con N° y al menos dos dígitos', () => {
@@ -62,15 +72,20 @@ describe('Product', () => {
     expect(() => Product.create(productProps()).netPriceArs(101)).toThrow(RangeError)
   })
 
-  it('ofrece cueros y virolas solo en los mates', () => {
-    expect(Product.create(productProps()).options()).toEqual({
-      leathers: ['Negro', 'Marrón', 'Crudo', 'Borravino'],
-      ferrules: ['Alpaca lisa', 'Alpaca cincelada', 'Acero'],
-    })
-    const bombilla = productProps({
-      category: { id: 'c2', slug: 'bombillones', name: 'Bombillones', group: 'bombilla' },
-    })
-    expect(Product.create(bombilla).options()).toBeNull()
+  it('guarda los cueros en el orden de LEATHERS y devuelve una copia', () => {
+    const mate = Product.create(productProps({ leathers: ['Borravino', 'Negro'] }))
+    expect(mate.leathers()).toEqual(['Negro', 'Borravino'])
+    mate.leathers().push('Crudo')
+    expect(mate.leathers()).toEqual(['Negro', 'Borravino'])
+    expect(mate.toProps().leathers).toEqual(['Negro', 'Borravino'])
+    expect(Product.create(productProps({ leathers: [] })).leathers()).toEqual([])
+  })
+
+  it('solo los mates llevan cueros: otro grupo con cueros es un RangeError', () => {
+    const bombilla = productProps({ category: BOMBILLONES, leathers: [] })
+    expect(Product.create(bombilla).leathers()).toEqual([])
+    expect(() => Product.create({ ...bombilla, leathers: ['Negro'] })).toThrow(RangeError)
+    expect(() => Product.create({ ...bombilla, leathers: ['Negro'] })).toThrow(/mates/)
   })
 
   it('usa la primera foto como principal y null sin fotos', () => {
@@ -94,6 +109,24 @@ describe('Product', () => {
     expect(() => Product.create(productProps({ inventory: { onHand: 1, reserved: 2 } }))).toThrow(
       /reservado/,
     )
+    expect(() => Product.create(productProps({ leathers: ['Negro', 'Negro'] }))).toThrow(RangeError)
+  })
+})
+
+describe('normalizeLeathers', () => {
+  it('deja los cueros en el orden de LEATHERS, en una lista nueva', () => {
+    const input = ['Borravino', 'Crudo', 'Negro', 'Marrón'] as const
+    expect(normalizeLeathers(input)).toEqual(['Negro', 'Marrón', 'Crudo', 'Borravino'])
+    expect(normalizeLeathers([])).toEqual([])
+    expect(input).toEqual(['Borravino', 'Crudo', 'Negro', 'Marrón'])
+  })
+
+  it('rechaza un cuero repetido o uno que no existe con un RangeError en español', () => {
+    expect(() => normalizeLeathers(['Negro', 'Negro'])).toThrow(/repetido/)
+    expect(() => normalizeLeathers(['Negro', 'Negro'])).toThrow(RangeError)
+    const unknown = JSON.parse('["Rosa"]') as ['Negro']
+    expect(() => normalizeLeathers(unknown)).toThrow(/"Rosa" no es un cuero/)
+    expect(() => normalizeLeathers(unknown)).toThrow(RangeError)
   })
 })
 
@@ -103,9 +136,10 @@ describe('selectRelated', () => {
     return { id, categoryId, group }
   }
 
-  it('pone primero los de la misma línea y después los del mismo grupo, sin el propio', () => {
+  it('va en tres tramos: la misma línea, el mismo grupo y el resto por grupo, sin el propio', () => {
     const product = item('a', 'imperiales', 'mate')
     const catalog = [
+      item('y1', 'yerbas', 'yerba'),
       product,
       item('b', 'torpedos', 'mate'),
       item('c', 'imperiales', 'mate'),
@@ -113,14 +147,31 @@ describe('selectRelated', () => {
       item('e', 'imperiales', 'mate'),
       item('f', 'camioneros', 'mate'),
       item('g', 'torpedos', 'mate'),
+      item('h', 'bombillones', 'bombilla'),
     ]
+    expect(selectRelated(product, catalog, 30).map(({ id }) => id)).toEqual([
+      'c',
+      'e',
+      'b',
+      'f',
+      'g',
+      'd',
+      'h',
+      'y1',
+    ])
     expect(selectRelated(product, catalog, 4).map(({ id }) => id)).toEqual(['c', 'e', 'b', 'f'])
   })
 
-  it('nunca incluye otro grupo y acepta un límite de 0', () => {
+  it('el resto sigue el orden mate, bombilla, yerba y acepta un límite de 0', () => {
     const product = item('a', 'yerbas', 'yerba')
-    const catalog = [product, item('b', 'bombillones', 'bombilla')]
-    expect(selectRelated(product, catalog, 4)).toEqual([])
-    expect(selectRelated(product, [product, item('c', 'yerbas', 'yerba')], 0)).toEqual([])
+    const catalog = [
+      product,
+      item('b', 'bombillones', 'bombilla'),
+      item('c', 'imperiales', 'mate'),
+      item('d', 'yerbas', 'yerba'),
+    ]
+    expect(selectRelated(product, catalog, 30).map(({ id }) => id)).toEqual(['d', 'c', 'b'])
+    expect(selectRelated(product, catalog, 0)).toEqual([])
+    expect(() => selectRelated(product, catalog, -1)).toThrow(RangeError)
   })
 })

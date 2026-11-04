@@ -172,7 +172,8 @@ describe('order.mapper', () => {
       totalArs: 79998,
       productId: 'p-mate',
       productSlug: 'mate-imperial-premium',
-      options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+      // Pedido anterior a los cueros por producto: la virola queda solo en `detail`.
+      options: { leather: 'Negro' },
       kitItems: null,
     })
   })
@@ -218,7 +219,7 @@ describe('order.mapper', () => {
       name: 'Yerba y mate',
       productId: null,
       productSlug: null,
-      options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+      options: { leather: 'Negro' },
     })
     expect(line?.kitItems?.map((piece) => [piece.position, piece.role])).toEqual([
       [1, 'yerba'],
@@ -282,24 +283,22 @@ describe('order.mapper', () => {
     expect(() => toShippingAddress(['CABA'])).toThrow(TypeError)
   })
 
-  it('lee y valida las opciones de una línea', () => {
+  it('lee el cuero de una línea e ignora la virola de los pedidos viejos', () => {
     expect(toCartItemOptions(null)).toBeNull()
-    expect(toCartItemOptions({ leather: 'Crudo', ferrule: 'Acero' })).toEqual({
-      leather: 'Crudo',
-      ferrule: 'Acero',
+    expect(toCartItemOptions({ leather: 'Crudo' })).toEqual({ leather: 'Crudo' })
+    expect(toCartItemOptions({ leather: 'Negro', ferrule: 'Alpaca cincelada' })).toEqual({
+      leather: 'Negro',
     })
     expect(() => toCartItemOptions({ leather: 'Verde', ferrule: 'Acero' })).toThrow(
       'Las opciones guardadas en la línea del pedido no son válidas',
     )
+    expect(() => toCartItemOptions({ ferrule: 'Acero' })).toThrow(TypeError)
   })
 
   it('escribe null de la base para el retiro y las líneas sin opciones', () => {
     expect(shippingAddressJson(null)).toBe(Prisma.DbNull)
     expect(cartItemOptionsJson(null)).toBe(Prisma.DbNull)
     expect(shippingAddressJson(HOME)).toEqual(HOME)
-    expect(cartItemOptionsJson({ leather: 'Negro', ferrule: 'Acero' })).toEqual({
-      leather: 'Negro',
-      ferrule: 'Acero',
-    })
+    expect(cartItemOptionsJson({ leather: 'Negro' })).toEqual({ leather: 'Negro' })
   })
 })

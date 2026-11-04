@@ -1,6 +1,6 @@
 // DTOs de respuesta del catálogo, solo para Swagger: reproducen `components/schemas` del contrato
-// (`Category`, `Rating`, `ProductSummary`, `ProductTabs`, `ProductOptions`, `ProductPage`,
-// `ProductDetail`, `ComboItem` y `Combo`) y el test de contrato los compara. Nunca se instancian (los controladores
+// (`Category`, `Rating`, `ProductSummary`, `ProductTabs`, `ProductPage`, `ProductDetail`,
+// `ComboItem` y `Combo`; `Leather` sale de `leathers`) y el test de contrato los compara. Nunca se instancian (los controladores
 // devuelven los read models de `application`): los campos van con asignación definida (`!`),
 // como dice el README.
 
@@ -15,10 +15,19 @@ import {
 } from '../../../../shared/infrastructure/http/openapi'
 import { PRODUCT_GROUPS } from '../../domain/category.entity'
 import { COMBO_MAX_ITEMS, COMBO_MIN_ITEMS, COMBO_STATUSES } from '../../domain/combo.entity'
-import { FERRULES, LEATHERS, MAX_QUANTITY_PER_PRODUCT } from '../../domain/product.entity'
+import { LEATHERS, MAX_QUANTITY_PER_PRODUCT } from '../../domain/product.entity'
 
 /** Grupo de producto como esquema con nombre (`ProductGroup`). */
 const PRODUCT_GROUP = { enum: [...PRODUCT_GROUPS], enumName: 'ProductGroup' }
+
+/** Cueros de un producto o de una pieza de combo: de 0 a 4 `Leather`, sin repetir. */
+const LEATHER_LIST = {
+  enum: [...LEATHERS],
+  enumName: 'Leather',
+  isArray: true,
+  maxItems: LEATHERS.length,
+  uniqueItems: true,
+}
 
 /** Línea del catálogo (`Category`). */
 @ApiSchema({ name: 'Category' })
@@ -107,6 +116,10 @@ export class ProductSummaryDto {
   @ApiProperty(PRODUCT_GROUP)
   group!: string
 
+  /** Cueros que el cliente puede elegir, en el orden de `Leather`; vacío sin selector. */
+  @ApiProperty(LEATHER_LIST)
+  leathers!: string[]
+
   /** Precio final, o `null` si es "a consultar". */
   @ApiSchemaProperty(namedRef('NullablePesos'))
   priceArs!: number | null
@@ -160,18 +173,6 @@ export class ProductTabsDto {
   care!: string
 }
 
-/** Cueros y virolas de un mate (`ProductOptions`). */
-@ApiSchema({ name: 'ProductOptions' })
-export class ProductOptionsDto {
-  /** Cueros disponibles. */
-  @ApiProperty({ enum: [...LEATHERS], enumName: 'Leather', isArray: true })
-  leathers!: string[]
-
-  /** Virolas disponibles. */
-  @ApiProperty({ enum: [...FERRULES], enumName: 'Ferrule', isArray: true })
-  ferrules!: string[]
-}
-
 /** Página de productos (`ProductPage`). */
 @ApiSchema({ name: 'ProductPage' })
 export class ProductPageDto {
@@ -210,6 +211,10 @@ export class ComboItemDto {
   /** Grupo del producto. */
   @ApiProperty(PRODUCT_GROUP)
   group!: string
+
+  /** Cueros que se pueden elegir de esta pieza; vacío si no es un mate o no tiene selector. */
+  @ApiProperty(LEATHER_LIST)
+  leathers!: string[]
 
   /** Precio de lista vigente, o `null` si es "a consultar". */
   @ApiSchemaProperty(namedRef('NullablePesos'))
@@ -300,11 +305,10 @@ export const CATALOG_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = 
       { $ref: getSchemaPath(ProductSummaryDto) },
       {
         type: 'object',
-        required: ['images', 'tabs', 'options'],
+        required: ['images', 'tabs'],
         properties: {
           images: { type: 'array', items: schemaRef('Image') },
           tabs: { $ref: getSchemaPath(ProductTabsDto) },
-          options: nullableRef('ProductOptions'),
         },
       },
     ],

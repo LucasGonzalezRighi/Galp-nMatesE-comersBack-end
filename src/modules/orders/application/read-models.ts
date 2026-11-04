@@ -44,7 +44,7 @@ export interface OrderLineView {
   totalArs: number
   /** Slug del producto al comprar, o `null` en un kit o un combo. */
   productSlug: string | null
-  /** Cuero y virola de un mate, del kit o del mate del combo, o `null`. */
+  /** Cuero de un mate, del mate del kit o del mate del combo, o `null`. */
   options: CartItemOptions | null
   /** Las piezas de un kit (3) o de un combo (2 o 3, en el orden del combo), o `null`. */
   kitItems: OrderKitItemView[] | null

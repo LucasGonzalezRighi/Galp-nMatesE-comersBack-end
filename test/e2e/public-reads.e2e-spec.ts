@@ -146,15 +146,38 @@ describe('lecturas públicas del contrato (HTTP + Postgres + Redis)', () => {
     expect(response.body).toMatchObject({ id: product.id, slug: PREMIUM })
   })
 
-  it('GET /products/{slug}/related → hasta 4, misma línea primero y después el mismo grupo', async () => {
+  it('GET /products/{slug}/related → 26: 3 imperiales, 12 mates, 8 bombillas y 3 yerbas', async () => {
     const response = await request(server()).get(`/api/v1/products/${PREMIUM}/related`)
 
     expect(response.status).toBe(200)
+    // Tres tramos (B-85): la misma línea, el mismo grupo y el resto por grupo, cada uno por código.
     expect((response.body as { slug: string }[]).map(({ slug }) => slug)).toEqual([
       'mate-imperial-de-calabaza',
       'mate-imperial-termico',
       'mate-imperial-criollo',
       'mate-torpedo-premium',
+      'mate-torpedo-virola-de-alpaca-cincelada',
+      'mate-torpedo-linea-acero',
+      'torpedo-crudo-con-base-y-anillos',
+      'mate-torpedo-virola-en-alpaca-cincelada',
+      'torpedo-alpaca-cincelada-c-cuero',
+      'mate-camionero-criollo-con-pelo',
+      'camionero-criollo',
+      'camionero-virola-de-aluminio',
+      'mate-ranchero-manchas-blancas',
+      'mate-galleta',
+      'mate-coquito-criollo',
+      'bombillon-curvo-de-alpaca',
+      'bombillon-100-alpaca',
+      'bombillon-mini-premium-pico-loro-15-cm',
+      'bombillon-mini-alpaca-15-cm',
+      'bombillon-premium-curvo',
+      'bombillon-alpaca-18-cm',
+      'bombillon-curvo',
+      'bombillon-alpaca-pico-loro-18-cm',
+      'yerba-canarias-1-kg',
+      'yerba-canarias-serena-1-kg',
+      'yerba-canarias-te-y-jengibre-1-kg',
     ])
   })
 

@@ -24,8 +24,8 @@ export class QuoteCartQuery {
   /**
    * @param items - Líneas del carrito (de 1 a 50).
    * @returns La cotización, con las líneas en el orden del carrito.
-   * @throws {CartValidationError} 422 si un mate llega sin cuero ni virola, o si el total pasa
-   *   del máximo.
+   * @throws {CartValidationError} 422 si un mate con cueros llega sin cuero o con uno que no
+   *   ofrece, o si el total pasa del máximo.
    * @throws {RangeError} En español, si las líneas o las cantidades están fuera de rango.
    */
   async execute(items: CartItem[]): Promise<CartQuote> {

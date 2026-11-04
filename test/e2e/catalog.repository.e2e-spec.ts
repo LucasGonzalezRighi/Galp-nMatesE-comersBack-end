@@ -85,7 +85,8 @@ describe('lecturas del catálogo, contenidos, reseñas y ajustes (Postgres + Red
     expect(product?.mainImage).toEqual(product?.images[0])
     expect(product?.rating.average).toBe(14 / 3)
     expect(product?.rating.average.toFixed(1)).toBe('4.7')
-    expect(product?.options?.ferrules).toHaveLength(3)
+    expect(product?.leathers).toEqual(['Negro', 'Marrón', 'Crudo', 'Borravino'])
+    expect(product).not.toHaveProperty('options')
     expect(product?.tabs.shipping).toMatch(/Enviamos a todo el país/)
   })
 
@@ -188,15 +189,39 @@ describe('lecturas del catálogo, contenidos, reseñas y ajustes (Postgres + Red
     await expect(get(GetProductQuery).execute('no-existe')).resolves.toBeNull()
   })
 
-  it('devuelve hasta 4 relacionados: primero la misma línea, después el mismo grupo', async () => {
+  it('devuelve 26 relacionados: la misma línea, el mismo grupo y después bombillas y yerbas', async () => {
     const related = await get(GetRelatedProductsQuery).execute('mate-imperial-premium')
+    if (related === null) throw new Error('El Mate Imperial Premium no está publicado')
 
-    expect(related?.map(({ slug }) => slug)).toEqual([
+    expect(related).toHaveLength(26)
+    // Los 4 primeros son los de antes de B-85.
+    expect(related.slice(0, 4).map(({ slug }) => slug)).toEqual([
       'mate-imperial-de-calabaza',
       'mate-imperial-termico',
       'mate-imperial-criollo',
       'mate-torpedo-premium',
     ])
+    const tramo = ({ group, categorySlug }: (typeof related)[number]): string =>
+      group === 'mate' && categorySlug === 'imperiales' ? 'imperiales' : group
+    const runs = related.reduce<[string, number][]>((acc, item) => {
+      const last = acc.at(-1)
+      if (last?.[0] === tramo(item)) last[1] += 1
+      else acc.push([tramo(item), 1])
+      return acc
+    }, [])
+    expect(runs).toEqual([
+      ['imperiales', 3],
+      ['mate', 12],
+      ['bombilla', 8],
+      ['yerba', 3],
+    ])
+    expect(related.map(({ slug }) => slug)).not.toContain('mate-imperial-premium')
+    // Dentro de cada tramo, el orden del catálogo (el código).
+    for (const group of ['bombilla', 'yerba'] as const) {
+      const codes = related.filter((item) => item.group === group).map(({ code }) => code)
+      expect(codes).toEqual([...codes].sort())
+    }
+    expect(related.find(({ group }) => group === 'bombilla')?.leathers).toEqual([])
   })
 
   it('lista las 6 líneas por posición con sus productos publicados', async () => {

@@ -1,8 +1,10 @@
 // Líneas del carrito que manda la tienda (`CartItemInput` del contrato): un producto suelto, un
 // kit o un combo, según `type`. Los mensajes son los del mock del front
-// (`mock/handlers/pricing.ts`); los que el mock deja a zod (tipo de línea, ids, cuero y virola) van
-// en español rioplatense. Swagger publica estos esquemas crudos (`oneOf` con `discriminator`) desde
-// `ORDERS_OPENAPI_SCHEMAS`: estas clases solo validan.
+// (`mock/handlers/pricing.ts`); los que el mock deja a zod (tipo de línea, ids y cuero) van en
+// español rioplatense. Un `ferrule` (la virola de antes) en `options` es un campo de más: 422
+// "Este campo no está permitido." hasta que la tienda vieja recargue (Ruling B-70). Swagger
+// publica estos esquemas crudos (`oneOf` con `discriminator`) desde `ORDERS_OPENAPI_SCHEMAS`:
+// estas clases solo validan.
 
 import { applyDecorators } from '@nestjs/common'
 import { plainToInstance, Transform, type TransformFnParams, Type } from 'class-transformer'
@@ -21,14 +23,13 @@ import {
   ValidateNested,
 } from 'class-validator'
 
-import { FERRULES, LEATHERS } from '../../../catalog/domain/product.entity'
+import { LEATHERS } from '../../../catalog/domain/product.entity'
 import { RawValue } from '../../../identity/interface/dto/identity-fields'
 import { ApiSchemaProperty, schemaRef } from '../../../../shared/infrastructure/http/openapi'
 import { MAX_TOTAL_ARS } from '../../domain/pricing'
 import {
   type CartItem,
   type CartItemOptions,
-  type Ferrule,
   type Leather,
   MAX_CART_LINES,
 } from '../../domain/cart-line'
@@ -54,10 +55,8 @@ export const CART_MESSAGES = {
   comboId: 'Elegí un combo válido.',
   /** Cuero que no es uno de los del contrato. */
   leather: 'Elegí el cuero del mate.',
-  /** Virola que no es una de las del contrato. */
-  ferrule: 'Elegí la virola del mate.',
   /** Opciones que no son un objeto. */
-  options: 'Elegí el cuero y la virola del mate.',
+  options: 'Elegí el cuero del mate.',
   /** Precio visto que no es un monto entero válido. */
   expectedPrice: 'El precio visto tiene que ser un monto entero en pesos.',
 } as const
@@ -107,15 +106,11 @@ function ExpectedPriceField(max: number): PropertyDecorator {
   )
 }
 
-/** Cuero y virola de un mate (`CartItemOptions`). */
+/** Cuero elegido de un mate (`CartItemOptions`). */
 export class CartItemOptionsDto {
   /** Color del cuero. */
   @IsIn(LEATHERS, { message: CART_MESSAGES.leather })
   leather!: Leather
-
-  /** Virola. */
-  @IsIn(FERRULES, { message: CART_MESSAGES.ferrule })
-  ferrule!: Ferrule
 }
 
 /** Producto suelto (`ProductCartItemInput`). */
@@ -132,7 +127,7 @@ export class ProductCartItemInputDto {
   @QuantityField()
   quantity!: number
 
-  /** Cuero y virola de un mate; `null` (o ausente) en los demás productos. */
+  /** Cuero elegido si el producto ofrece cueros; `null` (o ausente) en los demás. */
   @ValidateIf(IF_PRESENT)
   @ValidateNested({ message: CART_MESSAGES.options })
   @Type(() => CartItemOptionsDto)
@@ -161,9 +156,10 @@ export class KitCartItemInputDto {
   @ProductIdField()
   yerbaId!: string
 
-  /** Cuero del mate (la virola del kit es fija). */
+  /** Cuero del mate; `null` (o ausente, como en el mock) si el mate no ofrece cueros. */
+  @ValidateIf(IF_PRESENT)
   @IsIn(LEATHERS, { message: CART_MESSAGES.leather })
-  leather!: Leather
+  leather?: Leather | null
 
   /** Cantidad de kits, de 1 a 20. */
   @QuantityField()
@@ -188,7 +184,7 @@ export class ComboCartItemInputDto {
   @QuantityField()
   quantity!: number
 
-  /** Cuero y virola del mate del combo; `null` (o ausente) si no lleva mate. */
+  /** Cuero del mate del combo; `null` (o ausente) si no lleva mate o no ofrece cueros. */
   @ValidateIf(IF_PRESENT)
   @ValidateNested({ message: CART_MESSAGES.options })
   @Type(() => CartItemOptionsDto)
@@ -259,9 +255,9 @@ export function CartItemsField(): PropertyDecorator {
 }
 
 /**
- * Pasa una línea validada a la del dominio: `options` ausente queda `null` y
- * `expectedUnitPriceArs` solo va si vino con un número (ausente y `null` son lo mismo, como en el
- * mock).
+ * Pasa una línea validada a la del dominio: `options` y el `leather` del kit ausentes quedan
+ * `null` y `expectedUnitPriceArs` solo va si vino con un número (ausente y `null` son lo mismo,
+ * como en el mock).
  *
  * @param item - Línea ya validada por el pipe.
  * @returns La línea del carrito para los casos de uso.
@@ -275,15 +271,13 @@ export function toCartItem(item: CartItemInputDto): CartItem {
       mateId: item.mateId,
       bombillaId: item.bombillaId,
       yerbaId: item.yerbaId,
-      leather: item.leather,
+      leather: item.leather ?? null,
       quantity: item.quantity,
       ...expected,
     }
   }
   const options: CartItemOptions | null =
-    item.options === null || item.options === undefined
-      ? null
-      : { leather: item.options.leather, ferrule: item.options.ferrule }
+    item.options === null || item.options === undefined ? null : { leather: item.options.leather }
   if (item.type === 'combo') {
     return { type: 'combo', comboId: item.comboId, quantity: item.quantity, options, ...expected }
   }

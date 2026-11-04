@@ -173,7 +173,7 @@ export class OrderLineDto {
   @ApiSchemaProperty(NULLABLE_STRING)
   productSlug!: string | null
 
-  /** Cuero y virola de un mate, de un kit o del mate de un combo, o `null`. */
+  /** Cuero de un mate, del mate de un kit o del mate de un combo, o `null`. */
   @ApiSchemaProperty(nullableRef('CartItemOptions'))
   options!: unknown
 
@@ -423,7 +423,7 @@ const PRODUCT_ID: OpenApiSchema = { type: 'string', minLength: 1, maxLength: 80 
  * `discriminator`) y los destinos de un envío (`ShippingAddress` es un `oneOf`;
  * `BranchAddressInput` lleva `additionalProperties: false`) y los del dashboard (`AdminOrderPage`
  * y el cuerpo `OrderStatusChange`, con `type: [string, null]`). `buildOpenApiDocument` los suma a
- * `components.schemas`. `Leather`, `Ferrule` y `ShippingMethod` ya los publican catálogo y ajustes.
+ * `components.schemas`. `Leather` y `ShippingMethod` ya los publican catálogo y ajustes.
  */
 export const ORDERS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
   OrderNumber: { type: 'string', pattern: ORDER_NUMBER_PATTERN.source },
@@ -435,8 +435,8 @@ export const ORDERS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
   Honeypot: { type: ['string', 'null'] },
   CartItemOptions: {
     type: 'object',
-    required: ['leather', 'ferrule'],
-    properties: { leather: schemaRef('Leather'), ferrule: schemaRef('Ferrule') },
+    required: ['leather'],
+    properties: { leather: schemaRef('Leather') },
   },
   ProductCartItemInput: cartItemSchema(
     'product',
@@ -451,7 +451,7 @@ export const ORDERS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
       mateId: PRODUCT_ID,
       bombillaId: PRODUCT_ID,
       yerbaId: PRODUCT_ID,
-      leather: schemaRef('Leather'),
+      leather: nullableRef('Leather'),
     },
     'TotalArs',
   ),

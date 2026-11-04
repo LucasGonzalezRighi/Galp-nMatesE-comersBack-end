@@ -37,7 +37,7 @@ const MATE: ProductCartItem = {
   type: 'product',
   productId: imperialPremium.id,
   quantity: 1,
-  options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+  options: { leather: 'Negro' },
 }
 
 function setup() {
@@ -109,7 +109,7 @@ const DUO: ComboCartItem = {
   type: 'combo',
   comboId: COMBOS.duoImperial.id,
   quantity: 1,
-  options: { leather: 'Marrón', ferrule: 'Acero' },
+  options: { leather: 'Marrón' },
 }
 
 const KIT: KitCartItem = {
@@ -164,13 +164,13 @@ describe('CreateOrderCommand', () => {
         {
           type: 'product',
           name: 'Mate Imperial Premium',
-          detail: 'Cuero negro · Alpaca cincelada',
+          detail: 'Cuero negro',
           quantity: 1,
           unitPriceArs: 39999,
           kitSavingsArs: 0,
           totalArs: 39999,
           productSlug: 'mate-imperial-premium',
-          options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+          options: { leather: 'Negro' },
           kitItems: null,
         },
       ],
@@ -247,7 +247,7 @@ describe('CreateOrderCommand', () => {
         type: 'product' as const,
         productId: coquito.id,
         quantity: 3,
-        options: { leather: 'Negro' as const, ferrule: 'Acero' as const },
+        options: { leather: 'Negro' as const },
         expectedUnitPriceArs: 1,
       },
     ]
@@ -352,13 +352,13 @@ describe('CreateOrderCommand', () => {
       {
         type: 'combo',
         name: 'Dúo Imperial',
-        detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón · Acero',
+        detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
         quantity: 1,
         unitPriceArs: 68998,
         kitSavingsArs: 6999,
         totalArs: 61999,
         productSlug: null,
-        options: { leather: 'Marrón', ferrule: 'Acero' },
+        options: { leather: 'Marrón' },
         kitItems: [
           { slug: 'mate-imperial-premium', name: 'Mate Imperial Premium', unitPriceArs: 39999 },
           { slug: 'bombillon-premium-curvo', name: 'Bombillón Premium Curvo', unitPriceArs: 28999 },

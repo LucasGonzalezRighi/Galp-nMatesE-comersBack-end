@@ -14,7 +14,7 @@ const MATE_LINE = {
   type: 'product',
   productId: 'prd-imperial-premium',
   quantity: 1,
-  options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+  options: { leather: 'Negro' },
 }
 
 /** Kit con el precio visto, como lo manda la tienda en `POST /orders`. */
@@ -33,7 +33,7 @@ const COMBO_LINE = {
   type: 'combo',
   comboId: 'cmb-duo-imperial',
   quantity: 2,
-  options: { leather: 'Marrón', ferrule: 'Acero' },
+  options: { leather: 'Marrón' },
   expectedUnitPriceArs: 61999,
 }
 
@@ -102,6 +102,20 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
     expect(quoteCart.execute).toHaveBeenCalledWith([
       COMBO_LINE,
       { ...withoutOptions, options: null },
+    ])
+  })
+
+  it('POST /cart/quote: el cuero de un kit admite null y ausente, y llega como null', async () => {
+    const withoutLeather = { ...KIT_LINE, leather: undefined }
+
+    const response = await post('/cart/quote', {
+      items: [{ ...KIT_LINE, leather: null }, withoutLeather],
+    })
+
+    expect(response.status).toBe(200)
+    expect(quoteCart.execute).toHaveBeenCalledWith([
+      { ...KIT_LINE, leather: null },
+      { ...KIT_LINE, leather: null },
     ])
   })
 
@@ -185,6 +199,15 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
       { items: [{ ...COMBO_LINE, productId: 'prd-x' }] },
       {
         field: 'items.0.productId',
+        code: 'unrecognized_key',
+        message: 'Este campo no está permitido.',
+      },
+    ],
+    [
+      'la virola de antes en options (pestaña vieja de la tienda)',
+      { items: [{ ...MATE_LINE, options: { leather: 'Negro', ferrule: 'Alpaca cincelada' } }] },
+      {
+        field: 'items.0.options.ferrule',
         code: 'unrecognized_key',
         message: 'Este campo no está permitido.',
       },

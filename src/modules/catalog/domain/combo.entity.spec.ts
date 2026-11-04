@@ -116,7 +116,7 @@ describe('hasDistinctGroups', () => {
 })
 
 describe('comboHasMate', () => {
-  it('pide cuero y virola solo si alguna pieza es un mate', () => {
+  it('indica si alguna pieza es un mate', () => {
     expect(comboHasMate(['mate', 'bombilla'])).toBe(true)
     expect(comboHasMate(['bombilla', 'yerba'])).toBe(false)
   })

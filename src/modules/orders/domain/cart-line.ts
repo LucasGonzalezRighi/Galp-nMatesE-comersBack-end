@@ -1,17 +1,11 @@
-import type { FERRULES, LEATHERS } from '../../catalog/domain/product.entity'
+import type { Leather } from '../../catalog/domain/product.entity'
 
-/** Color de cuero de un mate (`Leather` del contrato). */
-export type Leather = (typeof LEATHERS)[number]
+export type { Leather } from '../../catalog/domain/product.entity'
 
-/** Virola de un mate (`Ferrule` del contrato). */
-export type Ferrule = (typeof FERRULES)[number]
-
-/** Cuero y virola elegidos para un mate (`CartItemOptions` del contrato). No cambian el precio. */
+/** Cuero elegido de un mate que ofrece cueros (`CartItemOptions` del contrato). No cambia el precio. */
 export interface CartItemOptions {
-  /** Color del cuero. */
+  /** Color del cuero, uno de los `leathers` del mate. */
   leather: Leather
-  /** Virola. */
-  ferrule: Ferrule
 }
 
 /** Producto suelto en el carrito (`ProductCartItemInput`). */
@@ -22,13 +16,13 @@ export interface ProductCartItem {
   productId: string
   /** Unidades, de 1 a 20. */
   quantity: number
-  /** Cuero y virola; `null` en los productos que no son mates (si llegan, se ignoran). */
+  /** Cuero elegido; `null` si el producto no ofrece cueros (si llega, se ignora). */
   options: CartItemOptions | null
   /** Precio de lista por unidad que la tienda tenía cotizado; si difiere, `price_changed`. */
   expectedUnitPriceArs?: number
 }
 
-/** Kit de mate, bombilla y yerba (`KitCartItemInput`): la virola es fija ({@link KIT_FERRULE}). */
+/** Kit de mate, bombilla y yerba (`KitCartItemInput`), con el cuero del mate si ofrece. */
 export interface KitCartItem {
   /** Discriminador. */
   type: 'kit'
@@ -38,8 +32,8 @@ export interface KitCartItem {
   bombillaId: string
   /** Id de la yerba. */
   yerbaId: string
-  /** Cuero del mate. */
-  leather: Leather
+  /** Cuero del mate, o `null` si el mate no ofrece cueros (si llega, se ignora). */
+  leather: Leather | null
   /** Cantidad de kits, de 1 a 20. */
   quantity: number
   /** Suma de las tres piezas que la tienda tenía cotizada (sin el descuento del kit). */
@@ -57,7 +51,7 @@ export interface ComboCartItem {
   comboId: string
   /** Cantidad de combos, de 1 a 20. */
   quantity: number
-  /** Cuero y virola del mate del combo; `null` si no lleva mate (si llegan, se ignoran). */
+  /** Cuero del mate del combo; `null` si no lleva mate o el mate no ofrece cueros (se ignora). */
   options: CartItemOptions | null
   /** Precio final del combo que la tienda tenía cotizado; si difiere, `price_changed`. */
   expectedUnitPriceArs?: number
@@ -69,29 +63,28 @@ export type CartItem = ProductCartItem | KitCartItem | ComboCartItem
 /** Máximo de líneas por carrito (`CartQuoteInput.items.maxItems`). */
 export const MAX_CART_LINES = 50
 
-/** Virola fija de los mates de un kit. */
-export const KIT_FERRULE: Ferrule = 'Alpaca cincelada'
-
 /** Nombre de una línea de kit. */
 export const KIT_LINE_NAME = 'Kit'
 
 /**
- * Clave de la línea, igual a la que arma la tienda: `product:{id}:{cuero|-}:{virola|-}`,
- * `kit:{mateId}:{bombillaId}:{yerbaId}:{cuero}` o `combo:{comboId}:{cuero|-}:{virola|-}`, con
- * acentos y espacios tal cual. La de un combo no incluye las piezas.
+ * Clave de la línea, igual a la que arma la tienda (`cartLineKey` y `comboLineKey` del front):
+ * `product:{id}:{cuero|-}`, `kit:{mateId}:{bombillaId}:{yerbaId}:{cuero|-}` o
+ * `combo:{comboId}:{cuero|-}`, con `-` si la línea no trae cuero y los acentos tal cual. Siempre
+ * repite lo que mandó la tienda, ofrezca o no cueros el producto: si no, la línea de la tienda
+ * queda cargando. La de un combo no incluye las piezas.
  *
  * @param item - Línea del carrito.
- * @param isMate - Si el producto suelto es un mate, o si el combo lleva mate o no existe (sin el
- *   combo no se sabe y se conserva lo que mandó la tienda): en los demás las opciones se ignoran.
  * @returns La clave.
+ * @example
+ * cartLineKey({ type: 'combo', comboId: 'cmb-duo-imperial', quantity: 1, options: { leather: 'Marrón' } })
+ * // "combo:cmb-duo-imperial:Marrón"
  */
-export function cartLineKey(item: CartItem, isMate: boolean): string {
+export function cartLineKey(item: CartItem): string {
   if (item.type === 'kit') {
-    return `kit:${item.mateId}:${item.bombillaId}:${item.yerbaId}:${item.leather}`
+    return `kit:${item.mateId}:${item.bombillaId}:${item.yerbaId}:${item.leather ?? '-'}`
   }
-  const options = isMate ? item.options : null
   const prefix = item.type === 'combo' ? `combo:${item.comboId}` : `product:${item.productId}`
-  return `${prefix}:${options?.leather ?? '-'}:${options?.ferrule ?? '-'}`
+  return `${prefix}:${item.options?.leather ?? '-'}`
 }
 
 /**

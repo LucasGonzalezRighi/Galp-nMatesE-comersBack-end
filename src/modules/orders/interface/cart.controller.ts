@@ -34,7 +34,8 @@ export class CartController {
    *
    * @param body - Líneas del carrito, ya validadas.
    * @returns Importes, ahorro por kit y disponibilidad de cada línea, en el orden del carrito.
-   * @throws {CartValidationError} 422 si un mate llega sin cuero ni virola o el total es enorme.
+   * @throws {CartValidationError} 422 si falta el cuero de un mate con cueros, si el mate no lo
+   *   ofrece o si el total es enorme.
    */
   @Post('cart/quote')
   @HttpCode(HttpStatus.OK)

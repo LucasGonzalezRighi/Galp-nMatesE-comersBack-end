@@ -20,12 +20,7 @@ import {
 } from '../application/queries/get-related-products.query'
 import { ListProductsQuery } from '../application/queries/list-products.query'
 import type { ProductDetail, ProductPage, ProductSummary } from '../application/read-models'
-import {
-  ProductOptionsDto,
-  ProductPageDto,
-  ProductSummaryDto,
-  ProductTabsDto,
-} from './dto/catalog.response.dto'
+import { ProductPageDto, ProductSummaryDto, ProductTabsDto } from './dto/catalog.response.dto'
 import { ListProductsQueryDto } from './dto/list-products.query.dto'
 import { PRODUCT_NOT_FOUND, ProductSlugParamDto } from './dto/product-slug.param.dto'
 
@@ -36,7 +31,7 @@ import { PRODUCT_NOT_FOUND, ProductSlugParamDto } from './dto/product-slug.param
  * el spec §3.2 solo limita login, formularios públicos y creación de pedidos.
  */
 @ApiTags('catalog')
-@ApiExtraModels(ProductSummaryDto, ProductTabsDto, ProductOptionsDto, ImageDto)
+@ApiExtraModels(ProductSummaryDto, ProductTabsDto, ImageDto)
 @SkipThrottle()
 @Controller('products')
 export class ProductsController {

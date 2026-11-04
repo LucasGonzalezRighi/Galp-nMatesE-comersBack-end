@@ -48,7 +48,7 @@ const BODY = {
       type: 'product',
       productId: 'prd-imperial-premium',
       quantity: 1,
-      options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+      options: { leather: 'Negro' },
       expectedUnitPriceArs: 39999,
     },
   ],

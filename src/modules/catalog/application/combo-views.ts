@@ -52,6 +52,7 @@ export function toComboItemView(product: Product): ComboItemView {
     slug: props.slug,
     name: props.name,
     group: product.group,
+    leathers: product.leathers(),
     unitPriceArs: props.priceArs,
     isPurchasable: product.isPurchasable(),
     maxQuantity: product.maxQuantity(),

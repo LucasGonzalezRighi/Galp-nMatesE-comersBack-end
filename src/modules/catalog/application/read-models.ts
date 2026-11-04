@@ -3,11 +3,11 @@
 
 import type { ProductGroup } from '../domain/category.entity'
 import type { ComboStatus } from '../domain/combo.entity'
-import type { ProductOptions, ProductTabs } from '../domain/product.entity'
+import type { Leather, ProductTabs } from '../domain/product.entity'
 
 export type { ProductGroup } from '../domain/category.entity'
 export type { ComboStatus } from '../domain/combo.entity'
-export type { ProductOptions, ProductTabs } from '../domain/product.entity'
+export type { Leather, ProductTabs } from '../domain/product.entity'
 
 /** Órdenes del listado (`ProductSortOrder`). */
 export const PRODUCT_SORT_ORDERS = ['destacados', 'menor', 'mayor', 'az'] as const
@@ -77,6 +77,8 @@ export interface ProductSummary {
   categoryName: string
   /** Grupo. */
   group: ProductGroup
+  /** Cueros que el cliente puede elegir, en el orden de `Leather`; vacío si no hay selector. */
+  leathers: Leather[]
   /** Precio final, o `null` si es "a consultar". */
   priceArs: number | null
   /** Precio sin impuestos nacionales, o `null` si no se muestra o es "a consultar". */
@@ -101,8 +103,6 @@ export interface ProductDetail extends ProductSummary {
   images: Image[]
   /** Pestañas de la ficha. */
   tabs: ProductTabs
-  /** Cueros y virolas en los mates; `null` en el resto. */
-  options: ProductOptions | null
 }
 
 /** Página de productos (`ProductPage`). */
@@ -127,6 +127,8 @@ export interface ComboItemView {
   name: string
   /** Grupo del producto. */
   group: ProductGroup
+  /** Cueros que se pueden elegir de esta pieza; vacío si no es un mate o no tiene selector. */
+  leathers: Leather[]
   /** Precio de lista vigente, o `null` si es "a consultar". */
   unitPriceArs: number | null
   /** Si el producto se puede vender ahora (publicado, con precio y con stock). */

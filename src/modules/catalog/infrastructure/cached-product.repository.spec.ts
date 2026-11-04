@@ -20,6 +20,7 @@ const PRODUCT = Product.create({
   inventory: { onHand: 12, reserved: 0 },
   tabsOverride: null,
   rating: { average: 4.5, count: 2 },
+  leathers: ['Negro', 'Crudo'],
 })
 
 /** Caché en memoria que anota cada `get` y cada `set`. */

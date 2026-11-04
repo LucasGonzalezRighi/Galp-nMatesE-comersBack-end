@@ -35,7 +35,7 @@ function mate(quantity: number, extra: Partial<ProductCartItem> = {}): ProductCa
     type: 'product',
     productId: imperialPremium.id,
     quantity,
-    options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+    options: { leather: 'Negro' },
     ...extra,
   }
 }
@@ -61,9 +61,18 @@ function combo(quantity: number, extra: Partial<ComboCartItem> = {}): ComboCartI
     type: 'combo',
     comboId: duoImperial.id,
     quantity,
-    options: { leather: 'Marrón', ferrule: 'Acero' },
+    options: { leather: 'Marrón' },
     ...extra,
   }
+}
+
+/** Los productos de prueba con el Mate Imperial Premium ofreciendo solo esos cueros. */
+function imperialWith(leathers: PricedProduct['leathers']): Map<string, PricedProduct> {
+  return productMap(
+    Object.values(PRODUCTS).map((item) =>
+      item.id === imperialPremium.id ? { ...item, leathers } : item,
+    ),
+  )
 }
 
 function price(
@@ -110,7 +119,7 @@ describe('priceCart: Review Focus 5', () => {
         totalArs: 136794,
         productId: null,
         productSlug: null,
-        options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+        options: { leather: 'Negro' },
         kitItems: [
           {
             role: 'mate',
@@ -146,18 +155,18 @@ describe('priceCart: Review Focus 5', () => {
     ])
   })
 
-  it('la clave de un mate con Alpaca cincelada conserva el espacio y el detail sigue al mock', () => {
+  it('la clave de un mate es product:{id}:{cuero} y el detail "Cuero negro", como el mock', () => {
     const priced = price([mate(1)])
 
     expect(priced.quote.lines[0]).toMatchObject({
-      key: `product:${imperialPremium.id}:Negro:Alpaca cincelada`,
+      key: `product:${imperialPremium.id}:Negro`,
       name: 'Mate Imperial Premium',
-      detail: 'Cuero negro · Alpaca cincelada',
+      detail: 'Cuero negro',
     })
     expect(priced.lines[0]).toMatchObject({
       productId: imperialPremium.id,
       productSlug: 'mate-imperial-premium',
-      options: { leather: 'Negro', ferrule: 'Alpaca cincelada' },
+      options: { leather: 'Negro' },
       kitItems: null,
     })
   })
@@ -276,7 +285,7 @@ describe('priceCart: líneas', () => {
       ['unavailable', 0, 'Producto no disponible'],
       ['unavailable', 0, 'Mate Torpedo Línea Acero'],
     ])
-    expect(priced.quote.lines[0]?.key).toBe('product:prd-no-existe:-:-')
+    expect(priced.quote.lines[0]?.key).toBe('product:prd-no-existe:-')
     expect(priced.stockChanges).toEqual([
       {
         kind: 'unavailable',
@@ -312,33 +321,104 @@ describe('priceCart: líneas', () => {
     ])
   })
 
-  it('ignora las opciones en un producto que no es mate', () => {
+  it('ignora el cuero en un producto sin cueros, pero la clave repite lo que mandó la tienda', () => {
     const item: ProductCartItem = {
       type: 'product',
       productId: bombillon100.id,
       quantity: 1,
-      options: { leather: 'Crudo', ferrule: 'Acero' },
+      options: { leather: 'Crudo' },
     }
-    const priced = price([item])
+    const priced = price([item, product(yerbaCanarias.id, 1)])
 
     expect(priced.quote.lines[0]).toMatchObject({
-      key: `product:${bombillon100.id}:-:-`,
+      key: `product:${bombillon100.id}:Crudo`,
       detail: '',
       issue: null,
     })
+    expect(priced.quote.lines[1]?.key).toBe(`product:${yerbaCanarias.id}:-`)
     expect(priced.lines[0]?.options).toBeNull()
+    expect(priced.optionErrors).toEqual([])
   })
 
-  it('un mate sin opciones deja un error de campo', () => {
-    const priced = price([product(yerbaCanarias.id, 1), product(imperialPremium.id, 1)])
+  it('un mate sin cueros ofrecidos ignora el cuero: detail vacío y options null', () => {
+    const products = imperialWith([])
+    const priced = price([mate(1), product(imperialPremium.id, 1)], products)
+
+    expect(priced.quote.lines.map(({ key, detail }) => [key, detail])).toEqual([
+      [`product:${imperialPremium.id}:Negro`, ''],
+      [`product:${imperialPremium.id}:-`, ''],
+    ])
+    expect(priced.lines.map(({ options }) => options)).toEqual([null, null])
+    expect(priced.optionErrors).toEqual([])
+  })
+
+  it('un mate con cueros sin options o con uno que no ofrece deja errores de campo', () => {
+    const products = imperialWith(['Negro', 'Crudo'])
+    const priced = price(
+      [
+        product(yerbaCanarias.id, 1),
+        product(imperialPremium.id, 1),
+        mate(1, { options: { leather: 'Marrón' } }),
+        mate(1, { options: { leather: 'Crudo' } }),
+      ],
+      products,
+    )
 
     expect(priced.optionErrors).toEqual([
+      { field: 'items.1.options', code: 'required', message: 'Elegí el cuero del mate.' },
       {
-        field: 'items.1.options',
-        code: 'required',
-        message: 'Elegí el cuero y la virola del mate.',
+        field: 'items.2.options.leather',
+        code: 'leather_not_offered',
+        message: 'Ese cuero no está disponible para este mate.',
       },
     ])
+    expect(priced.quote.lines[3]).toMatchObject({
+      key: `product:${imperialPremium.id}:Crudo`,
+      detail: 'Cuero crudo',
+    })
+  })
+
+  it('un mate que no se vende sale unavailable sin error de cuero', () => {
+    const products = productMap([{ ...imperialPremium, published: false }])
+    const priced = price([product(imperialPremium.id, 1)], products)
+
+    expect(priced.quote.lines[0]).toMatchObject({ issue: 'unavailable', detail: '' })
+    expect(priced.optionErrors).toEqual([])
+  })
+
+  it('un kit sigue los cueros del mate: null pide cuero, uno que no ofrece da error en leather', () => {
+    const priced = price([kit(1, { leather: null }), kit(1, { leather: 'Borravino' })])
+    expect(priced.optionErrors).toEqual([
+      { field: 'items.0.leather', code: 'required', message: 'Elegí el cuero del mate.' },
+    ])
+
+    const twoLeathers = imperialWith(['Negro', 'Crudo'])
+    const notOffered = price([kit(1, { leather: 'Borravino' })], twoLeathers)
+    expect(notOffered.optionErrors).toEqual([
+      {
+        field: 'items.0.leather',
+        code: 'leather_not_offered',
+        message: 'Ese cuero no está disponible para este mate.',
+      },
+    ])
+  })
+
+  it('un kit con un mate sin cueros ignora el cuero: clave con lo que mandó y sin el cuero', () => {
+    const products = imperialWith([])
+    const priced = price([kit(1, { leather: null }), kit(1)], products)
+
+    expect(priced.quote.lines.map(({ key, detail }) => [key, detail])).toEqual([
+      [
+        `kit:${imperialPremium.id}:${bombillon100.id}:${yerbaCanarias.id}:-`,
+        'Mate Imperial Premium + Bombillón 100% Alpaca + Yerba Canarias 1 kg',
+      ],
+      [
+        `kit:${imperialPremium.id}:${bombillon100.id}:${yerbaCanarias.id}:Negro`,
+        'Mate Imperial Premium + Bombillón 100% Alpaca + Yerba Canarias 1 kg',
+      ],
+    ])
+    expect(priced.lines.map(({ options }) => options)).toEqual([null, null])
+    expect(priced.optionErrors).toEqual([])
   })
 
   it('un precio esperado distinto sale price_changed con el aviso', () => {
@@ -388,6 +468,7 @@ describe('priceCart: líneas', () => {
       slug: id,
       name: id,
       group: 'yerba',
+      leathers: [],
       priceArs: 99_999_999,
       published: true,
       available: 20,
@@ -419,10 +500,10 @@ describe('priceCart: combos', () => {
     const [line] = priced.quote.lines
 
     expect(line).toEqual({
-      key: 'combo:cmb-duo-imperial:Marrón:Acero',
+      key: 'combo:cmb-duo-imperial:Marrón',
       type: 'combo',
       name: 'Dúo Imperial',
-      detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón · Acero',
+      detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
       unitPriceArs: 68998,
       netUnitPriceArs: 51239,
       kitSavingsArs: 13998,
@@ -448,7 +529,7 @@ describe('priceCart: combos', () => {
         totalArs: 123998,
         productId: null,
         productSlug: null,
-        options: { leather: 'Marrón', ferrule: 'Acero' },
+        options: { leather: 'Marrón' },
         kitItems: [
           {
             role: 'mate',
@@ -507,7 +588,7 @@ describe('priceCart: combos', () => {
   it('un combo en borrador o inexistente sale unavailable con avisos sin producto', () => {
     const priced = price([
       combo(1, { comboId: galletaCanarias.id }),
-      combo(1, { comboId: 'cmb-no-existe', options: { leather: 'Negro', ferrule: 'Alpaca lisa' } }),
+      combo(1, { comboId: 'cmb-no-existe', options: { leather: 'Negro' } }),
     ])
     const blocked = {
       type: 'combo',
@@ -522,13 +603,13 @@ describe('priceCart: combos', () => {
     expect(priced.quote.lines).toEqual([
       {
         ...blocked,
-        key: 'combo:cmb-galleta-y-canarias:Marrón:Acero',
+        key: 'combo:cmb-galleta-y-canarias:Marrón',
         name: 'Galleta y Canarias',
-        detail: 'Mate Galleta + Yerba Canarias 1 kg · Cuero marrón · Acero',
+        detail: 'Mate Galleta + Yerba Canarias 1 kg · Cuero marrón',
       },
       {
         ...blocked,
-        key: 'combo:cmb-no-existe:Negro:Alpaca lisa',
+        key: 'combo:cmb-no-existe:Negro',
         name: MISSING_COMBO_NAME,
         detail: '',
       },
@@ -595,25 +676,48 @@ describe('priceCart: combos', () => {
     expect(priced.lines).toEqual([])
   })
 
-  it('un combo con mate sin opciones deja el error en items.N.options', () => {
-    const priced = price([product(yerbaCanarias.id, 1), combo(1, { options: null })])
+  it('un combo con un mate con cueros: sin options o con uno que no ofrece, error de campo', () => {
+    const products = imperialWith(['Negro', 'Crudo'])
+    const priced = price(
+      [
+        product(yerbaCanarias.id, 1),
+        combo(1, { options: null }),
+        combo(1, { options: { leather: 'Marrón' } }),
+      ],
+      products,
+    )
 
     expect(priced.optionErrors).toEqual([
+      { field: 'items.1.options', code: 'required', message: 'Elegí el cuero del mate.' },
       {
-        field: 'items.1.options',
-        code: 'required',
-        message: 'Elegí el cuero y la virola del mate.',
+        field: 'items.2.options.leather',
+        code: 'leather_not_offered',
+        message: 'Ese cuero no está disponible para este mate.',
       },
     ])
   })
 
-  it('un combo sin mate ignora las opciones, también en la clave', () => {
-    const priced = price([
-      combo(1, { comboId: bombillaYerba.id, options: { leather: 'Crudo', ferrule: 'Acero' } }),
-    ])
+  it('un combo con un mate sin cueros ignora el cuero; la clave repite lo que mandó la tienda', () => {
+    const products = imperialWith([])
+    const priced = price([combo(1)], products)
 
     expect(priced.quote.lines[0]).toMatchObject({
-      key: 'combo:cmb-bombilla-y-yerba:-:-',
+      key: 'combo:cmb-duo-imperial:Marrón',
+      detail: 'Mate Imperial Premium + Bombillón Premium Curvo',
+    })
+    expect(priced.lines[0]?.options).toBeNull()
+    expect(priced.optionErrors).toEqual([])
+  })
+
+  it('un combo sin mate ignora el cuero, pero la clave repite lo que mandó la tienda', () => {
+    const priced = price([
+      combo(1, { comboId: bombillaYerba.id, options: { leather: 'Crudo' } }),
+      combo(1, { comboId: bombillaYerba.id, options: null }),
+    ])
+
+    expect(priced.quote.lines[1]?.key).toBe('combo:cmb-bombilla-y-yerba:-')
+    expect(priced.quote.lines[0]).toMatchObject({
+      key: 'combo:cmb-bombilla-y-yerba:Crudo',
       name: 'Bombilla y yerba',
       detail: 'Bombillón 100% Alpaca + Yerba Canarias 1 kg',
       unitPriceArs: 35998,
@@ -700,7 +804,7 @@ describe('priceCart: combos', () => {
       priceArs: 45999,
       productIds: [yerbaCanarias.id, imperialPremium.id],
     }
-    const options = { leather: 'Negro', ferrule: 'Alpaca cincelada' } as const
+    const options = { leather: 'Negro' } as const
     const priced = price(
       [combo(1, { options })],
       productMap(),
@@ -709,7 +813,7 @@ describe('priceCart: combos', () => {
     )
 
     expect(priced.quote.lines[0]?.detail).toBe(
-      'Yerba Canarias 1 kg + Mate Imperial Premium · Cuero negro · Alpaca cincelada',
+      'Yerba Canarias 1 kg + Mate Imperial Premium · Cuero negro',
     )
     expect(priced.lines[0]?.kitItems?.map((piece) => [piece.position, piece.role])).toEqual([
       [1, 'yerba'],

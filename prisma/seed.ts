@@ -10,6 +10,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { argon2id, hash } from 'argon2'
 
 import { Prisma, PrismaClient } from '../src/generated/prisma/client'
+import { LEATHERS } from '../src/modules/catalog/domain/product.entity'
 import { SEED_ADMIN } from './seed-data/admin'
 import { SEED_CATEGORIES } from './seed-data/categories'
 import { SEED_COMBOS } from './seed-data/combos'
@@ -150,7 +151,8 @@ async function seedCategories(tx: Tx): Promise<Map<string, string>> {
  * Las fotos que sobren de una corrida anterior (posiciones mayores) se borran. El stock se crea con
  * el `onHand` del diseño y en una nueva corrida se actualiza solo si no queda por debajo de lo
  * reservado (`reserved <= onHand`, en el mismo `UPDATE`); si no, la fila queda como estaba (no se
- * toca `reserved`) y se avisa por la salida estándar, como el resumen del seed.
+ * toca `reserved`) y se avisa por la salida estándar, como el resumen del seed. Los cueros son los
+ * de la migración b6: los cuatro en los mates y ninguno en el resto.
  *
  * @throws {Error} Si la línea del producto no está en el seed.
  */
@@ -166,8 +168,10 @@ async function seedProduct(
     )
   }
   const createdAt = new Date(product.createdAt)
+  const group = SEED_CATEGORIES.find((category) => category.slug === product.categorySlug)?.group
   const data = {
     categoryId,
+    leathers: group === 'mate' ? [...LEATHERS] : [],
     name: product.name,
     description: product.description,
     priceArs: product.priceArs,
