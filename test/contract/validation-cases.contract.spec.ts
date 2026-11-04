@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import {
+  ComboInputDto,
+  ComboOrderInputDto,
+} from '../../src/modules/catalog/interface/dto/combo-input.dto'
 import { AddressBookInputDto } from '../../src/modules/identity/interface/dto/address-book-input.dto'
 import { AdminLoginDto } from '../../src/modules/identity/interface/dto/admin-login.dto'
 import { CustomerUpdateDto } from '../../src/modules/identity/interface/dto/customer-update.dto'
@@ -25,7 +29,8 @@ import { createValidationPipe } from '../../src/shared/infrastructure/http/valid
  *
  * El archivo `validation-cases.json` está junto al contrato (`CONTRACT_PATH` o, por defecto,
  * `../frontend/docs/api/`). Solo se corren los schemas que tienen un DTO de identidad; el resto
- * (checkout, reseñas, dashboard…) entra con el módulo que los implemente.
+ * (checkout, reseñas, dashboard…) entra con el módulo que los implemente. Un caso válido sin
+ * `output` solo tiene que pasar (README del contrato).
  */
 
 /** Caso del archivo compartido (lo que genera `@galpon/schemas`). */
@@ -44,8 +49,8 @@ interface ValidationCase {
 interface Check {
   /** Cuerpo que recibe el DTO. */
   body: Record<string, unknown>
-  /** Salida esperada de un caso válido, sin los campos que valen `null`. */
-  output: Record<string, unknown>
+  /** Salida esperada de un caso válido, sin los campos que valen `null`; sin ella, solo tiene que pasar. */
+  output?: Record<string, unknown> | undefined
   /** Primer mensaje esperado por campo de un caso inválido. */
   errors: Record<string, string>
 }
@@ -144,7 +149,7 @@ function wholeCase(schema: string): (validationCase: ValidationCase) => Check | 
     validationCase.schema === schema
       ? {
           body: validationCase.input,
-          output: validationCase.output ?? {},
+          output: validationCase.output,
           errors: errorsOf(validationCase, sameField),
         }
       : null
@@ -304,6 +309,20 @@ const MAPPINGS: readonly Mapping[] = [
           }
         : null,
   },
+  {
+    // Combo del dashboard (`POST /admin/combos` y `PATCH /admin/combos/{id}`): el DTO entero. Un
+    // producto sin elegir da `productIds.1` por `EachItem` del pipe global (Ruling B-64).
+    name: 'ComboInputDto (comboFormSchema)',
+    dto: ComboInputDto,
+    check: wholeCase('comboFormSchema'),
+  },
+  {
+    // Orden de los combos (`PUT /admin/combos/order`): el DTO entero; que estén todos lo revisa
+    // el caso de uso con la base.
+    name: 'ComboOrderInputDto (comboOrderSchema)',
+    dto: ComboOrderInputDto,
+    check: wholeCase('comboOrderSchema'),
+  },
 ]
 
 describe('casos de validación compartidos con el front', () => {
@@ -325,7 +344,7 @@ describe('casos de validación compartidos con el front', () => {
           const outcome = await validate(mapping.dto, check.body)
           if (validationCase.valid) {
             expect(outcome.ok, `esperaba válido: ${JSON.stringify(outcome)}`).toBe(true)
-            if (outcome.ok)
+            if (outcome.ok && check.output !== undefined)
               expect(withoutNulls((mapping.effective ?? identity)(outcome.value))).toEqual(
                 check.output,
               )

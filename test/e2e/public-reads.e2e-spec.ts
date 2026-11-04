@@ -4,7 +4,11 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { seed } from '../../prisma/seed'
-import type { ProductDetail, ProductPage } from '../../src/modules/catalog/application/read-models'
+import type {
+  ComboView,
+  ProductDetail,
+  ProductPage,
+} from '../../src/modules/catalog/application/read-models'
 import type { HomeContent, LegalContent } from '../../src/modules/content/application/read-models'
 import type { ReviewPage } from '../../src/modules/reviews/application/read-models'
 import type { PublicSettings } from '../../src/modules/settings/application/read-models'
@@ -60,6 +64,19 @@ describe('lecturas públicas del contrato (HTTP + Postgres + Redis)', () => {
     expect(response.body).toHaveLength(6)
     const positions = (response.body as { position: number }[]).map(({ position }) => position)
     expect(positions).toEqual([1, 2, 3, 4, 5, 6])
+  })
+
+  it('GET /combos → los 4 combos publicados, por position, sin el borrador', async () => {
+    const response = await request(server()).get('/api/v1/combos')
+
+    expect(response.status).toBe(200)
+    const combos = response.body as ComboView[]
+    expect(combos.map(({ name, position }) => [name, position])).toEqual([
+      ['Dúo Imperial', 1],
+      ['Camionero y Canarias', 2],
+      ['Torpedo completo', 3],
+      ['Bombilla y yerba', 4],
+    ])
   })
 
   it('GET /products?pageSize=100 → los 27 productos publicados', async () => {

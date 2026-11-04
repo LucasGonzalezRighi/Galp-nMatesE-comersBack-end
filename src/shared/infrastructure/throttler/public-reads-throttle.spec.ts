@@ -9,8 +9,10 @@ import { createControllerApp } from '../../../../test/support/controller-app'
 import { GetProductQuery } from '../../../modules/catalog/application/queries/get-product.query'
 import { GetRelatedProductsQuery } from '../../../modules/catalog/application/queries/get-related-products.query'
 import { ListCategoriesQuery } from '../../../modules/catalog/application/queries/list-categories.query'
+import { ListCombosQuery } from '../../../modules/catalog/application/queries/list-combos.query'
 import { ListProductsQuery } from '../../../modules/catalog/application/queries/list-products.query'
 import { CategoriesController } from '../../../modules/catalog/interface/categories.controller'
+import { CombosController } from '../../../modules/catalog/interface/combos.controller'
 import { ProductsController } from '../../../modules/catalog/interface/products.controller'
 import { GetContentQuery } from '../../../modules/content/application/queries/get-content.query'
 import { ContentController } from '../../../modules/content/interface/content.controller'
@@ -26,9 +28,10 @@ const TEST_LIMIT = 2
 /** Pedidos por ruta: más que {@link TEST_LIMIT}, así un límite activo se nota. */
 const REQUESTS_PER_ROUTE = TEST_LIMIT + 3
 
-/** Las 13 lecturas públicas del contrato (con slugs y documentos válidos). */
+/** Las 14 lecturas públicas del contrato (con slugs y documentos válidos). */
 const PUBLIC_READ_PATHS = [
   '/categories',
+  '/combos',
   '/products',
   '/products/mate-imperial-premium',
   '/products/mate-imperial-premium/related',
@@ -65,6 +68,7 @@ describe('Lecturas públicas fuera del límite global de pedidos por IP (spec §
       controllers: [
         CategoriesController,
         ProductsController,
+        CombosController,
         ContentController,
         ReviewsController,
         SettingsController,
@@ -74,6 +78,7 @@ describe('Lecturas públicas fuera del límite global de pedidos por IP (spec §
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: ListCategoriesQuery, useValue: inMemoryQuery },
         { provide: ListProductsQuery, useValue: inMemoryQuery },
+        { provide: ListCombosQuery, useValue: inMemoryQuery },
         { provide: GetProductQuery, useValue: inMemoryQuery },
         { provide: GetRelatedProductsQuery, useValue: inMemoryQuery },
         { provide: GetContentQuery, useValue: inMemoryQuery },

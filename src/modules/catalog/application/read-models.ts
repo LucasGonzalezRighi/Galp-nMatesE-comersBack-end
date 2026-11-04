@@ -2,9 +2,11 @@
 // (`../frontend/docs/api/openapi.yaml`).
 
 import type { ProductGroup } from '../domain/category.entity'
+import type { ComboStatus } from '../domain/combo.entity'
 import type { ProductOptions, ProductTabs } from '../domain/product.entity'
 
 export type { ProductGroup } from '../domain/category.entity'
+export type { ComboStatus } from '../domain/combo.entity'
 export type { ProductOptions, ProductTabs } from '../domain/product.entity'
 
 /** Órdenes del listado (`ProductSortOrder`). */
@@ -113,4 +115,57 @@ export interface ProductPage {
   pageSize: number
   /** Total de productos que cumplen el filtro. */
   total: number
+}
+
+/** Producto fijo de un combo, con sus datos vigentes (`ComboItem`). */
+export interface ComboItemView {
+  /** Id del producto. */
+  productId: string
+  /** Slug actual del producto. */
+  slug: string
+  /** Nombre del producto. */
+  name: string
+  /** Grupo del producto. */
+  group: ProductGroup
+  /** Precio de lista vigente, o `null` si es "a consultar". */
+  unitPriceArs: number | null
+  /** Si el producto se puede vender ahora (publicado, con precio y con stock). */
+  isPurchasable: boolean
+  /** Unidades que se pueden pedir de una vez (0 a 20). */
+  maxQuantity: number
+  /** Foto principal, o `null`. */
+  image: Image | null
+}
+
+/**
+ * Combo como lo ven la tienda y el dashboard (`Combo`), con los derivados calculados con los
+ * precios y el stock vigentes de sus piezas.
+ */
+export interface ComboView {
+  /** Id del combo. */
+  id: string
+  /** Nombre. */
+  name: string
+  /** Descripción corta (puede ser vacía). */
+  description: string
+  /** Sus productos, en el orden en que los cargó el dashboard. */
+  items: ComboItemView[]
+  /** Precio final del combo. */
+  priceArs: number
+  /** Precio sin impuestos nacionales, o `null` si no se muestra. */
+  netPriceArs: number | null
+  /** Suma de los precios de lista vigentes de las piezas con precio. */
+  listPriceArs: number
+  /** Ahorro frente a las piezas sueltas (nunca negativo). */
+  savingsArs: number
+  /** Si se puede agregar al carrito. */
+  isPurchasable: boolean
+  /** Si alguna pieza se quedó sin stock disponible. */
+  isSoldOut: boolean
+  /** Combos que se pueden pedir de una vez (0 a 20). */
+  maxQuantity: number
+  /** Borrador o publicado. */
+  status: ComboStatus
+  /** Lugar en el listado, desde 1. */
+  position: number
 }

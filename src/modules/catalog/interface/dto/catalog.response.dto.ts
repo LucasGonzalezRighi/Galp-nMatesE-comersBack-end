@@ -1,6 +1,6 @@
 // DTOs de respuesta del catálogo, solo para Swagger: reproducen `components/schemas` del contrato
-// (`Category`, `Rating`, `ProductSummary`, `ProductTabs`, `ProductOptions`, `ProductPage` y
-// `ProductDetail`) y el test de contrato los compara. Nunca se instancian (los controladores
+// (`Category`, `Rating`, `ProductSummary`, `ProductTabs`, `ProductOptions`, `ProductPage`,
+// `ProductDetail`, `ComboItem` y `Combo`) y el test de contrato los compara. Nunca se instancian (los controladores
 // devuelven los read models de `application`): los campos van con asignación definida (`!`),
 // como dice el README.
 
@@ -14,6 +14,7 @@ import {
   schemaRef,
 } from '../../../../shared/infrastructure/http/openapi'
 import { PRODUCT_GROUPS } from '../../domain/category.entity'
+import { COMBO_MAX_ITEMS, COMBO_MIN_ITEMS, COMBO_STATUSES } from '../../domain/combo.entity'
 import { FERRULES, LEATHERS, MAX_QUANTITY_PER_PRODUCT } from '../../domain/product.entity'
 
 /** Grupo de producto como esquema con nombre (`ProductGroup`). */
@@ -189,6 +190,103 @@ export class ProductPageDto {
   /** Total de productos que cumplen el filtro. */
   @ApiProperty({ type: 'integer', minimum: 0 })
   total!: number
+}
+
+/** Producto fijo de un combo, con sus datos vigentes (`ComboItem`). */
+@ApiSchema({ name: 'ComboItem' })
+export class ComboItemDto {
+  /** Id del producto. */
+  @ApiProperty({ type: 'string' })
+  productId!: string
+
+  /** Slug actual del producto. */
+  @ApiProperty({ type: 'string' })
+  slug!: string
+
+  /** Nombre del producto. */
+  @ApiProperty({ type: 'string' })
+  name!: string
+
+  /** Grupo del producto. */
+  @ApiProperty(PRODUCT_GROUP)
+  group!: string
+
+  /** Precio de lista vigente, o `null` si es "a consultar". */
+  @ApiSchemaProperty(namedRef('NullablePesos'))
+  unitPriceArs!: number | null
+
+  /** Si el producto se puede vender ahora. */
+  @ApiProperty({ type: 'boolean' })
+  isPurchasable!: boolean
+
+  /** Unidades que se pueden pedir de una vez. */
+  @ApiProperty({ type: 'integer', minimum: 0, maximum: MAX_QUANTITY_PER_PRODUCT })
+  maxQuantity!: number
+
+  /** Foto principal, o `null`. */
+  @ApiSchemaProperty(nullableRef('Image'))
+  image!: unknown
+}
+
+/** Combo de 2 o 3 productos fijos con un precio final (`Combo`). */
+@ApiSchema({ name: 'Combo' })
+export class ComboDto {
+  /** Id del combo. */
+  @ApiProperty({ type: 'string' })
+  id!: string
+
+  /** Nombre. */
+  @ApiProperty({ type: 'string' })
+  name!: string
+
+  /** Descripción corta (puede ser vacía). */
+  @ApiProperty({ type: 'string' })
+  description!: string
+
+  /** Sus productos, en el orden en que los cargó el dashboard. */
+  @ApiProperty({
+    type: () => ComboItemDto,
+    isArray: true,
+    minItems: COMBO_MIN_ITEMS,
+    maxItems: COMBO_MAX_ITEMS,
+  })
+  items!: ComboItemDto[]
+
+  /** Precio final del combo. */
+  @ApiSchemaProperty(namedRef('Pesos'))
+  priceArs!: number
+
+  /** Precio sin impuestos nacionales, o `null`. */
+  @ApiSchemaProperty(namedRef('NullablePesos'))
+  netPriceArs!: number | null
+
+  /** Suma de los precios de lista vigentes de las piezas con precio. */
+  @ApiSchemaProperty(namedRef('TotalArs'))
+  listPriceArs!: number
+
+  /** Ahorro frente a las piezas sueltas (nunca negativo). */
+  @ApiSchemaProperty(namedRef('TotalArs'))
+  savingsArs!: number
+
+  /** Si se puede agregar al carrito. */
+  @ApiProperty({ type: 'boolean' })
+  isPurchasable!: boolean
+
+  /** Si alguna pieza se quedó sin stock disponible. */
+  @ApiProperty({ type: 'boolean' })
+  isSoldOut!: boolean
+
+  /** Combos que se pueden pedir de una vez. */
+  @ApiProperty({ type: 'integer', minimum: 0, maximum: MAX_QUANTITY_PER_PRODUCT })
+  maxQuantity!: number
+
+  /** Borrador o publicado. */
+  @ApiProperty({ enum: [...COMBO_STATUSES], enumName: 'ComboStatus' })
+  status!: string
+
+  /** Lugar en el listado, desde 1. */
+  @ApiProperty({ type: 'integer', minimum: 1 })
+  position!: number
 }
 
 /**

@@ -69,6 +69,13 @@ const IMPLEMENTED_PATHS: readonly string[] = [
   'POST /orders/{number}/payments/mercadopago/installments',
   'POST /orders/{number}/cancel-payment',
   'POST /webhooks/mercadopago',
+  // B5c: combos (la tienda y el dashboard).
+  'GET /combos',
+  'GET /admin/combos',
+  'POST /admin/combos',
+  'PUT /admin/combos/order',
+  'PATCH /admin/combos/{id}',
+  'DELETE /admin/combos/{id}',
 ]
 
 /** Operaciones que Swagger genera y el contrato no tiene, a propósito. */
