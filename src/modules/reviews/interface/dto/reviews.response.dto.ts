@@ -5,7 +5,12 @@
 
 import { ApiProperty, ApiSchema, getSchemaPath } from '@nestjs/swagger'
 
-import type { OpenApiSchema } from '../../../../shared/infrastructure/http/openapi'
+import {
+  ApiSchemaProperty,
+  type OpenApiSchema,
+  schemaRef,
+} from '../../../../shared/infrastructure/http/openapi'
+import { REVIEW_STATUSES } from '../../domain/review-moderation'
 
 /** Reseña publicada (`Review`). */
 @ApiSchema({ name: 'Review' })
@@ -86,9 +91,44 @@ export class ReviewPageDto {
   stats!: ReviewStatsDto
 }
 
+/** Página de reseñas del dashboard (`AdminReviewPage`). */
+@ApiSchema({ name: 'AdminReviewPage' })
+export class AdminReviewPageDto {
+  /** Reseñas de la página. */
+  @ApiSchemaProperty({ type: 'array', items: schemaRef('AdminReview') })
+  items!: unknown[]
+
+  /** Número de página, desde 1. */
+  @ApiProperty({ type: 'integer', minimum: 1 })
+  page!: number
+
+  /** Reseñas por página. */
+  @ApiProperty({ type: 'integer', minimum: 1, maximum: 100 })
+  pageSize!: number
+
+  /** Total de reseñas que cumplen el filtro. */
+  @ApiProperty({ type: 'integer', minimum: 0 })
+  total!: number
+}
+
 /**
- * Esquemas de reseñas que no salen de una clase: la destacada (`FeaturedReview`) es un `allOf`
- * de la reseña más su producto, como en el contrato. `buildOpenApiDocument` los suma a
+ * Estado de una reseña recibida: `const` de OpenAPI 3.1, que los tipos de `@nestjs/swagger` no
+ * declaran (por eso va en una constante y no en un literal).
+ */
+const PENDING_STATUS_SCHEMA = { type: 'string', const: 'pending' } as const
+
+/** Confirmación de una reseña recibida (`ReviewReceipt`): siempre `pending`. */
+@ApiSchema({ name: 'ReviewReceipt' })
+export class ReviewReceiptDto {
+  /** Estado de la reseña recibida. */
+  @ApiSchemaProperty(PENDING_STATUS_SCHEMA)
+  status!: 'pending'
+}
+
+/**
+ * Esquemas de reseñas que no salen de una clase: la destacada (`FeaturedReview`) y la del
+ * dashboard (`AdminReview`) son un `allOf` de la reseña más lo suyo, como en el contrato; el estado
+ * (`ReviewStatus`) y el cambio de la moderación (`AdminReviewUpdate`, con `minProperties`). `buildOpenApiDocument` los suma a
  * `components.schemas`.
  */
 export const REVIEWS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = {
@@ -107,5 +147,29 @@ export const REVIEWS_OPENAPI_SCHEMAS: Readonly<Record<string, OpenApiSchema>> = 
         },
       },
     ],
+  },
+  ReviewStatus: { type: 'string', enum: [...REVIEW_STATUSES] },
+  AdminReview: {
+    allOf: [
+      { $ref: getSchemaPath(ReviewDto) },
+      {
+        type: 'object',
+        required: ['status', 'featured', 'product'],
+        properties: {
+          status: schemaRef('ReviewStatus'),
+          featured: { type: 'boolean' },
+          product: {
+            type: 'object',
+            required: ['slug', 'name'],
+            properties: { slug: { type: 'string' }, name: { type: 'string' } },
+          },
+        },
+      },
+    ],
+  },
+  AdminReviewUpdate: {
+    type: 'object',
+    minProperties: 1,
+    properties: { status: schemaRef('ReviewStatus'), featured: { type: 'boolean' } },
   },
 }

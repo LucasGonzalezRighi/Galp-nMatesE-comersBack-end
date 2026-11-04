@@ -76,6 +76,84 @@ function itemRuleOf(error: ValidationError, constraint: string): ItemRule | unde
 }
 
 /**
+ * Regla sobre el objeto entero (un error "de raíz", como el `.refine` de un `z.object` del front):
+ * por ejemplo, "Mandá al menos un cambio" cuando un `PATCH` llega sin ningún campo. Ver
+ * {@link RootRule}.
+ */
+export interface RootRuleOptions {
+  /** Nombre de la restricción en `class-validator` (uno por regla). */
+  name: string
+  /** Código del `FieldError` (por ejemplo `empty_update`). */
+  code: string
+  /** Mensaje en español. */
+  message: string
+  /** Indica si el objeto, ya transformado por el DTO, cumple la regla. */
+  isValid: (value: object) => boolean
+}
+
+/** Clave del `context` de `class-validator` donde viaja la regla de {@link RootRule}. */
+const ROOT_RULE_CONTEXT = 'rootRule'
+
+/**
+ * Propiedad donde se registra la regla de raíz. Es la clave vacía: con `forbidNonWhitelisted`,
+ * cualquier propiedad registrada queda permitida, así que si un cuerpo trae la clave `""` la regla
+ * falla y {@link toFieldErrors} la responde como un campo no permitido.
+ */
+const ROOT_PROPERTY = ''
+
+/**
+ * Valida el objeto entero con una regla. Si no la cumple, el pipe global responde un error con
+ * `field: ''` (en un objeto anidado, la ruta del objeto), el código y el mensaje de la regla,
+ * como los errores de raíz de zod (Ruling B-80). Sale después de los errores de los campos.
+ *
+ * Mecanismo: la regla se registra como una restricción de `class-validator` sobre la clave vacía
+ * (que ningún DTO usa), con la regla en el `context`; la validación recibe el objeto entero en
+ * `args.object` y {@link toFieldErrors} reconoce el `context` para poner el error en la raíz. Solo
+ * cambian los DTOs que usan este decorador.
+ *
+ * @param rule - Regla del objeto.
+ * @returns El decorador de la clase.
+ * @throws {TypeError} En español, si la regla no tiene nombre, código o mensaje.
+ */
+export function RootRule(rule: RootRuleOptions): ClassDecorator {
+  for (const key of ['name', 'code', 'message'] as const) {
+    if (rule[key].trim() === '') {
+      throw new TypeError(`La regla de raíz necesita ${key}`)
+    }
+  }
+  return (target) => {
+    registerDecorator({
+      name: rule.name,
+      target,
+      propertyName: ROOT_PROPERTY,
+      options: { message: rule.message, context: { [ROOT_RULE_CONTEXT]: rule } },
+      validator: {
+        validate: (value: unknown, args) =>
+          value === undefined && typeof args?.object === 'object' && rule.isValid(args.object),
+      },
+    })
+  }
+}
+
+function isRootRule(value: unknown): value is RootRuleOptions {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Partial<RootRuleOptions>).code === 'string' &&
+    typeof (value as Partial<RootRuleOptions>).isValid === 'function'
+  )
+}
+
+/** Regla de {@link RootRule} de una restricción que falló, o `undefined` si no es una de esas. */
+function rootRuleOf(error: ValidationError, constraint: string): RootRuleOptions | undefined {
+  const contexts: Record<string, unknown> = error.contexts ?? {}
+  const context = contexts[constraint]
+  if (typeof context !== 'object' || context === null) return undefined
+  const rule: unknown = Reflect.get(context, ROOT_RULE_CONTEXT)
+  return isRootRule(rule) ? rule : undefined
+}
+
+/**
  * Código de cada restricción de `class-validator` en el `FieldError`, alineado con los de los
  * schemas de zod del front (`too_small`, `too_big`, `invalid_type`…). Las que no están acá se
  * pasan a `snake_case` (por ejemplo `isPhoneNumber` → `is_phone_number`).
@@ -115,7 +193,8 @@ function codeFor(constraint: string): string {
 /**
  * Pasa los errores de `class-validator` a `FieldError[]`: un error por restricción que falló,
  * con la ruta del campo con puntos (`customer.email`, `items.0.quantity`). Las de
- * {@link EachItem} dan un error por elemento que falla, en `campo.<índice>`.
+ * {@link EachItem} dan un error por elemento que falla, en `campo.<índice>`, y las de
+ * {@link RootRule}, uno en la ruta del objeto (`''` en la raíz).
  *
  * @param errors - Errores de validación (pueden venir anidados en `children`).
  * @param parent - Ruta del objeto que los contiene; vacía en la raíz.
@@ -125,8 +204,14 @@ export function toFieldErrors(errors: readonly ValidationError[], parent = ''): 
   return errors.flatMap((error) => {
     const field = parent === '' ? error.property : `${parent}.${error.property}`
     const own = Object.entries(error.constraints ?? {}).flatMap(([constraint, message]) => {
-      const rule = itemRuleOf(error, constraint)
       const value: unknown = error.value
+      const root = rootRuleOf(error, constraint)
+      if (root !== undefined) {
+        return value === undefined
+          ? [{ field: parent, code: root.code, message }]
+          : [{ field, code: codeFor('whitelistValidation'), message: UNKNOWN_FIELD_MESSAGE }]
+      }
+      const rule = itemRuleOf(error, constraint)
       if (rule !== undefined && Array.isArray(value)) {
         return value.flatMap((item: unknown, index) =>
           rule.isValid(item)

@@ -4,6 +4,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createControllerApp } from '../../../../test/support/controller-app'
+import { SubmitReviewCommand } from '../application/commands/submit-review.command'
 import { ListFeaturedReviewsQuery } from '../application/queries/list-featured-reviews.query'
 import { ListProductReviewsQuery } from '../application/queries/list-product-reviews.query'
 import { ReviewsController } from './reviews.controller'
@@ -24,6 +25,11 @@ describe('ReviewsController (HTTP con queries en memoria)', () => {
     ),
   }
   const listFeaturedReviews = { execute: vi.fn(() => Promise.resolve([])) }
+  const submitReview = {
+    execute: vi.fn((slug: string) =>
+      Promise.resolve(slug === KNOWN_SLUG ? { status: 'pending' as const } : null),
+    ),
+  }
   let app: INestApplication<Server> | undefined
 
   beforeAll(async () => {
@@ -32,6 +38,7 @@ describe('ReviewsController (HTTP con queries en memoria)', () => {
       providers: [
         { provide: ListProductReviewsQuery, useValue: listProductReviews },
         { provide: ListFeaturedReviewsQuery, useValue: listFeaturedReviews },
+        { provide: SubmitReviewCommand, useValue: submitReview },
       ],
     })
   })
@@ -81,6 +88,64 @@ describe('ReviewsController (HTTP con queries en memoria)', () => {
     expect(missing.body).toMatchObject({ type: 'not_found' })
     expect(invalid.status).toBe(422)
     expect(firstError(invalid)).toMatchObject({ field: 'slug' })
+  })
+
+  describe('POST /products/{slug}/reviews', () => {
+    const body = {
+      rating: 4.5,
+      authorName: '  ',
+      text: '  Un mate hermoso, llegó rápido.  ',
+      website: null,
+    }
+
+    it('responde 202 { status: pending } con el cuerpo normalizado (nombre vacío en null)', async () => {
+      const response = await request(server()).post(`/products/${KNOWN_SLUG}/reviews`).send(body)
+
+      expect(response.status).toBe(202)
+      expect(response.body).toEqual({ status: 'pending' })
+      expect(submitReview.execute.mock.calls).toEqual([
+        [
+          KNOWN_SLUG,
+          { rating: 4.5, authorName: null, text: 'Un mate hermoso, llegó rápido.', website: null },
+        ],
+      ])
+    })
+
+    it('un producto que no existe da 404 "No existe un producto con ese slug."', async () => {
+      const response = await request(server()).post('/products/no-existe/reviews').send(body)
+
+      expect(response.status).toBe(404)
+      expect(response.body).toMatchObject({ detail: 'No existe un producto con ese slug.' })
+    })
+
+    it('el pipe valida antes: trampa llena con otro campo inválido → 422 sin llamar al caso de uso', async () => {
+      const response = await request(server())
+        .post('/products/no-existe/reviews')
+        .send({ ...body, rating: 4.3, website: 'spam' })
+
+      expect(response.status).toBe(422)
+      expect(firstError(response)).toMatchObject({
+        field: 'rating',
+        message: 'Elegí una puntuación de 1 a 5 estrellas.',
+      })
+      expect(submitReview.execute).not.toHaveBeenCalled()
+    })
+
+    it('el contrato pide los campos nullable: sin authorName ni website → 422 "Requerido"', async () => {
+      const response = await request(server())
+        .post(`/products/${KNOWN_SLUG}/reviews`)
+        .send({ rating: 5, text: 'Un mate hermoso, llegó rápido.' })
+
+      const { errors } = response.body as { errors: { field: string }[] }
+      const first = (field: string): unknown => errors.find((error) => error.field === field)
+      expect(response.status).toBe(422)
+      expect(first('authorName')).toEqual({
+        field: 'authorName',
+        code: 'required',
+        message: 'Requerido',
+      })
+      expect(first('website')).toEqual({ field: 'website', code: 'required', message: 'Requerido' })
+    })
   })
 
   it('devuelve las destacadas', async () => {

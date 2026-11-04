@@ -1,5 +1,22 @@
-import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common'
-import { ApiExtraModels, ApiOkResponse, ApiOperation, ApiTags, PickType } from '@nestjs/swagger'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import {
+  ApiAcceptedResponse,
+  ApiExtraModels,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  PickType,
+} from '@nestjs/swagger'
 import { SkipThrottle } from '@nestjs/throttler'
 
 import { ApiProblemResponses, schemaRef } from '../../../shared/infrastructure/http/openapi'
@@ -8,35 +25,68 @@ import {
   PRODUCT_NOT_FOUND,
   ProductSlugParamDto,
 } from '../../catalog/interface/dto/product-slug.param.dto'
+import { SubmitReviewCommand } from '../application/commands/submit-review.command'
 import { ListFeaturedReviewsQuery } from '../application/queries/list-featured-reviews.query'
 import { ListProductReviewsQuery } from '../application/queries/list-product-reviews.query'
-import type { FeaturedReview, ReviewPage } from '../application/read-models'
-import { ReviewDto, ReviewPageDto } from './dto/reviews.response.dto'
+import type { FeaturedReview, ReviewPage, ReviewReceipt } from '../application/read-models'
+import { ReviewInputDto } from './dto/review-input.dto'
+import { ReviewDto, ReviewPageDto, ReviewReceiptDto } from './dto/reviews.response.dto'
 
 /** Query de las reseñas de un producto: solo `page` (el tamaño de página lo fija el back). */
 export class ReviewsPageQueryDto extends PickType(PageQueryDto, ['page'] as const) {}
 
 /**
- * Lecturas públicas de reseñas: las de un producto y las destacadas del inicio. Enviar una
- * reseña (`POST /products/{slug}/reviews`) llega en B7.
+ * Reseñas públicas: las de un producto, las destacadas del inicio y el envío de una reseña nueva
+ * (`POST /products/{slug}/reviews`), que queda pendiente de moderación.
  *
- * Sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y `next build`) y
- * el spec §3.2 solo limita login, formularios públicos y creación de pedidos. El `POST` de B7 es
- * un formulario público: tiene que reponer el límite en su método con `@SkipThrottle({ default: false })`.
+ * Las lecturas van sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y
+ * `next build`) y el spec §3.2 solo limita login, formularios públicos y creación de pedidos. El
+ * `POST` es un formulario público: repone el límite global con `@SkipThrottle({ default: false })`.
  */
 @ApiTags('reviews')
-@ApiExtraModels(ReviewDto)
+@ApiExtraModels(ReviewDto, ReviewReceiptDto)
 @SkipThrottle()
 @Controller()
 export class ReviewsController {
   /**
    * @param listProductReviews - Query de las reseñas de un producto.
    * @param listFeaturedReviews - Query de las destacadas.
+   * @param submitReview - Envío de una reseña nueva.
    */
   constructor(
     private readonly listProductReviews: ListProductReviewsQuery,
     private readonly listFeaturedReviews: ListFeaturedReviewsQuery,
+    private readonly submitReview: SubmitReviewCommand,
   ) {}
+
+  /**
+   * Recibe la reseña de un producto publicado: queda pendiente hasta que el admin la apruebe. El
+   * pipe valida antes; después, un slug que no existe da 404 aunque el campo trampa venga lleno
+   * (orden del mock), y con el campo trampa lleno responde igual sin guardar nada. No avisa a la
+   * tienda: una pendiente no se ve.
+   *
+   * @param params - Slug de la ruta ya validado (actual o anterior).
+   * @param body - Reseña ya validada.
+   * @returns `{ status: 'pending' }` (202).
+   * @throws {NotFoundException} Si no hay un producto publicado con ese slug (404).
+   */
+  @Post('products/:slug/reviews')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @SkipThrottle({ default: false })
+  @ApiOperation({ operationId: 'createReview', summary: 'Enviar una reseña' })
+  @ApiAcceptedResponse({
+    type: ReviewReceiptDto,
+    description: 'Reseña recibida; queda pendiente de aprobación.',
+  })
+  @ApiProblemResponses(404, 422, 429, 500)
+  async create(
+    @Param() params: ProductSlugParamDto,
+    @Body() body: ReviewInputDto,
+  ): Promise<ReviewReceipt> {
+    const receipt = await this.submitReview.execute(params.slug, body.toInput())
+    if (receipt === null) throw new NotFoundException(PRODUCT_NOT_FOUND)
+    return receipt
+  }
 
   /**
    * Devuelve las reseñas aprobadas de un producto, de la más nueva a la más vieja, con el

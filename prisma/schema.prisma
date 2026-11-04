@@ -1,8 +1,8 @@
 // Esquema de Galpón Mates (spec del back §4). Tablas en snake_case con @map/@@map; ids uuid v7
 // generados por la app; montos enteros en pesos con sufijo _ars; fechas timestamptz.
 // Lo que Prisma no sabe expresar (extensión citext, CHECK, índices parciales y la secuencia de
-// números de pedido) está escrito a mano en las migraciones b2_catalogo_contenido, b3_identidad,
-// b4_pedidos, b5_pagos y b5c_combos.
+// números de pedido y de arrepentimiento) está escrito a mano en las migraciones
+// b2_catalogo_contenido, b3_identidad, b4_pedidos, b5_pagos, b5c_combos y b6_support.
 
 generator client {
   provider     = "prisma-client"
@@ -209,6 +209,26 @@ enum RefundReason {
   manual
 
   @@map("refund_reason")
+}
+
+/// Tipo de mensaje de la bandeja del dashboard: del formulario de contacto o una solicitud de
+/// arrepentimiento.
+enum ContactMessageKind {
+  contact
+  withdrawal
+
+  @@map("contact_message_kind")
+}
+
+/// Motivo del formulario de contacto (`ContactReason` del contrato), guardado con su texto exacto.
+enum ContactReason {
+  pedido          @map("Pedido")
+  envio           @map("Envío")
+  cambio          @map("Cambio")
+  arrepentimiento @map("Arrepentimiento")
+  otro            @map("Otro")
+
+  @@map("contact_reason")
 }
 
 // ── Identidad (spec §4.1) ───────────────────────────────────────────────────────────────────
@@ -728,6 +748,7 @@ model Review {
   orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
 
   @@index([productId, status])
+  @@index([status, createdAt(sort: Desc)])
   @@index([customerId])
   @@map("reviews")
 }
@@ -818,4 +839,27 @@ model IdempotencyKey {
 
   @@id([scope, key])
   @@map("idempotency_keys")
+}
+
+// ── Bandeja del dashboard (spec §4.5, Ruling B-76) ──────────────────────────────────────────
+
+/// Mensaje de la bandeja: uno del formulario de contacto (con motivo y texto) o una solicitud de
+/// arrepentimiento (con su código `ARR-` + 6 dígitos de `withdrawal_code_seq` y el comentario
+/// opcional en `message`). Leído = `read_at` con fecha.
+model ContactMessage {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  kind        ContactMessageKind
+  name        String
+  email       String             @db.Citext
+  orderNumber String?            @map("order_number")
+  reason      ContactReason?
+  message     String?
+  code        String?            @unique
+  readAt      DateTime?          @map("read_at") @db.Timestamptz(3)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([kind, createdAt(sort: Desc)])
+  @@map("contact_messages")
 }

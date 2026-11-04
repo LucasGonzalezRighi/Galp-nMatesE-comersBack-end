@@ -1,10 +1,25 @@
 import { UnprocessableEntityException } from '@nestjs/common'
 import { Type } from 'class-transformer'
-import { ArrayMinSize, IsArray, IsInt, IsString, ValidateNested } from 'class-validator'
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 import { describe, expect, it } from 'vitest'
 
 import type { FieldError } from './problem.filter'
-import { createValidationPipe, EachItem, type ItemRule } from './validation.pipe'
+import {
+  createValidationPipe,
+  EachItem,
+  type ItemRule,
+  RootRule,
+  type RootRuleOptions,
+} from './validation.pipe'
 
 /** Regla de prueba: cada elemento es un texto con algo. */
 const REQUIRED_ITEM: ItemRule = {
@@ -107,5 +122,76 @@ describe('createValidationPipe con EachItem (errores por índice, Ruling B-64)',
     expect(() => EachItem({ ...REQUIRED_ITEM, name: ' ' })).toThrow(TypeError)
     expect(() => EachItem({ ...REQUIRED_ITEM, code: '' })).toThrow(TypeError)
     expect(() => EachItem({ ...REQUIRED_ITEM, message: '' })).toThrow(TypeError)
+  })
+})
+
+/** Regla de prueba de raíz: al menos uno de `status` o `featured` (como `adminReviewUpdateSchema`). */
+const AT_LEAST_ONE: RootRuleOptions = {
+  name: 'testAtLeastOneChange',
+  code: 'empty_update',
+  message: 'Mandá al menos un cambio',
+  isValid: (value) => Object.values(value).some((item) => item !== undefined),
+}
+
+@RootRule(AT_LEAST_ONE)
+class PatchDto {
+  @IsOptional()
+  @IsIn(['pending', 'approved'], { message: 'Elegí un estado' })
+  status?: string
+
+  @IsOptional()
+  @IsBoolean({ message: 'Sí o no' })
+  featured?: boolean
+}
+
+class PatchParentDto {
+  @ValidateNested()
+  @Type(() => PatchDto)
+  patch!: PatchDto
+}
+
+describe('createValidationPipe con RootRule (errores de raíz, Ruling B-80)', () => {
+  it('sin ningún campo da el error de raíz con field vacío y el código de la regla', async () => {
+    await expect(errorsOf(PatchDto, {})).resolves.toEqual([
+      { field: '', code: 'empty_update', message: 'Mandá al menos un cambio' },
+    ])
+  })
+
+  it('con un campo válido no hay errores', async () => {
+    await expect(errorsOf(PatchDto, { featured: false })).resolves.toEqual([])
+    await expect(errorsOf(PatchDto, { status: 'approved', featured: true })).resolves.toEqual([])
+  })
+
+  it('el error de un campo sale solo y sin el de raíz cuando la regla se cumple', async () => {
+    await expect(errorsOf(PatchDto, { status: 'deleted' })).resolves.toEqual([
+      { field: 'status', code: 'invalid_value', message: 'Elegí un estado' },
+    ])
+  })
+
+  it('la clave vacía no queda permitida: un campo "" responde que no está permitido', async () => {
+    const errors = await errorsOf(PatchDto, { '': 1, featured: true })
+
+    expect(errors).toEqual([
+      { field: '', code: 'unrecognized_key', message: 'Este campo no está permitido.' },
+    ])
+  })
+
+  it('en un objeto anidado el error va en la ruta del objeto', async () => {
+    await expect(errorsOf(PatchParentDto, { patch: {} })).resolves.toEqual([
+      { field: 'patch', code: 'empty_update', message: 'Mandá al menos un cambio' },
+    ])
+  })
+
+  it('los DTOs sin RootRule no cambian: un cuerpo vacío no suma errores de raíz', async () => {
+    const errors = await errorsOf(ListDto, {})
+
+    expect(errors.some((error) => error.field === '')).toBe(false)
+    expect(errors.map((error) => error.field)).toEqual(['ids', 'ids', 'count'])
+  })
+
+  it('RootRule rechaza una regla sin nombre, código o mensaje', () => {
+    expect(() => RootRule({ ...AT_LEAST_ONE, name: '' })).toThrow(TypeError)
+    expect(() => RootRule({ ...AT_LEAST_ONE, code: ' ' })).toThrow(TypeError)
+    expect(() => RootRule({ ...AT_LEAST_ONE, message: '' })).toThrow(TypeError)
   })
 })

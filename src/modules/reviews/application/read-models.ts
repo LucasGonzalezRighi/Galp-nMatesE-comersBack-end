@@ -69,3 +69,36 @@ export interface FeaturedReview extends Review {
     name: string
   }
 }
+
+/** Reseña como la ve el dashboard, en cualquier estado y con su producto (`AdminReview`). */
+export interface AdminReview extends Review {
+  /** Estado de moderación. */
+  status: 'pending' | 'approved' | 'hidden'
+  /** Si es destacada. */
+  featured: boolean
+  /** Producto reseñado. */
+  product: {
+    /** Slug actual del producto. */
+    slug: string
+    /** Nombre del producto. */
+    name: string
+  }
+}
+
+/** Página de reseñas del dashboard (`AdminReviewPage`). */
+export interface AdminReviewPage {
+  /** Reseñas de la página, de la más nueva a la más vieja. */
+  items: AdminReview[]
+  /** Número de página, desde 1. */
+  page: number
+  /** Reseñas por página (20). */
+  pageSize: number
+  /** Total de reseñas que cumplen el filtro. */
+  total: number
+}
+
+/** Confirmación de una reseña recibida (`ReviewReceipt`): siempre queda pendiente. */
+export interface ReviewReceipt {
+  /** Estado de la reseña recibida. */
+  status: 'pending'
+}

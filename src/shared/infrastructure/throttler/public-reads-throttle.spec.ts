@@ -16,6 +16,7 @@ import { CombosController } from '../../../modules/catalog/interface/combos.cont
 import { ProductsController } from '../../../modules/catalog/interface/products.controller'
 import { GetContentQuery } from '../../../modules/content/application/queries/get-content.query'
 import { ContentController } from '../../../modules/content/interface/content.controller'
+import { SubmitReviewCommand } from '../../../modules/reviews/application/commands/submit-review.command'
 import { ListFeaturedReviewsQuery } from '../../../modules/reviews/application/queries/list-featured-reviews.query'
 import { ListProductReviewsQuery } from '../../../modules/reviews/application/queries/list-product-reviews.query'
 import { ReviewsController } from '../../../modules/reviews/interface/reviews.controller'
@@ -84,6 +85,7 @@ describe('Lecturas públicas fuera del límite global de pedidos por IP (spec §
         { provide: GetContentQuery, useValue: inMemoryQuery },
         { provide: ListProductReviewsQuery, useValue: inMemoryQuery },
         { provide: ListFeaturedReviewsQuery, useValue: inMemoryQuery },
+        { provide: SubmitReviewCommand, useValue: inMemoryQuery },
         { provide: GetPublicSettingsQuery, useValue: inMemoryQuery },
       ],
     })
@@ -105,6 +107,24 @@ describe('Lecturas públicas fuera del límite global de pedidos por IP (spec §
     }
 
     expect(statuses).toEqual([200, 200, 429, 429, 429])
+  })
+
+  it('el POST de reseñas, en el mismo controlador, sí lleva el límite global (formulario público)', async () => {
+    const review = {
+      rating: 5,
+      authorName: null,
+      text: 'Un mate hermoso, llegó rápido.',
+      website: null,
+    }
+    const statuses: number[] = []
+    for (let i = 0; i < REQUESTS_PER_ROUTE; i += 1) {
+      const response = await request(server())
+        .post('/products/mate-imperial-premium/reviews')
+        .send(review)
+      statuses.push(response.status)
+    }
+
+    expect(statuses).toEqual([202, 202, 429, 429, 429])
   })
 
   it.each(PUBLIC_READ_PATHS)('GET %s responde 200 siempre, sin 429', async (path) => {

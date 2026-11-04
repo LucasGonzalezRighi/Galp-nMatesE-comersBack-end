@@ -9,6 +9,7 @@ import { ORDERS_OPENAPI_SCHEMAS } from './modules/orders/interface/dto/orders.re
 import { PAYMENTS_OPENAPI_SCHEMAS } from './modules/payments/interface/dto/payments.response.dto'
 import { REVIEWS_OPENAPI_SCHEMAS } from './modules/reviews/interface/dto/reviews.response.dto'
 import { SETTINGS_OPENAPI_SCHEMAS } from './modules/settings/interface/dto/settings.response.dto'
+import { SUPPORT_OPENAPI_SCHEMAS } from './modules/support/interface/dto/support.response.dto'
 import { SHARED_OPENAPI_SCHEMAS } from './shared/infrastructure/http/openapi'
 
 /** Ruta de Swagger UI, fuera del prefijo `/api/v1`: `/api/docs` (y el JSON en `/api/docs-json`). */
@@ -46,6 +47,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       ...ORDERS_OPENAPI_SCHEMAS,
       ...PAYMENTS_OPENAPI_SCHEMAS,
       ...SETTINGS_OPENAPI_SCHEMAS,
+      ...SUPPORT_OPENAPI_SCHEMAS,
     },
   }
   return SwaggerModule.createDocument(app, config, { ignoreGlobalPrefix: true })
