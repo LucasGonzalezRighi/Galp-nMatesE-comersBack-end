@@ -38,6 +38,9 @@ import { ListMyAddressesQuery } from './queries/list-my-addresses.query'
 const STORE_ORIGIN = 'http://localhost:3000'
 const PASSWORD = 'mate-con-yerba-2026'
 
+/** IP del cliente que inicia sesión (el bloqueo cuenta por email y por IP). */
+const IP = '203.0.113.7'
+
 /** Puertos en memoria compartidos por los casos de uso de cada test. */
 function setup() {
   const clock = new FixedClock()
@@ -131,27 +134,30 @@ describe('RegisterCustomerCommand', () => {
     expect(await deps.sessions.get(result.session.id)).not.toBeNull()
   })
 
-  it('adjunta el usuario al cliente invitado con ese email y conserva su id', async () => {
-    deps.customers.customers.set('cus-guest', {
+  it('con el email de un invitado crea un cliente nuevo: no adopta sus datos ni sus pedidos (NV-02)', async () => {
+    const guest = {
       id: 'cus-guest',
       userId: null,
       email: 'ana@mail.com',
       firstName: 'Anita',
       lastName: 'P',
       phone: '1123456789',
-    })
+    }
+    deps.customers.customers.set(guest.id, { ...guest })
 
     const result = await register.execute(
       { email: 'ANA@mail.com', firstName: 'Ana', lastName: 'Pérez', password: PASSWORD },
       null,
     )
 
-    expect(deps.customers.customers.size).toBe(1)
-    const customer = deps.customers.customers.get('cus-guest')
+    expect(deps.customers.customers.size).toBe(2)
+    expect(deps.customers.customers.get(guest.id)).toEqual(guest)
     const [user] = [...deps.users.users.values()]
-    expect(customer).toMatchObject({ userId: user?.id, firstName: 'Ana', lastName: 'Pérez' })
-    expect(result.customer.phone).toBe('1123456789')
-    expect(result.session.customerId).toBe('cus-guest')
+    const account = await deps.customers.findByUserId(user?.id ?? '')
+    expect(account).toMatchObject({ email: 'ana@mail.com', firstName: 'Ana', phone: null })
+    expect(account?.id).not.toBe(guest.id)
+    expect(result.customer.phone).toBeNull()
+    expect(result.session.customerId).toBe(account?.id)
   })
 
   it('rechaza un email ya registrado aunque cambien las mayúsculas', async () => {
@@ -167,59 +173,6 @@ describe('RegisterCustomerCommand', () => {
       ),
     ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
     expect(deps.users.users.size).toBe(1)
-  })
-
-  it('no deja un usuario sin cliente si un invitado con ese email aparece entre la consulta y el alta', async () => {
-    deps.customers.customers.set('cus-guest', {
-      id: 'cus-guest',
-      userId: null,
-      email: 'ana@mail.com',
-      firstName: 'Anita',
-      lastName: 'P',
-      phone: null,
-    })
-    // La consulta del registro todavía no lo ve: el invitado "aparece" justo después.
-    vi.spyOn(deps.customers, 'findByEmail').mockResolvedValueOnce(null)
-
-    await expect(
-      register.execute(
-        { email: 'ana@mail.com', firstName: 'Ana', lastName: 'Pérez', password: PASSWORD },
-        null,
-      ),
-    ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
-
-    expect(deps.users.users.size).toBe(0)
-    expect(deps.customers.customers.get('cus-guest')?.userId).toBeNull()
-  })
-
-  it('no deja un usuario suelto si el invitado ya fue adjuntado a otra cuenta', async () => {
-    deps.customers.customers.set('cus-guest', {
-      id: 'cus-guest',
-      userId: 'usr-other',
-      email: 'ana@mail.com',
-      firstName: 'Anita',
-      lastName: 'P',
-      phone: null,
-    })
-    // La consulta del registro lo vio todavía como invitado; otro registro lo ganó después.
-    vi.spyOn(deps.customers, 'findByEmail').mockResolvedValueOnce({
-      id: 'cus-guest',
-      userId: null,
-      email: 'ana@mail.com',
-      firstName: 'Anita',
-      lastName: 'P',
-      phone: null,
-    })
-
-    await expect(
-      register.execute(
-        { email: 'ana@mail.com', firstName: 'Ana', lastName: 'Pérez', password: PASSWORD },
-        null,
-      ),
-    ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
-
-    expect(deps.users.users.size).toBe(0)
-    expect(deps.customers.customers.get('cus-guest')?.userId).toBe('usr-other')
   })
 })
 
@@ -252,28 +205,31 @@ describe('LoginCustomerCommand', () => {
   it('con la contraseña mala responde credenciales incorrectas y el décimo fallo bloquea', async () => {
     for (let attempt = 1; attempt < 10; attempt += 1) {
       await expect(
-        login.execute({ email: 'ana@mail.com', password: 'otra-cosa-1' }, null),
+        login.execute({ email: 'ana@mail.com', password: 'otra-cosa-1', clientIp: IP }, null),
       ).rejects.toBeInstanceOf(InvalidCredentialsError)
     }
 
-    const tenth = login.execute({ email: 'ana@mail.com', password: 'otra-cosa-1' }, null)
+    const tenth = login.execute(
+      { email: 'ana@mail.com', password: 'otra-cosa-1', clientIp: IP },
+      null,
+    )
 
     await expect(tenth).rejects.toBeInstanceOf(LoginLockedError)
     const error = await tenth.catch((caught: unknown) => caught)
     expect(error instanceof LoginLockedError && error.retryAfterSeconds).toBeGreaterThan(0)
     // Bloqueado, ni la contraseña correcta entra hasta que termina la ventana.
     await expect(
-      login.execute({ email: 'ana@mail.com', password: PASSWORD }, null),
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: IP }, null),
     ).rejects.toBeInstanceOf(LoginLockedError)
     deps.clock.advance(15 * 60 * 1000)
     await expect(
-      login.execute({ email: 'ana@mail.com', password: PASSWORD }, null),
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: IP }, null),
     ).resolves.toMatchObject({ customer: { email: 'ana@mail.com' } })
   })
 
   it('al entrar limpia los fallos, actualiza lastLoginAt y rota la sesión', async () => {
     await expect(
-      login.execute({ email: 'ana@mail.com', password: 'mala-1234567' }, null),
+      login.execute({ email: 'ana@mail.com', password: 'mala-1234567', clientIp: IP }, null),
     ).rejects.toBeInstanceOf(InvalidCredentialsError)
     const anonymous = await deps.sessions.create({
       kind: 'anonymous',
@@ -282,7 +238,7 @@ describe('LoginCustomerCommand', () => {
     })
 
     const result = await login.execute(
-      { email: ' ANA@mail.com ', password: PASSWORD },
+      { email: ' ANA@mail.com ', password: PASSWORD, clientIp: IP },
       anonymous.id,
     )
 
@@ -292,17 +248,67 @@ describe('LoginCustomerCommand', () => {
       lastName: 'Pérez',
       phone: null,
     })
-    expect(deps.attempts.count('ana@mail.com')).toBe(0)
+    expect(deps.attempts.count('ana@mail.com', IP)).toBe(0)
     expect(deps.users.users.get(user.id)?.lastLoginAt).toEqual(deps.clock.now())
     expect(result.session).toMatchObject({ kind: 'customer', userId: user.id, customerId: 'cus-1' })
     expect(await deps.sessions.get(anonymous.id)).toBeNull()
+  })
+
+  it('una sesión abierta con la contraseña vieja mientras corre un restablecimiento queda rechazada (NV-03)', async () => {
+    const readUser = deps.users.findByEmail.bind(deps.users)
+    vi.spyOn(deps.users, 'findByEmail').mockImplementationOnce(async (email) => {
+      const found = await readUser(email)
+      // Con el hash viejo ya leído, el restablecimiento cambia la contraseña y cierra todo.
+      deps.clock.advance(5)
+      await deps.users.updatePassword(user.id, 'hashed:nueva-clave-2027')
+      await deps.sessions.destroyAllForUser(user.id)
+      deps.clock.advance(5)
+      return found
+    })
+
+    const result = await login.execute(
+      { email: 'ana@mail.com', password: PASSWORD, clientIp: IP },
+      null,
+    )
+
+    expect(await deps.sessions.get(result.session.id)).toBeNull()
+  })
+
+  it('intentos a la vez no pasan el tope: el contador sube antes de verificar (NV-08)', async () => {
+    const outcomes = await Promise.all(
+      Array.from({ length: 15 }, () =>
+        login
+          .execute({ email: 'ana@mail.com', password: 'otra-cosa-1', clientIp: IP }, null)
+          .catch((caught: unknown) => caught),
+      ),
+    )
+
+    expect(deps.hasher.verifyCalls).toBe(10)
+    expect(outcomes.filter((outcome) => outcome instanceof InvalidCredentialsError)).toHaveLength(9)
+    expect(outcomes.filter((outcome) => outcome instanceof LoginLockedError)).toHaveLength(6)
+  })
+
+  it('el bloqueo cuenta por email y por IP: los fallos desde otra IP no bloquean al dueño (NV-09)', async () => {
+    const attacker = '198.51.100.23'
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      await login
+        .execute({ email: 'ana@mail.com', password: 'otra-cosa-1', clientIp: attacker }, null)
+        .catch(() => undefined)
+    }
+
+    await expect(
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: attacker }, null),
+    ).rejects.toBeInstanceOf(LoginLockedError)
+    await expect(
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: IP }, null),
+    ).resolves.toMatchObject({ customer: { email: 'ana@mail.com' } })
   })
 
   it('un admin no entra por la ruta del cliente', async () => {
     seedUser(deps, { id: 'usr-admin', email: 'admin@galponmates.com.ar', role: 'admin' })
 
     await expect(
-      login.execute({ email: 'admin@galponmates.com.ar', password: PASSWORD }, null),
+      login.execute({ email: 'admin@galponmates.com.ar', password: PASSWORD, clientIp: IP }, null),
     ).rejects.toBeInstanceOf(InvalidCredentialsError)
   })
 
@@ -310,15 +316,15 @@ describe('LoginCustomerCommand', () => {
     seedUser(deps, { id: 'usr-off', email: 'off@mail.com', status: 'disabled' })
 
     await expect(
-      login.execute({ email: 'nadie@mail.com', password: PASSWORD }, null),
+      login.execute({ email: 'nadie@mail.com', password: PASSWORD, clientIp: IP }, null),
     ).rejects.toBeInstanceOf(InvalidCredentialsError)
     // Igual verifica contra un hash fijo, para no responder más rápido.
     expect(deps.hasher.verifyCalls).toBe(1)
     await expect(
-      login.execute({ email: 'off@mail.com', password: PASSWORD }, null),
+      login.execute({ email: 'off@mail.com', password: PASSWORD, clientIp: IP }, null),
     ).rejects.toBeInstanceOf(InvalidCredentialsError)
-    expect(deps.attempts.count('nadie@mail.com')).toBe(1)
-    expect(deps.attempts.count('off@mail.com')).toBe(1)
+    expect(deps.attempts.count('nadie@mail.com', IP)).toBe(1)
+    expect(deps.attempts.count('off@mail.com', IP)).toBe(1)
   })
 })
 
@@ -545,33 +551,52 @@ describe('admin', () => {
       deps.clock,
     )
 
-    const result = await login.execute({ email: 'Admin@GalponMates.com.ar', password: PASSWORD })
+    const result = await login.execute({
+      email: 'Admin@GalponMates.com.ar',
+      password: PASSWORD,
+      clientIp: IP,
+    })
 
     expect(result.email).toBe('admin@galponmates.com.ar')
     expect(result.session).toMatchObject({ kind: 'admin', userId: admin.id, customerId: null })
     await expect(
-      login.execute({ email: 'ana@mail.com', password: PASSWORD }),
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: IP }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError)
   })
 
-  it('ChangeAdminPasswordCommand exige la actual y deja viva la sesión', async () => {
+  it('ChangeAdminPasswordCommand exige la actual, cierra las otras sesiones y renueva la actual (NV-32)', async () => {
     const session = await deps.sessions.create({
       kind: 'admin',
       userId: admin.id,
       customerId: null,
     })
-    const change = new ChangeAdminPasswordCommand(deps.users, deps.hasher)
+    const other = await deps.sessions.create({ kind: 'admin', userId: admin.id, customerId: null })
+    const change = new ChangeAdminPasswordCommand(deps.users, deps.hasher, deps.sessions)
 
     await expect(
-      change.execute(admin.id, { currentPassword: 'no-es-esta-1', newPassword: 'nueva-2027-x' }),
+      change.execute(
+        admin.id,
+        { currentPassword: 'no-es-esta-1', newPassword: 'nueva-2027-x' },
+        session.id,
+      ),
     ).resolves.toEqual(err('wrong_current_password'))
     expect(deps.users.users.get(admin.id)?.passwordHash).toBe(`hashed:${PASSWORD}`)
+    expect(await deps.sessions.get(other.id)).not.toBeNull()
 
     await expect(
-      change.execute(admin.id, { currentPassword: PASSWORD, newPassword: 'nueva-2027-x' }),
+      change.execute(
+        admin.id,
+        { currentPassword: PASSWORD, newPassword: 'nueva-2027-x' },
+        session.id,
+      ),
     ).resolves.toEqual(ok(undefined))
     expect(deps.users.users.get(admin.id)?.passwordHash).toBe('hashed:nueva-2027-x')
-    expect(await deps.sessions.get(session.id)).not.toBeNull()
+    expect(await deps.sessions.get(session.id)).toMatchObject({
+      id: session.id,
+      csrfToken: session.csrfToken,
+      expiresAt: session.expiresAt,
+    })
+    expect(await deps.sessions.get(other.id)).toBeNull()
   })
 })
 

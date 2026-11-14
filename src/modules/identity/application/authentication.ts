@@ -15,12 +15,25 @@ import type { LoginAttemptsPort } from './ports/login-attempts.port'
 import type { PasswordHasher } from './ports/password-hasher.port'
 import type { UserRepository } from './ports/user.repository.port'
 
-/** Email y contraseña de un inicio de sesión. */
+/** Email, contraseña e IP de un inicio de sesión. */
 export interface Credentials {
   /** Email tal como llegó (se normaliza). */
   email: string
   /** Contraseña en claro. */
   password: string
+  /** IP del cliente: el bloqueo por intentos cuenta por email y por IP. */
+  clientIp: string
+}
+
+/** Usuario que pasó {@link authenticate}. */
+export interface AuthenticatedUser {
+  /** El usuario, ya con los intentos limpios y el inicio de sesión registrado. */
+  user: User
+  /**
+   * Cuándo empezó la comprobación, antes de leer el hash: va en la sesión como `authenticatedAt`,
+   * así un cambio de contraseña que corra en el medio la deja sin valor.
+   */
+  authenticatedAt: Date
 }
 
 /** Puertos que usa {@link authenticate}. */
@@ -29,7 +42,7 @@ export interface AuthenticationPorts {
   users: UserRepository
   /** Hash de contraseñas. */
   hasher: PasswordHasher
-  /** Intentos fallidos por email. */
+  /** Intentos por email e IP. */
   attempts: LoginAttemptsPort
   /** Reloj, para `lastLoginAt`. */
   clock: Clock
@@ -44,13 +57,14 @@ const dummyHashes = new WeakMap<PasswordHasher, string>()
 /**
  * Comprueba las credenciales de un usuario de un rol sin revelar si el email existe ni si la
  * cuenta está deshabilitada: con un email desconocido igual verifica contra un hash fijo (mismo
- * costo) y todos los fallos responden lo mismo y cuentan para el bloqueo por email.
+ * costo) y todos los fallos responden lo mismo. Cada intento cuenta para el bloqueo por email e IP
+ * **antes** de verificar (de forma atómica), así los intentos a la vez no pasan el tope.
  *
- * @param ports - Usuarios, hasher, intentos fallidos y reloj.
- * @param credentials - Email y contraseña.
+ * @param ports - Usuarios, hasher, intentos y reloj.
+ * @param credentials - Email, contraseña e IP del cliente.
  * @param role - Rol que tiene que tener el usuario.
- * @returns El usuario, ya con los fallos limpios y el inicio de sesión registrado.
- * @throws {LoginLockedError} Si el email está bloqueado o este fallo lo bloquea.
+ * @returns El usuario y cuándo empezó la comprobación.
+ * @throws {LoginLockedError} Si el par email + IP está bloqueado o este fallo lo bloquea.
  * @throws {InvalidCredentialsError} Si el email no existe, la contraseña no coincide, el rol es
  *   otro o la cuenta está deshabilitada ({@link AccountDisabledError}, que se responde igual).
  */
@@ -58,10 +72,14 @@ export async function authenticate(
   ports: AuthenticationPorts,
   credentials: Credentials,
   role: UserRole,
-): Promise<User> {
+): Promise<AuthenticatedUser> {
+  const authenticatedAt = ports.clock.now()
   const email = normalizeEmail(credentials.email)
-  const blockedFor = await ports.attempts.blockedFor(email)
-  if (blockedFor !== null) throw new LoginLockedError(wholeSeconds(blockedFor))
+  const key = { email, clientIp: credentials.clientIp }
+  const attempt = await ports.attempts.attempt(key)
+  if (attempt.blockedForSeconds !== null) {
+    throw new LoginLockedError(wholeSeconds(attempt.blockedForSeconds))
+  }
 
   const user = await ports.users.findByEmail(email)
   const matches =
@@ -69,16 +87,17 @@ export async function authenticate(
       ? await verifyWithoutUser(ports.hasher, credentials.password)
       : await ports.hasher.verify(user.passwordHash, credentials.password)
   if (user === null || !matches || user.role !== role || user.status !== 'active') {
-    const { blockedForSeconds } = await ports.attempts.fail(email)
-    if (blockedForSeconds !== null) throw new LoginLockedError(wholeSeconds(blockedForSeconds))
+    if (attempt.lockedIfFailsSeconds !== null) {
+      throw new LoginLockedError(wholeSeconds(attempt.lockedIfFailsSeconds))
+    }
     throw matches && user?.role === role
       ? new AccountDisabledError()
       : new InvalidCredentialsError()
   }
 
-  await ports.attempts.clear(email)
+  await ports.attempts.clear(key)
   await ports.users.touchLastLogin(user.id, ports.clock.now())
-  return user
+  return { user, authenticatedAt }
 }
 
 /**

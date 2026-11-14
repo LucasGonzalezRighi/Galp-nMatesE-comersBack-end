@@ -1,34 +1,50 @@
+/** A quién se le cuentan los intentos: el email y la IP del cliente, juntos. */
+export interface LoginAttemptKey {
+  /** Email normalizado (exista o no la cuenta). */
+  email: string
+  /** IP del cliente que intenta entrar. */
+  clientIp: string
+}
+
+/** Lo que dice el contador sobre un intento, antes de verificar la contraseña. */
+export interface LoginAttempt {
+  /**
+   * Segundos de bloqueo que quedan si el par ya pasó el tope: el intento no se verifica. `null` si
+   * se puede verificar.
+   */
+  blockedForSeconds: number | null
+  /**
+   * Segundos de bloqueo que arrancan si este intento falla (es el último permitido de la ventana),
+   * o `null`.
+   */
+  lockedIfFailsSeconds: number | null
+}
+
 /**
- * Intentos fallidos de inicio de sesión por email: 10 fallos en una ventana de 15 minutos (que
- * arranca con el primero) bloquean el email por el resto de la ventana. **Falla abierta**: si el
- * almacén no responde, nada queda bloqueado y ninguna operación lanza.
+ * Intentos de inicio de sesión por email **y por IP del cliente** (Ruling B-7, ajustado por la
+ * auditoría: NV-08 y NV-09): cada intento suma de forma atómica **antes** de verificar la
+ * contraseña, así ni los intentos a la vez pasan el tope; con 10 en una ventana de 15 minutos (que
+ * arranca con el primero) el par queda bloqueado por el resto de la ventana. Desde otra IP el mismo
+ * email sigue entrando, así un anónimo no deja afuera al dueño de la cuenta. Un inicio de sesión
+ * correcto borra la cuenta del par. **Falla abierta**: si el almacén no responde, nada queda
+ * bloqueado y ninguna operación lanza.
  */
 export interface LoginAttemptsPort {
   /**
-   * Registra un fallo.
+   * Cuenta un intento, de forma atómica y antes de verificar la contraseña.
    *
-   * @param email - Email normalizado (exista o no la cuenta).
-   * @returns Los segundos de bloqueo que quedan si con este fallo el email está bloqueado, o
-   *   `null` si no lo está (o el almacén no respondió).
+   * @param key - Email normalizado e IP del cliente.
+   * @returns Si el intento se puede verificar y cuánto bloqueo arranca si falla (los dos `null` si
+   *   el almacén no respondió).
    */
-  fail(email: string): Promise<{ blockedForSeconds: number | null }>
+  attempt(key: LoginAttemptKey): Promise<LoginAttempt>
 
   /**
-   * Consulta el bloqueo antes de verificar la contraseña, para que durante el bloqueo ni la
-   * contraseña correcta entre.
+   * Olvida los intentos de un par (después de un inicio de sesión correcto).
    *
-   * @param email - Email normalizado.
-   * @returns Los segundos de bloqueo que quedan, o `null` si no está bloqueado (o el almacén no
-   *   respondió).
+   * @param key - Email normalizado e IP del cliente.
    */
-  blockedFor(email: string): Promise<number | null>
-
-  /**
-   * Olvida los fallos de un email (después de un inicio de sesión correcto).
-   *
-   * @param email - Email normalizado.
-   */
-  clear(email: string): Promise<void>
+  clear(key: LoginAttemptKey): Promise<void>
 }
 
 /** Token de inyección del {@link LoginAttemptsPort}. */

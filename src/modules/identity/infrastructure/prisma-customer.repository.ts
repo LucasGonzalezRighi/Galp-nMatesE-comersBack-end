@@ -9,10 +9,13 @@ import type {
 } from '../application/ports/customer.repository.port'
 import type { NewUser } from '../application/ports/user.repository.port'
 import type { Customer } from '../domain/customer.entity'
-import { EmailAlreadyRegisteredError } from '../domain/identity-errors'
 import { toCustomer, translateEmailTaken } from './identity.mapper'
 
-/** Clientes con Prisma (Postgres): con cuenta o invitados; el email es `citext` y único. */
+/**
+ * Clientes con Prisma (Postgres): con cuenta o invitados. El email es `citext`; hay un solo
+ * invitado por email (índice único parcial `customers_guest_email_key`) y una sola cuenta (la
+ * unicidad de `users.email`), y los dos pueden convivir.
+ */
 @Injectable()
 export class PrismaCustomerRepository implements CustomerRepository {
   /** @param prisma - Cliente de Prisma de la app. */
@@ -26,7 +29,16 @@ export class PrismaCustomerRepository implements CustomerRepository {
 
   /** {@inheritDoc CustomerRepository.findByEmail} */
   async findByEmail(email: string): Promise<Customer | null> {
-    const row = await this.prisma.customer.findUnique({ where: { email } })
+    const row = await this.prisma.customer.findFirst({
+      where: { email },
+      orderBy: { userId: { sort: 'asc', nulls: 'last' } },
+    })
+    return row === null ? null : toCustomer(row)
+  }
+
+  /** {@inheritDoc CustomerRepository.findGuestByEmail} */
+  async findGuestByEmail(email: string): Promise<Customer | null> {
+    const row = await this.prisma.customer.findFirst({ where: { email, userId: null } })
     return row === null ? null : toCustomer(row)
   }
 
@@ -43,31 +55,6 @@ export class PrismaCustomerRepository implements CustomerRepository {
   async createWithUser(user: NewUser, customer: Omit<NewCustomer, 'userId'>): Promise<Customer> {
     const row = await translateEmailTaken(() =>
       this.prisma.customer.create({ data: { ...customer, user: { create: { ...user } } } }),
-    )
-    return toCustomer(row)
-  }
-
-  /**
-   * {@inheritDoc CustomerRepository.attachUser}
-   *
-   * En una transacción: crea el usuario y se lo asigna al cliente solo si sigue sin cuenta
-   * (`updateMany` con `userId: null`); si otro registro lo ganó, la transacción se deshace.
-   */
-  async attachUser(
-    customerId: string,
-    user: NewUser,
-    names: { firstName: string; lastName: string },
-  ): Promise<Customer> {
-    const row = await translateEmailTaken(() =>
-      this.prisma.$transaction(async (tx) => {
-        await tx.user.create({ data: { ...user } })
-        const { count } = await tx.customer.updateMany({
-          where: { id: customerId, userId: null },
-          data: { userId: user.id, firstName: names.firstName, lastName: names.lastName },
-        })
-        if (count !== 1) throw new EmailAlreadyRegisteredError()
-        return tx.customer.findUniqueOrThrow({ where: { id: customerId } })
-      }),
     )
     return toCustomer(row)
   }

@@ -35,6 +35,7 @@ function workingRedis() {
   const client: RedisSessionClient = {
     get: (key) => Promise.resolve(strings.get(key) ?? null),
     smembers: (key) => Promise.resolve([...(sets.get(key) ?? [])]),
+    mget: (...keys) => Promise.resolve(keys.map((key) => strings.get(key) ?? null)),
     multi: () => {
       const queued: (() => unknown)[] = []
       const transaction: RedisSessionTransaction = {
@@ -50,8 +51,14 @@ function workingRedis() {
           queued.push(() => sets.set(key, (sets.get(key) ?? new Set()).add(member)))
           return transaction
         },
-        srem(key, member) {
-          queued.push(() => sets.get(key)?.delete(member))
+        srem(key, ...members) {
+          queued.push(() => {
+            const set = sets.get(key)
+            const removed = members.filter((member) => set?.delete(member)).length
+            // Como Redis: un set que queda vacío deja de existir.
+            if (set?.size === 0) sets.delete(key)
+            return removed
+          })
           return transaction
         },
         expire(key, seconds) {
@@ -85,7 +92,7 @@ function failingRedis(): RedisSessionClient {
     del: () => transaction,
     exec: fail,
   }
-  return { get: fail, smembers: fail, multi: () => transaction }
+  return { get: fail, smembers: fail, mget: fail, multi: () => transaction }
 }
 
 function quietLogger() {
@@ -106,6 +113,7 @@ describe('RedisSessionStore', () => {
       customerId: 'c1',
       csrfToken: '2'.padStart(64, '0'),
       createdAt: '2026-11-02T12:00:00.000Z',
+      authenticatedAt: '2026-11-02T12:00:00.000Z',
       expiresAt: '2026-12-02T12:00:00.000Z',
     })
     expect(redis.set).toHaveBeenCalledWith(
@@ -134,13 +142,13 @@ describe('RedisSessionStore', () => {
     expect(session.expiresAt).toBe('2026-11-02T20:00:00.000Z')
   })
 
-  it('una sesión anónima dura 24 h y no se indexa por usuario', async () => {
+  it('una sesión anónima dura 30 minutos y no se indexa por usuario (NV-19)', async () => {
     const redis = workingRedis()
     const store = new RedisSessionStore(redis.client, countingSecrets(), clock, quietLogger())
 
     await store.create({ kind: 'anonymous', userId: null, customerId: null })
 
-    expect(redis.set).toHaveBeenCalledWith(expect.any(String), expect.any(String), 'EX', 86_400)
+    expect(redis.set).toHaveBeenCalledWith(expect.any(String), expect.any(String), 'EX', 1_800)
     expect(redis.sets.size).toBe(0)
   })
 
@@ -195,6 +203,35 @@ describe('RedisSessionStore', () => {
     await expect(store.get(second.id)).resolves.toBeNull()
     await expect(store.get(other.id)).resolves.toEqual(other)
     expect(redis.sets.has('user-sessions:u1')).toBe(false)
+  })
+
+  it('destroyAllForUser: si falla el borrado de las sesiones viejas, igual quedan rechazadas y no responde 503 (NV-24)', async () => {
+    const redis = workingRedis()
+    const logger = quietLogger()
+    // Toda transacción con DEL falla (por ejemplo, un índice enorme); el resto anda.
+    const deleteFails: RedisSessionClient = {
+      ...redis.client,
+      multi: () => {
+        const transaction = redis.client.multi()
+        const del = transaction.del.bind(transaction)
+        const exec = transaction.exec.bind(transaction)
+        let deletes = false
+        transaction.del = (...keys) => {
+          deletes = true
+          return del(...keys)
+        }
+        transaction.exec = () =>
+          deletes ? Promise.reject(new Error('ERR demasiados argumentos')) : exec()
+        return transaction
+      },
+    }
+    const store = new RedisSessionStore(deleteFails, countingSecrets(), clock, logger)
+    const old = await store.create({ kind: 'customer', userId: 'u1', customerId: 'c1' })
+
+    await expect(store.destroyAllForUser('u1')).resolves.toBeUndefined()
+
+    await expect(store.get(old.id)).resolves.toBeNull()
+    expect(logger.warn).toHaveBeenCalledTimes(1)
   })
 
   it('falla cerrado: si Redis no responde, lanza DomainError 503 service_unavailable', async () => {

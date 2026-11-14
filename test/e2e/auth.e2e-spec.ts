@@ -96,13 +96,13 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
   describe('cliente: CSRF, registro, cuenta, libreta y cierre de sesión', () => {
     let anonymous: Jar
 
-    it('GET /auth/csrf sin cookie → 200 y una sesión anónima de 24 h', async () => {
+    it('GET /auth/csrf sin cookie → 200 y una sesión anónima de 30 minutos (NV-19)', async () => {
       const response = await refreshCsrf(browser)
 
       expect(browser.csrf).toMatch(/^[0-9a-f]{64}$/)
       expect(setCookies(response)).toEqual([
         expect.stringMatching(
-          /^__Host-galpon_session=[0-9a-f]{64}; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400$/,
+          /^__Host-galpon_session=[0-9a-f]{64}; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=1800$/,
         ),
       ])
       anonymous = { ...browser }
@@ -363,7 +363,11 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
       expect(csrf.body).toEqual({ csrfToken: admin.csrf })
     })
 
-    it('POST /admin/auth/password: sin CSRF 403, la actual mal 422, bien 204 y la sesión sigue', async () => {
+    it('POST /admin/auth/password: sin CSRF 403, la actual mal 422, bien 204, la sesión sigue y las otras se cierran (NV-32)', async () => {
+      const otherAdmin = newJar()
+      const otherLogin = await call(otherAdmin, 'post', '/admin/auth/login', { body: SEED_ADMIN })
+      expect(otherLogin.status).toBe(200)
+      expect((await call(otherAdmin, 'get', '/admin/auth/me')).status).toBe(200)
       const change = {
         currentPassword: SEED_ADMIN.password,
         newPassword: NEW_ADMIN_PASSWORD,
@@ -379,6 +383,8 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
       })
       const done = await call(admin, 'post', '/admin/auth/password', { body: change })
       const me = await call(admin, 'get', '/admin/auth/me')
+      const csrf = await call(admin, 'get', '/admin/auth/csrf')
+      const otherMe = await call(otherAdmin, 'get', '/admin/auth/me')
 
       expect(noCsrf.status).toBe(403)
       expect(noCsrf.body).toMatchObject({ type: 'csrf_invalid' })
@@ -389,6 +395,8 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
       })
       expect(done.status).toBe(204)
       expect(me.status).toBe(200)
+      expect(csrf.body).toEqual({ csrfToken: admin.csrf })
+      expect(otherMe.status).toBe(401)
     })
 
     it('POST /admin/auth/logout → 204 y después /admin/auth/me → 401', async () => {

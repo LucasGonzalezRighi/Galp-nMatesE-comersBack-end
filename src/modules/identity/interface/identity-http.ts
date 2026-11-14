@@ -8,6 +8,20 @@ export { adminUserIdOf, customerIdOf } from '../../../shared/infrastructure/auth
  */
 export const AUTH_WRITE_THROTTLE = { default: { limit: 20, ttl: 60_000 } } as const
 
+/** IP con la que se cuenta un intento cuando Express no la conoce (socket ya cerrado). */
+export const UNKNOWN_CLIENT_IP = 'desconocida'
+
+/**
+ * IP del cliente para el bloqueo por intentos de inicio de sesión: la de `req.ip` (`@Ip()`), la
+ * misma que usa el límite por IP, o {@link UNKNOWN_CLIENT_IP} si Express no la conoce.
+ *
+ * @param ip - Lo que dio `@Ip()`.
+ * @returns La IP, nunca vacía.
+ */
+export function clientIpOf(ip: string | undefined): string {
+  return ip === undefined || ip.trim() === '' ? UNKNOWN_CLIENT_IP : ip
+}
+
 /** Lo que los controladores usan de la respuesta de Express: el header `Set-Cookie`. */
 export interface CookieResponse {
   /**

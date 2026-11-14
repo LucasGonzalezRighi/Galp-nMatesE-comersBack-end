@@ -354,7 +354,7 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         orderBy: { number: 'asc' },
       })
       expect(second?.customerId).toBe(first?.customerId)
-      const guest = await prisma().customer.findUniqueOrThrow({
+      const guest = await prisma().customer.findFirstOrThrow({
         where: { email: 'invitada@example.com' },
       })
       expect(guest).toMatchObject({ firstName: 'Anita', phone: '1155556666', userId: null })
@@ -689,7 +689,7 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
         phone: '1144443333',
       })
       expect(
-        await prisma().customer.findUniqueOrThrow({ where: { email: 'carrera@example.com' } }),
+        await prisma().customer.findFirstOrThrow({ where: { email: 'carrera@example.com' } }),
       ).toMatchObject({ firstName: 'Rita María', phone: '1144443333' })
       expect(await directory().findByEmail('nadie@example.com')).toBeNull()
     })

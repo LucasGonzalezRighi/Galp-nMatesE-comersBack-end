@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Ip,
   Post,
   Req,
   Res,
@@ -53,7 +54,12 @@ import { CsrfTokenDto, CustomerDto } from './dto/identity.response.dto'
 import { LoginDto } from './dto/login.dto'
 import { RegisterDto } from './dto/register.dto'
 import { ResetPasswordDto } from './dto/reset-password.dto'
-import { AUTH_WRITE_THROTTLE, type CookieResponse, type CsrfTokenView } from './identity-http'
+import {
+  AUTH_WRITE_THROTTLE,
+  clientIpOf,
+  type CookieResponse,
+  type CsrfTokenView,
+} from './identity-http'
 
 /** Error del campo `token` cuando el enlace de recuperación no sirve (como el mock del front). */
 const INVALID_RESET_TOKEN = {
@@ -89,7 +95,7 @@ export class AuthController {
 
   /**
    * Devuelve el CSRF de la sesión de la cookie (anónima o de cliente); si no hay una vigente,
-   * abre una anónima de 24 h y manda su cookie.
+   * abre una anónima de 30 minutos y manda su cookie.
    *
    * @param req - Pedido (se lee la cookie `__Host-galpon_session`).
    * @param res - Respuesta (para la cookie de la sesión nueva).
@@ -149,10 +155,12 @@ export class AuthController {
 
   /**
    * Inicia la sesión del cliente (rota la sesión actual). Email o contraseña incorrectos → 401
-   * sin decir cuál; 10 fallos seguidos del mismo email → 429 con `Retry-After`.
+   * sin decir cuál; 10 intentos del mismo email desde la misma IP en 15 minutos → el siguiente,
+   * 429 con `Retry-After` (el décimo también, si falla).
    *
    * @param body - Email y contraseña.
    * @param current - Sesión actual (la que dio el CSRF).
+   * @param ip - IP del cliente (el bloqueo por intentos cuenta por email y por IP).
    * @param res - Respuesta (para la cookie).
    * @returns Los datos del cliente.
    * @throws {InvalidCredentialsError} 401 `invalid_credentials`.
@@ -169,10 +177,14 @@ export class AuthController {
   async login(
     @Body() body: LoginDto,
     @CurrentSession() current: SessionRecord,
+    @Ip() ip: string | undefined,
     @Res({ passthrough: true }) res: CookieResponse,
   ): Promise<CustomerView> {
     const { email, password } = body
-    const result = await this.loginCustomer.execute({ email, password }, current.id)
+    const result = await this.loginCustomer.execute(
+      { email, password, clientIp: clientIpOf(ip) },
+      current.id,
+    )
     return startCustomerSession(res, result)
   }
 

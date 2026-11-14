@@ -117,6 +117,22 @@ Requisitos que salen del spec y de los Rulings:
     - `NODE_ENV=production` obligatorio. Si falta, el `LogMailer` registraría los links.
     - `exposedHeaders: ['Retry-After']` en CORS, si el admin llega a mostrar la espera.
 
+### Actualización 2026-11-14 (auditoría de seguridad, tanda A)
+
+- **Marca de credenciales por usuario** (`user-credentials:{userId}`, la hora del cambio): restablecer
+  o cambiar la contraseña la escribe primero y `get` rechaza toda sesión del usuario cuya credencial
+  se comprobó hasta esa hora (`authenticatedAt` de la sesión, que en un login se toma antes de leer
+  el hash). Cierra la carrera de un login con la contraseña vieja que crea su sesión después del
+  cierre, sin script Lua. El borrado de las sesiones viejas queda como limpieza de mejor esfuerzo, de
+  a 100 (si falla, solo avisa). El cambio de contraseña del admin cierra sus otras sesiones y renueva
+  la actual en la misma transacción que la marca.
+- **Tope de 20 sesiones por usuario:** al abrir la 21, se cierra la más vieja y el índice se poda.
+- **Sesión anónima de 30 minutos** (antes 24 h): solo da el CSRF hasta que la persona inicia sesión.
+- **Bloqueo por email y por IP**, contado antes de verificar la contraseña (`INCR` atómico).
+- **El registro ya no adopta al invitado** del mismo email: la cuenta tiene su propio cliente.
+- `NODE_ENV` obligatorio y el admin semilla con credenciales propias en producción ya no son
+  pendientes de B8. Siguen pendientes `trust proxy` (otra tanda) y `exposedHeaders`.
+
 ## Alternativas descartadas
 
 - **JWT (tokens firmados sin estado):**

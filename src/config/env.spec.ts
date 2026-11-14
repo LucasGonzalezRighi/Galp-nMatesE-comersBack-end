@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { parseEnv } from './env'
 
 const REQUIRED = {
+  NODE_ENV: 'development',
   DATABASE_URL: 'postgresql://galpon:galpon@localhost:5432/galpon',
   REDIS_URL: 'redis://localhost:6379',
 }
@@ -54,6 +55,46 @@ describe('parseEnv', () => {
     expect(message).toContain('REDIS_URL')
   })
 
+  describe('NODE_ENV y HOST', () => {
+    /** Producción completa: Mercado Pago real, Cloudinary y el secreto de la tienda. */
+    const PRODUCTION = {
+      ...REQUIRED,
+      ...LIVE,
+      ...CLOUDINARY,
+      NODE_ENV: 'production',
+      STORE_REVALIDATE_SECRET: STORE_SECRET,
+    }
+
+    it('sin NODE_ENV no arranca: el error pide development, test o production explícito (NV-07)', () => {
+      const message = errorOf({
+        DATABASE_URL: REQUIRED.DATABASE_URL,
+        REDIS_URL: REQUIRED.REDIS_URL,
+      })
+
+      expect(message).toContain('- NODE_ENV: falta; se espera development, test o production')
+      expect(message).toContain('sin NODE_ENV el back no arranca')
+      expect(errorOf({ ...REQUIRED, NODE_ENV: 'prod' })).toContain(
+        '- NODE_ENV: tiene un valor inválido',
+      )
+    })
+
+    it('HOST por defecto: 127.0.0.1 fuera de producción y 0.0.0.0 en producción (NV-31)', () => {
+      expect(parseEnv(REQUIRED).HOST).toBe('127.0.0.1')
+      expect(parseEnv({ ...REQUIRED, NODE_ENV: 'test' }).HOST).toBe('127.0.0.1')
+      expect(parseEnv(PRODUCTION).HOST).toBe('0.0.0.0')
+    })
+
+    it('HOST respeta una IP o localhost y rechaza otra cosa sin mostrar el valor', () => {
+      expect(parseEnv({ ...REQUIRED, HOST: '0.0.0.0' }).HOST).toBe('0.0.0.0')
+      expect(parseEnv({ ...PRODUCTION, HOST: '10.0.0.5' }).HOST).toBe('10.0.0.5')
+      expect(parseEnv({ ...REQUIRED, HOST: '::' }).HOST).toBe('::')
+      expect(parseEnv({ ...REQUIRED, HOST: 'localhost' }).HOST).toBe('localhost')
+      const message = errorOf({ ...REQUIRED, HOST: 'mi host raro' })
+      expect(message).toContain('- HOST: tiene un valor inválido')
+      expect(message).not.toContain('mi host raro')
+    })
+  })
+
   it('con un PORT que no es número lanza un error que nombra PORT', () => {
     expect(errorOf({ ...REQUIRED, PORT: 'abc' })).toContain('PORT')
   })
@@ -61,6 +102,7 @@ describe('parseEnv', () => {
   it('con las variables obligatorias completa el resto con los valores por defecto', () => {
     expect(parseEnv(REQUIRED)).toEqual({
       NODE_ENV: 'development',
+      HOST: '127.0.0.1',
       PORT: 3001,
       DATABASE_URL: REQUIRED.DATABASE_URL,
       REDIS_URL: REQUIRED.REDIS_URL,

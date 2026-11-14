@@ -7,6 +7,15 @@ import {
   type LoginAttemptsRedisClient,
 } from './redis-login-attempts.adapter'
 
+/** Email e IP de los intentos de prueba. */
+const KEY = { email: 'ana@mail.com', clientIp: '203.0.113.7' }
+
+/** Clave de Redis de {@link KEY}. */
+const REDIS_KEY = 'login-fail:203.0.113.7:ana@mail.com'
+
+/** Intento que se puede verificar sin que arranque un bloqueo. */
+const FREE = { blockedForSeconds: null, lockedIfFailsSeconds: null }
+
 /** ioredis simulado: contadores en memoria con TTL fijo (el tiempo no corre). */
 function fakeRedis() {
   const values = new Map<string, number>()
@@ -24,10 +33,6 @@ function fakeRedis() {
       return Promise.resolve(1)
     }),
     ttl: vi.fn((key: string) => Promise.resolve(values.has(key) ? (ttls.get(key) ?? -1) : -2)),
-    get: vi.fn((key: string) => {
-      const value = values.get(key)
-      return Promise.resolve(value === undefined ? null : String(value))
-    }),
     del: vi.fn((key: string) => {
       const had = values.delete(key)
       ttls.delete(key)
@@ -40,65 +45,92 @@ function fakeRedis() {
 /** Redis caído: todos los comandos fallan. */
 function downRedis(): LoginAttemptsRedisClient {
   const fail = () => Promise.reject(new Error('Connection is closed.'))
-  return { incr: fail, expire: fail, ttl: fail, get: fail, del: fail }
+  return { incr: fail, expire: fail, ttl: fail, del: fail }
 }
 
 const quietLogger = { warn: vi.fn() }
 
 describe('RedisLoginAttempts', () => {
-  it('usa la clave login-fail:{email} con una ventana de 15 minutos desde el primer fallo', async () => {
+  it('usa la clave login-fail:{ip}:{email} con una ventana de 15 minutos desde el primer intento', async () => {
     const { client, ttls } = fakeRedis()
     const attempts = new RedisLoginAttempts(client, quietLogger)
 
-    await expect(attempts.fail('ana@mail.com')).resolves.toEqual({ blockedForSeconds: null })
+    await expect(attempts.attempt(KEY)).resolves.toEqual(FREE)
 
-    expect(client.incr).toHaveBeenCalledWith('login-fail:ana@mail.com')
-    expect(client.expire).toHaveBeenCalledWith(
-      'login-fail:ana@mail.com',
-      LOGIN_FAILURE_WINDOW_SECONDS,
-      'NX',
-    )
-    expect(ttls.get('login-fail:ana@mail.com')).toBe(900)
+    expect(client.incr).toHaveBeenCalledWith(REDIS_KEY)
+    expect(client.expire).toHaveBeenCalledWith(REDIS_KEY, LOGIN_FAILURE_WINDOW_SECONDS, 'NX')
+    expect(ttls.get(REDIS_KEY)).toBe(900)
   })
 
-  it('los primeros nueve fallos no bloquean; el décimo bloquea por el TTL que queda', async () => {
+  it('codifica la IP: una IPv6 no se confunde con el separador', async () => {
+    const { client } = fakeRedis()
+    const attempts = new RedisLoginAttempts(client, quietLogger)
+
+    await attempts.attempt({ email: 'ana@mail.com', clientIp: '::ffff:127.0.0.1' })
+
+    expect(client.incr).toHaveBeenCalledWith('login-fail:%3A%3Affff%3A127.0.0.1:ana@mail.com')
+  })
+
+  it('los primeros nueve se verifican; el décimo avisa el bloqueo si falla; del once en adelante, bloqueado', async () => {
     const { client, ttls } = fakeRedis()
     const attempts = new RedisLoginAttempts(client, quietLogger)
 
     for (let i = 1; i < LOGIN_FAILURE_LIMIT; i++) {
-      await expect(attempts.fail('ana@mail.com')).resolves.toEqual({ blockedForSeconds: null })
+      await expect(attempts.attempt(KEY)).resolves.toEqual(FREE)
     }
-    await expect(attempts.blockedFor('ana@mail.com')).resolves.toBeNull()
+    ttls.set(REDIS_KEY, 612)
 
-    ttls.set('login-fail:ana@mail.com', 612)
-    await expect(attempts.fail('ana@mail.com')).resolves.toEqual({ blockedForSeconds: 612 })
-    await expect(attempts.blockedFor('ana@mail.com')).resolves.toBe(612)
+    await expect(attempts.attempt(KEY)).resolves.toEqual({
+      blockedForSeconds: null,
+      lockedIfFailsSeconds: 612,
+    })
+    await expect(attempts.attempt(KEY)).resolves.toEqual({
+      blockedForSeconds: 612,
+      lockedIfFailsSeconds: null,
+    })
   })
 
-  it('clear olvida los fallos', async () => {
+  it('si el TTL no se puede leer, el bloqueo dura la ventana entera (nunca deja pasar)', async () => {
+    const { client } = fakeRedis()
+    client.expire.mockResolvedValue(0)
+    const attempts = new RedisLoginAttempts(client, quietLogger)
+    for (let i = 0; i < LOGIN_FAILURE_LIMIT; i++) await attempts.attempt(KEY)
+
+    await expect(attempts.attempt(KEY)).resolves.toEqual({
+      blockedForSeconds: LOGIN_FAILURE_WINDOW_SECONDS,
+      lockedIfFailsSeconds: null,
+    })
+  })
+
+  it('cuenta cada IP por separado y clear olvida solo el par', async () => {
     const { client } = fakeRedis()
     const attempts = new RedisLoginAttempts(client, quietLogger)
-    for (let i = 0; i < LOGIN_FAILURE_LIMIT; i++) await attempts.fail('ana@mail.com')
+    for (let i = 0; i < LOGIN_FAILURE_LIMIT; i++) await attempts.attempt(KEY)
 
-    await attempts.clear('ana@mail.com')
+    await expect(attempts.attempt({ ...KEY, clientIp: '198.51.100.23' })).resolves.toEqual(FREE)
+    await attempts.clear(KEY)
 
-    expect(client.del).toHaveBeenCalledWith('login-fail:ana@mail.com')
-    await expect(attempts.blockedFor('ana@mail.com')).resolves.toBeNull()
+    expect(client.del).toHaveBeenCalledWith(REDIS_KEY)
+    await expect(attempts.attempt(KEY)).resolves.toEqual(FREE)
   })
 
   it('falla abierta: sin Redis nada queda bloqueado y nada lanza (con un solo aviso)', async () => {
     const logger = { warn: vi.fn() }
     const attempts = new RedisLoginAttempts(downRedis(), logger)
 
-    await expect(attempts.fail('ana@mail.com')).resolves.toEqual({ blockedForSeconds: null })
-    await expect(attempts.blockedFor('ana@mail.com')).resolves.toBeNull()
-    await expect(attempts.clear('ana@mail.com')).resolves.toBeUndefined()
+    await expect(attempts.attempt(KEY)).resolves.toEqual(FREE)
+    await expect(attempts.clear(KEY)).resolves.toBeUndefined()
     expect(logger.warn).toHaveBeenCalledTimes(1)
   })
 
-  it('rechaza un email vacío', async () => {
+  it('rechaza un email o una IP vacíos', async () => {
     const attempts = new RedisLoginAttempts(fakeRedis().client, quietLogger)
 
-    await expect(attempts.fail(' ')).rejects.toThrow('El email no puede estar vacío')
+    await expect(attempts.attempt({ ...KEY, email: ' ' })).rejects.toThrow(
+      'El email no puede estar vacío',
+    )
+    await expect(attempts.attempt({ ...KEY, clientIp: '' })).rejects.toThrow(
+      'La IP del cliente no puede estar vacía',
+    )
   })
 })

@@ -38,8 +38,8 @@ export class IdentityCustomersAdapter implements CustomerDirectoryPort {
   /**
    * {@inheritDoc CustomerDirectoryPort.createGuest}
    *
-   * Si el `INSERT` choca con el email único (`P2002`, otro pedido lo creó a la vez), devuelve el
-   * cliente que ganó.
+   * Si el `INSERT` choca con el invitado único del email (`P2002`, otro pedido lo creó a la vez),
+   * devuelve ese invitado: nunca la cuenta del mismo email, que no ve pedidos de invitado.
    *
    * @throws {TypeError} En español, si falta el email.
    */
@@ -57,7 +57,7 @@ export class IdentityCustomersAdapter implements CustomerDirectoryPort {
       return { id: created.id }
     } catch (error) {
       if (!isUniqueViolation(error)) throw error
-      const existing = await this.customers.findByEmail(input.email)
+      const existing = await this.customers.findGuestByEmail(input.email)
       if (existing === null) throw error
       return { id: existing.id }
     }

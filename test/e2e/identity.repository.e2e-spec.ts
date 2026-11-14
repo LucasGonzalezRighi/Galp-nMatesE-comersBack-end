@@ -163,16 +163,14 @@ describe('adaptadores de identidad (Postgres + Redis)', () => {
       })
     })
 
-    it('createWithUser con un email repetido lanza 409 y no deja un usuario huérfano', async () => {
-      await prisma().customer.create({
-        data: { id: newId(), email: 'invitada@mail.com', firstName: 'Inés', lastName: 'Gómez' },
-      })
-      const user = await newUser('INVITADA@mail.com')
+    it('createWithUser con el email de otra cuenta lanza 409 y no deja un usuario huérfano', async () => {
+      await account('repetida@mail.com')
+      const user = await newUser('REPETIDA@mail.com')
 
       await expect(
         customers().createWithUser(user, {
           id: newId(),
-          email: 'INVITADA@mail.com',
+          email: 'REPETIDA@mail.com',
           firstName: 'Inés',
           lastName: 'Gómez',
           phone: null,
@@ -181,7 +179,7 @@ describe('adaptadores de identidad (Postgres + Redis)', () => {
       await expect(users().findById(user.id)).resolves.toBeNull()
     })
 
-    it('attachUser convierte un invitado en cuenta y no se puede repetir', async () => {
+    it('el invitado y la cuenta del mismo email conviven sin mezclarse; dos invitados no (NV-02)', async () => {
       const guest = await customers().create({
         id: newId(),
         userId: null,
@@ -190,25 +188,18 @@ describe('adaptadores de identidad (Postgres + Redis)', () => {
         lastName: 'Viejo',
         phone: '1144556677',
       })
-      const user = await newUser('guest@mail.com')
 
-      const attached = await customers().attachUser(guest.id, user, {
-        firstName: 'Juana',
-        lastName: 'López',
-      })
-      expect(attached).toMatchObject({
-        id: guest.id,
-        userId: user.id,
-        firstName: 'Juana',
-        lastName: 'López',
-        phone: '1144556677',
-      })
+      const { userId, customerId } = await account('GUEST@mail.com')
 
-      const other = { ...(await newUser('otro@mail.com')) }
+      expect(customerId).not.toBe(guest.id)
+      await expect(customers().findByEmail('guest@mail.com')).resolves.toMatchObject({
+        id: customerId,
+        userId,
+      })
+      await expect(customers().findGuestByEmail('guest@mail.com')).resolves.toEqual(guest)
       await expect(
-        customers().attachUser(guest.id, other, { firstName: 'X', lastName: 'Y' }),
-      ).rejects.toBeInstanceOf(EmailAlreadyRegisteredError)
-      await expect(users().findById(other.id)).resolves.toBeNull()
+        customers().create({ ...guest, id: newId(), email: 'Guest@Mail.com' }),
+      ).rejects.toMatchObject({ code: 'P2002' })
     })
 
     it('update cambia solo los campos definidos y null borra el teléfono', async () => {
@@ -349,18 +340,28 @@ describe('adaptadores de identidad (Postgres + Redis)', () => {
   })
 
   describe('bloqueo de intentos en Redis', () => {
-    it('el décimo fallo bloquea por el resto de la ventana y clear lo levanta', async () => {
+    it('cuenta cada intento de forma atómica antes de verificar: de 15 a la vez pasan 10 (NV-08) y la otra IP no se bloquea (NV-09)', async () => {
       const attempts = get<LoginAttemptsPort>(LOGIN_ATTEMPTS_PORT)
-      const results = []
-      for (let i = 0; i < 10; i++) results.push(await attempts.fail('bloqueo@mail.com'))
+      const key = { email: 'bloqueo@mail.com', clientIp: '203.0.113.7' }
+      const free = { blockedForSeconds: null, lockedIfFailsSeconds: null }
 
-      expect(results.slice(0, 9).every((r) => r.blockedForSeconds === null)).toBe(true)
-      expect(results[9]?.blockedForSeconds).toBeGreaterThan(890)
-      expect(results[9]?.blockedForSeconds).toBeLessThanOrEqual(900)
-      await expect(attempts.blockedFor('bloqueo@mail.com')).resolves.toBeGreaterThan(0)
+      const results = await Promise.all(Array.from({ length: 15 }, () => attempts.attempt(key)))
 
-      await attempts.clear('bloqueo@mail.com')
-      await expect(attempts.blockedFor('bloqueo@mail.com')).resolves.toBeNull()
+      const allowed = results.filter((result) => result.blockedForSeconds === null)
+      expect(allowed).toHaveLength(10)
+      const last = allowed.filter((result) => result.lockedIfFailsSeconds !== null)
+      expect(last).toHaveLength(1)
+      expect(last[0]?.lockedIfFailsSeconds).toBeGreaterThan(890)
+      for (const result of results.filter((candidate) => candidate.blockedForSeconds !== null)) {
+        expect(result.blockedForSeconds).toBeGreaterThan(890)
+        expect(result.blockedForSeconds).toBeLessThanOrEqual(900)
+      }
+      await expect(
+        attempts.attempt({ email: 'bloqueo@mail.com', clientIp: '198.51.100.23' }),
+      ).resolves.toEqual(free)
+
+      await attempts.clear(key)
+      await expect(attempts.attempt(key)).resolves.toEqual(free)
     })
   })
 

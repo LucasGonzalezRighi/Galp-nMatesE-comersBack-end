@@ -5,6 +5,7 @@ import { PrismaService } from './prisma.service'
 
 /** Postgres inexistente: el puerto 1 rechaza la conexión al instante, sin red ni Docker. */
 const unreachableEnv = parseEnv({
+  NODE_ENV: 'test',
   DATABASE_URL: 'postgresql://galpon:clave-secreta@127.0.0.1:1/galpon',
   REDIS_URL: 'redis://127.0.0.1:1',
 })

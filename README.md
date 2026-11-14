@@ -29,8 +29,14 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
 | ---------------------- | ----------------------- | ------------------------------------------------------------------------------ |
 | Tienda (Next.js)       | `http://localhost:3000` | `STORE_ORIGIN`: link de recuperación y vuelta del pago. Llega desde su server. |
 | Admin (Vite)           | `http://localhost:5173` | `ADMIN_ORIGIN`. El único origen con CORS.                                      |
-| Este back              | `http://localhost:3001` | `PORT`. Prefijo `/api/v1`; Swagger UI en `/api/docs`.                          |
-| Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`).                                            |
+| Este back              | `http://localhost:3001` | `PORT` y `HOST`. Prefijo `/api/v1`; Swagger UI en `/api/docs`.                 |
+| Postgres / Redis (dev) | `5432` / `6379`         | `docker compose` (`npm run db:up`), solo en `127.0.0.1`.                       |
+
+**Interfaz (`HOST`):** fuera de producción el back escucha solo en `127.0.0.1` (esta máquina); en
+producción, en `0.0.0.0` (detrás del proxy o del contenedor). `HOST` acepta una IP o `localhost`
+para cambiarlo. Si algo de tu máquina llama a `localhost` y lo resuelve solo como IPv6 (`::1`), usá
+`http://127.0.0.1:3001` o arrancá con `HOST=::1`. El Postgres y el Redis de `docker compose` también
+quedan atados a `127.0.0.1`: desde otra máquina de la red no se llega a ellos.
 
 **CORS:** solo `ADMIN_ORIGIN` (en desarrollo `http://localhost:5173`) recibe permiso, con
 credenciales (las cookies de sesión del admin). La tienda no lo necesita: su servidor llama al back
@@ -53,6 +59,10 @@ npm run db:seed         # carga los datos del diseño (se puede repetir)
 npm run dev             # nest start --watch en http://localhost:3001
 ```
 
+- `NODE_ENV` es **obligatorio y explícito** (`development`, `test` o `production`): sin él la API
+  no arranca ni corre el seed, así un despliegue que se olvida de definirlo nunca queda como
+  desarrollo (con Swagger, el simulador de pagos y los links de recuperación en el log). El
+  `.env.example` trae `NODE_ENV=development`.
 - Salud: `GET http://localhost:3001/api/v1/health` (`ok`; `degraded` si Redis cae; 503 si cae
   Postgres). Si falta una variable obligatoria o la base no responde, la API no arranca y el error
   dice qué corregir.
@@ -180,21 +190,26 @@ cookies `__Host-` y un token CSRF por sesión
 `/auth/*`, `/me*` y `/admin/auth/*` están implementadas (desde B4, `GET /me/orders` y
 `GET /me/orders/{number}` viven en el módulo `orders`; ver "Pedidos y stock").
 
-- **Cookies:** `__Host-galpon_session` (tienda: 30 días; la anónima que solo da el CSRF, 24 h) y
-  `__Host-galpon_admin` (admin: 8 h). Duran un plazo fijo, que no se renueva con el uso.
+- **Cookies:** `__Host-galpon_session` (tienda: 30 días; la anónima que solo da el CSRF, 30
+  minutos) y `__Host-galpon_admin` (admin: 8 h). Duran un plazo fijo, que no se renueva con el uso.
+  - Cada cuenta tiene como mucho 20 sesiones abiertas: al abrir otra, se cierra la más vieja.
+  - Restablecer la contraseña (cliente) o cambiarla (admin) cierra todas las sesiones de la cuenta,
+    también una que se esté abriendo en ese momento con la contraseña vieja; al cambiarla desde el
+    admin, la sesión desde la que se cambió sigue valiendo (mismo CSRF).
   - Van siempre con `Path=/; HttpOnly; Secure; SameSite=Lax`, también en `http://localhost`.
   - **Probá con Chrome o Firefox:** aceptan cookies `Secure` en `localhost`. Safari no, y ahí la
     sesión no se guarda.
   - El token CSRF va en `X-CSRF-Token`. Si falta o no es el de la sesión, la respuesta es 403
     `csrf_invalid`, y el front pide uno nuevo.
-- **Admin semilla:** `admin@galponmates.com.ar` / `galpon-demo-2026`, las credenciales del demo del
-  front.
+- **Admin semilla:** fuera de producción, `admin@galponmates.com.ar` / `galpon-demo-2026`, las
+  credenciales del demo del front (o las de `ADMIN_EMAIL` y `ADMIN_PASSWORD`, si las definís).
+  - **En producción** el seed exige `ADMIN_EMAIL` y `ADMIN_PASSWORD` propios (la contraseña de 12
+    caracteres o más y distinta de la de demostración); si falta alguna, no corre.
   - `npm run db:seed` lo crea solo si no existe y nunca lo pisa.
   - Para cambiar la contraseña: en el admin, "Mi cuenta" → "Cambiar contraseña"
     (`POST /admin/auth/password`).
   - Un nuevo seed no la restablece. Si la olvidás, `npm run db:reset && npm run db:seed` (borra la
     base de desarrollo).
-  - En producción no puede quedar la contraseña pública (B8).
 - **Recuperación de contraseña:** `POST /auth/password/forgot` responde siempre 202. Hasta B7 no
   hay proveedor de mail: fuera de producción, el back escribe el link en el log, en una línea con
   `"context":"LogMailer"` y el texto "Mail de recuperación de contraseña (solo log, sin proveedor)":
@@ -208,10 +223,15 @@ cookies `__Host-` y un token CSRF por sesión
   - Al usarlo se cierran todas las sesiones del usuario.
   - En producción el link no se loguea.
 
+- **Registro:** crea siempre una cuenta con su propio cliente. Si ese email ya había comprado como
+  invitado, la cuenta **no** adopta esos pedidos ni sus datos (escribir un email no prueba que sea
+  tuyo): siguen leyéndose con el link del pedido.
 - **Límites:**
   - 20 pedidos por minuto por IP en registro, ingreso (cliente y admin), `forgot` y `reset`.
-  - Tras 10 ingresos fallidos con el mismo email en 15 minutos, 429 con `Retry-After`. Durante esa
-    espera tampoco entra la contraseña correcta.
+  - Cada ingreso cuenta por email **y por IP**, antes de verificar la contraseña: 10 intentos del
+    mismo email desde la misma IP en 15 minutos y el siguiente responde 429 con `Retry-After` (el
+    décimo también, si falla). Durante esa espera tampoco entra la contraseña correcta desde esa IP;
+    desde otra, sí.
   - Sin Redis, las rutas con sesión responden 503: ninguna deja pasar sin verificar.
 - **Admin contra este back:** el back tiene que permitir el origen del admin en `ADMIN_ORIGIN`
   (`http://localhost:5173` con `vite dev`). Para el admin compilado, desde `../frontend`:

@@ -253,12 +253,14 @@ model User {
   @@map("users")
 }
 
-/// La persona que compra. Un invitado es un cliente sin `userId`; si después se registra con el
-/// mismo email, se vincula y sus compras quedan asociadas.
+/// La persona que compra. Un invitado es un cliente sin `userId`. Si después se registra con el
+/// mismo email, la cuenta tiene su propio cliente: el registro nunca adopta al invitado ni sus
+/// compras (auditoría, NV-02). Un solo invitado por email: índice único parcial
+/// `customers_guest_email_key` en la migración; la cuenta es única por `users.email`.
 model Customer {
   id             String   @id @default(uuid(7)) @db.Uuid
   userId         String?  @unique @map("user_id") @db.Uuid
-  email          String   @unique @db.Citext
+  email          String   @db.Citext
   firstName      String   @map("first_name")
   lastName       String   @map("last_name")
   phone          String?
@@ -272,6 +274,7 @@ model Customer {
   reviews   Review[]
   orders    Order[]
 
+  @@index([email])
   @@map("customers")
 }
 

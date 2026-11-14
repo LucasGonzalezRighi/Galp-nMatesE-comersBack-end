@@ -112,7 +112,60 @@ describe('RedisSessionStore (Redis real)', () => {
     await expect(sessions().get(first.id)).resolves.toBeNull()
     await expect(sessions().get(second.id)).resolves.toBeNull()
     await expect(sessions().get(other.id)).resolves.toEqual(other)
-    await expect(client().exists('user-sessions:admin-1')).resolves.toBe(0)
+    await expect(client().exists(`session:${first.id}`)).resolves.toBe(0)
+    await expect(client().scard('user-sessions:admin-1')).resolves.toBe(0)
+  })
+
+  it('destroyAllForUser rechaza también la sesión que se abre después con una credencial comprobada antes (NV-03)', async () => {
+    // El login leyó el hash viejo antes del cambio y crea su sesión recién después del cierre.
+    const checkedBefore = new Date(Date.now() - 1_000)
+    await sessions().destroyAllForUser('race-1')
+    const late = await sessions().create({
+      kind: 'customer',
+      userId: 'race-1',
+      customerId: 'customer-race-1',
+      authenticatedAt: checkedBefore,
+    })
+    const fresh = await sessions().create({
+      kind: 'customer',
+      userId: 'race-1',
+      customerId: 'customer-race-1',
+      authenticatedAt: new Date(Date.now() + 1_000),
+    })
+
+    await expect(sessions().get(late.id)).resolves.toBeNull()
+    await expect(sessions().get(fresh.id)).resolves.toEqual(fresh)
+  })
+
+  it('destroyAllForUser con keep cierra las demás y deja viva (renovada) la que se conserva (NV-32)', async () => {
+    const current = await sessions().create({ kind: 'admin', userId: 'keep-1', customerId: null })
+    const other = await sessions().create({ kind: 'admin', userId: 'keep-1', customerId: null })
+
+    await sessions().destroyAllForUser('keep-1', { keep: current.id })
+
+    const kept = await sessions().get(current.id)
+    expect(kept).toMatchObject({
+      id: current.id,
+      csrfToken: current.csrfToken,
+      expiresAt: current.expiresAt,
+    })
+    await expect(sessions().get(other.id)).resolves.toBeNull()
+    await expect(client().smembers('user-sessions:keep-1')).resolves.toEqual([current.id])
+  })
+
+  it('un usuario tiene como mucho 20 sesiones: la 21 descarta la más vieja', async () => {
+    const created = []
+    for (let index = 0; index < 21; index++) {
+      created.push(await sessions().create({ kind: 'admin', userId: 'cap-1', customerId: null }))
+      // La antigüedad se mide en milisegundos: cada una, en uno distinto.
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+
+    const alive = await Promise.all(created.map((session) => sessions().get(session.id)))
+
+    expect(alive[0]).toBeNull()
+    expect(alive.slice(1).every((session) => session !== null)).toBe(true)
+    await expect(client().scard('user-sessions:cap-1')).resolves.toBe(20)
   })
 
   it('con Redis caído, get lanza DomainError 503 service_unavailable (falla cerrado)', async () => {

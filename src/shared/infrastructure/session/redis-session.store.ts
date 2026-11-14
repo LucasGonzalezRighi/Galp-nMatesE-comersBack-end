@@ -3,6 +3,8 @@ import { Logger } from '@nestjs/common'
 import type { SecretsPort } from '../../application/ports/secrets.port'
 import {
   assertNewSession,
+  type DestroyAllForUserOptions,
+  MAX_SESSIONS_PER_USER,
   type NewSession,
   type SessionKind,
   type SessionPort,
@@ -22,6 +24,15 @@ const SESSION_ID_PATTERN = /^[0-9a-f]{64}$/
 /** Vida del índice de sesiones de un usuario: la de la sesión más larga (cliente, 30 días). */
 const USER_SESSIONS_TTL_SECONDS = SESSION_TTL_SECONDS.customer
 
+/**
+ * Vida de la marca de credenciales de un usuario: la de la sesión más larga. Pasado ese tiempo,
+ * toda sesión autenticada antes de la marca ya venció sola.
+ */
+const CREDENTIALS_MARKER_TTL_SECONDS = SESSION_TTL_SECONDS.customer
+
+/** Sesiones que se borran por transacción en la limpieza (nunca un `DEL` con miles de claves). */
+const CLEANUP_BATCH_SIZE = 100
+
 const SESSION_KINDS: ReadonlySet<string> = new Set(Object.keys(SESSION_TTL_SECONDS))
 
 /** `detail` del 503 cuando el almacén de sesiones no responde. */
@@ -34,8 +45,8 @@ export interface RedisSessionTransaction {
   set(key: string, value: string, secondsToken: 'EX', seconds: number): RedisSessionTransaction
   /** `SADD key member`. */
   sadd(key: string, member: string): RedisSessionTransaction
-  /** `SREM key member`. */
-  srem(key: string, member: string): RedisSessionTransaction
+  /** `SREM key member [member ...]`. */
+  srem(key: string, ...members: string[]): RedisSessionTransaction
   /** `EXPIRE key seconds`. */
   expire(key: string, seconds: number): RedisSessionTransaction
   /** `DEL key [key ...]`. */
@@ -50,6 +61,8 @@ export interface RedisSessionClient {
   get(key: string): Promise<string | null>
   /** `SMEMBERS key`. */
   smembers(key: string): Promise<string[]>
+  /** `MGET key [key ...]`: el texto de cada clave, o `null` si no está. */
+  mget(...keys: string[]): Promise<(string | null)[]>
   /** Abre una transacción `MULTI`. */
   multi(): RedisSessionTransaction
 }
@@ -57,7 +70,13 @@ export interface RedisSessionClient {
 /**
  * {@link SessionPort} sobre Redis. Cada sesión es `session:{id}` (JSON con `EX` = la duración de
  * su tipo, vencimiento fijo) y las de un usuario se indexan en el set `user-sessions:{userId}`
- * (con `EXPIRE` de 30 días) para poder cerrarlas todas. Ids y tokens CSRF: 32 bytes aleatorios.
+ * (con `EXPIRE` de 30 días), con un tope de {@link MAX_SESSIONS_PER_USER} vigentes: al pasarlo se
+ * cierra la más vieja. Ids y tokens CSRF: 32 bytes aleatorios.
+ *
+ * Cerrar todas las sesiones de un usuario escribe primero su marca de credenciales
+ * (`user-credentials:{userId}`, la hora del cambio en milisegundos): `get` rechaza toda sesión del
+ * usuario autenticada hasta esa hora, aunque se haya creado después. El borrado de las sesiones
+ * viejas es de mejor esfuerzo.
  *
  * **Falla cerrado:** cualquier error de Redis termina en un `DomainError` 503
  * `service_unavailable` (avisado por `warn` como mucho una vez por minuto), nunca en "sin
@@ -98,17 +117,20 @@ export class RedisSessionStore implements SessionPort {
       customerId: input.customerId,
       csrfToken: this.secrets.token(TOKEN_BYTES),
       createdAt: now.toISOString(),
+      authenticatedAt: (input.authenticatedAt ?? now).toISOString(),
       expiresAt: new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
     }
+    const { userId } = session
     await this.run(async () => {
       const transaction = this.redis
         .multi()
         .set(sessionKey(session.id), JSON.stringify(session), 'EX', ttlSeconds)
-      if (session.userId !== null) {
-        const index = userSessionsKey(session.userId)
+      if (userId !== null) {
+        const index = userSessionsKey(userId)
         transaction.sadd(index, session.id).expire(index, USER_SESSIONS_TTL_SECONDS)
       }
       await execOrThrow(transaction)
+      if (userId !== null) await this.enforceSessionCap(userId, session.id)
     })
     return session
   }
@@ -121,7 +143,11 @@ export class RedisSessionStore implements SessionPort {
   async get(id: string): Promise<SessionRecord | null> {
     const session = await this.read(id)
     if (session === null) return null
-    return Date.parse(session.expiresAt) <= this.clock.now().getTime() ? null : session
+    if (Date.parse(session.expiresAt) <= this.clock.now().getTime()) return null
+    const { userId } = session
+    if (userId === null) return session
+    const changedAt = await this.run(() => this.redis.get(credentialsKey(userId)))
+    return isRevoked(session, changedAt) ? null : session
   }
 
   /**
@@ -145,13 +171,85 @@ export class RedisSessionStore implements SessionPort {
    * @throws {TypeError} En español, si `userId` está vacío.
    * @throws {DomainError} 503 `service_unavailable` si Redis no responde.
    */
-  async destroyAllForUser(userId: string): Promise<void> {
+  async destroyAllForUser(userId: string, options: DestroyAllForUserOptions = {}): Promise<void> {
     if (userId.trim() === '') throw new TypeError('Falta el usuario cuyas sesiones se cierran')
+    const changedAt = this.clock.now().getTime()
+    const kept = options.keep === undefined ? null : await this.read(options.keep)
+    const keepId = kept !== null && kept.userId === userId ? kept.id : null
+    const transaction = this.redis
+      .multi()
+      .set(credentialsKey(userId), String(changedAt), 'EX', CREDENTIALS_MARKER_TTL_SECONDS)
+    if (kept !== null && keepId !== null) {
+      // Renovada en la misma transacción que la marca: nunca hay un momento en que no valga.
+      const remainingSeconds = Math.ceil((Date.parse(kept.expiresAt) - changedAt) / 1000)
+      const renewed: SessionRecord = {
+        ...kept,
+        authenticatedAt: new Date(changedAt + 1).toISOString(),
+      }
+      if (remainingSeconds > 0) {
+        transaction.set(sessionKey(keepId), JSON.stringify(renewed), 'EX', remainingSeconds)
+      }
+    }
+    await this.run(() => execOrThrow(transaction))
+    await this.removeSessionsOf(userId, keepId)
+  }
+
+  /**
+   * Limpieza de mejor esfuerzo después de la marca de credenciales: borra las sesiones del índice
+   * del usuario (salvo `keepId`) de a {@link CLEANUP_BATCH_SIZE}. Si Redis falla, solo avisa: esas
+   * sesiones ya no valen y vencen solas.
+   */
+  private async removeSessionsOf(userId: string, keepId: string | null): Promise<void> {
     const index = userSessionsKey(userId)
-    await this.run(async () => {
-      const ids = await this.redis.smembers(index)
-      await execOrThrow(this.redis.multi().del(...ids.map(sessionKey), index))
+    try {
+      const ids = (await this.redis.smembers(index)).filter((id) => id !== keepId)
+      for (let start = 0; start < ids.length; start += CLEANUP_BATCH_SIZE) {
+        const batch = ids.slice(start, start + CLEANUP_BATCH_SIZE)
+        await execOrThrow(
+          this.redis
+            .multi()
+            .del(...batch.map(sessionKey))
+            .srem(index, ...batch),
+        )
+      }
+    } catch (error) {
+      this.warn(`No se pudieron borrar sesiones viejas (igual ya no valen): ${errorMessage(error)}`)
+    }
+  }
+
+  /**
+   * Deja al usuario con {@link MAX_SESSIONS_PER_USER} sesiones vigentes como mucho: saca del índice
+   * las que ya no están y, si sobran, cierra las más viejas (nunca `createdId`, la recién abierta).
+   */
+  private async enforceSessionCap(userId: string, createdId: string): Promise<void> {
+    const index = userSessionsKey(userId)
+    const ids = await this.redis.smembers(index)
+    if (ids.length <= MAX_SESSIONS_PER_USER) return
+    const raws = await this.redis.mget(...ids.map(sessionKey))
+    const now = this.clock.now().getTime()
+    const gone: string[] = []
+    const alive: SessionRecord[] = []
+    ids.forEach((id, position) => {
+      const raw = raws[position] ?? null
+      const session = raw === null ? null : parseSession(raw, id)
+      if (session === null || Date.parse(session.expiresAt) <= now) gone.push(id)
+      else alive.push(session)
     })
+    alive.sort(
+      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id),
+    )
+    const evicted = alive
+      .filter((session) => session.id !== createdId)
+      .slice(0, Math.max(0, alive.length - MAX_SESSIONS_PER_USER))
+      .map((session) => session.id)
+    const removed = [...gone, ...evicted]
+    if (removed.length === 0) return
+    await execOrThrow(
+      this.redis
+        .multi()
+        .del(...removed.map(sessionKey))
+        .srem(index, ...removed),
+    )
   }
 
   /** Lee y valida `session:{id}` sin mirar el vencimiento; `null` si no está o es ilegible. */
@@ -180,6 +278,20 @@ function userSessionsKey(userId: string): string {
   return `user-sessions:${userId}`
 }
 
+function credentialsKey(userId: string): string {
+  return `user-credentials:${userId}`
+}
+
+/**
+ * Indica si una sesión quedó cerrada por un cambio de contraseña: su credencial se comprobó no
+ * después de la marca del usuario. Una marca ilegible cuenta como un cambio (falla cerrado).
+ */
+function isRevoked(session: SessionRecord, changedAt: string | null): boolean {
+  if (changedAt === null) return false
+  const marker = Number(changedAt)
+  return !Number.isFinite(marker) || Date.parse(session.authenticatedAt) <= marker
+}
+
 /** Manda la transacción y lanza si se abortó o si algún comando falló. */
 async function execOrThrow(transaction: RedisSessionTransaction): Promise<void> {
   const results = await transaction.exec()
@@ -199,6 +311,8 @@ function parseSession(raw: string, id: string): SessionRecord | null {
   if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>
   const { kind, userId, customerId, csrfToken, createdAt, expiresAt } = record
+  // Las sesiones guardadas antes de la marca de credenciales no tienen el campo: vale la creación.
+  const authenticatedAt = record.authenticatedAt ?? createdAt
   if (
     record.id !== id ||
     typeof kind !== 'string' ||
@@ -208,12 +322,23 @@ function parseSession(raw: string, id: string): SessionRecord | null {
     typeof csrfToken !== 'string' ||
     csrfToken === '' ||
     typeof createdAt !== 'string' ||
+    typeof authenticatedAt !== 'string' ||
+    Number.isNaN(Date.parse(authenticatedAt)) ||
     typeof expiresAt !== 'string' ||
     Number.isNaN(Date.parse(expiresAt))
   ) {
     return null
   }
-  return { id, kind: kind as SessionKind, userId, customerId, csrfToken, createdAt, expiresAt }
+  return {
+    id,
+    kind: kind as SessionKind,
+    userId,
+    customerId,
+    csrfToken,
+    createdAt,
+    authenticatedAt,
+    expiresAt,
+  }
 }
 
 function isNullableString(value: unknown): value is string | null {

@@ -14,7 +14,7 @@ export class LoginCustomerCommand {
    * @param users - Usuarios.
    * @param customers - Clientes.
    * @param hasher - Hash de contraseñas.
-   * @param attempts - Intentos fallidos por email.
+   * @param attempts - Intentos por email e IP.
    * @param sessions - Almacén de sesiones.
    * @param clock - Reloj, para `lastLoginAt`.
    */
@@ -28,12 +28,12 @@ export class LoginCustomerCommand {
   ) {}
 
   /**
-   * @param credentials - Email y contraseña.
+   * @param credentials - Email, contraseña e IP del cliente.
    * @param currentSessionId - Id de la sesión actual, o `null`.
    * @returns El cliente y su sesión nueva.
    * @throws {InvalidCredentialsError} Si el email no es de un cliente activo o la contraseña no
    *   coincide (sin decir cuál).
-   * @throws {LoginLockedError} Si el email está bloqueado por intentos fallidos.
+   * @throws {LoginLockedError} Si el email está bloqueado para esa IP por intentos fallidos.
    * @throws {Error} En español, si la cuenta no tiene cliente (dato inconsistente).
    */
   async execute(
@@ -41,7 +41,11 @@ export class LoginCustomerCommand {
     currentSessionId: string | null,
   ): Promise<CustomerSessionResult> {
     const { users, hasher, attempts, clock } = this
-    const user = await authenticate({ users, hasher, attempts, clock }, credentials, 'customer')
+    const { user, authenticatedAt } = await authenticate(
+      { users, hasher, attempts, clock },
+      credentials,
+      'customer',
+    )
     const customer = await this.customers.findByUserId(user.id)
     if (customer === null) {
       throw new Error(`La cuenta ${user.id} no tiene un cliente asociado`)
@@ -50,6 +54,7 @@ export class LoginCustomerCommand {
       kind: 'customer',
       userId: user.id,
       customerId: customer.id,
+      authenticatedAt,
     })
     return { customer: toCustomerView(customer), session }
   }

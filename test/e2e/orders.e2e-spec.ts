@@ -641,8 +641,8 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       expect(byToken.status).toBe(200)
     })
 
-    it('un invitado que después se registra con ese email ve el pedido en su cuenta', async () => {
-      const { order } = await createdOrder(
+    it('registrarse con el email de un invitado no adopta sus pedidos: 404 por sesión, 200 por token (NV-02)', async () => {
+      const { order, orderToken } = await createdOrder(
         newJar(),
         await orderBody([mateLine(mate.id)], 'despues@ejemplo.com'),
       )
@@ -650,11 +650,15 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       const jar = await registered('despues@ejemplo.com')
       const list = await send(jar, 'get', '/me/orders')
       const detail = await send(jar, 'get', `/me/orders/${order.number}`)
+      const bySession = await send(jar, 'get', `/orders/${order.number}`)
+      const byToken = await send(newJar(), 'get', `/orders/${order.number}`, {
+        headers: { 'X-Order-Token': orderToken },
+      })
 
-      expect((list.body as OrderSummaryPageView).items.map((item) => item.number)).toEqual([
-        order.number,
-      ])
-      expect(detail.status).toBe(200)
+      expect((list.body as OrderSummaryPageView).total).toBe(0)
+      expect(detail.status).toBe(404)
+      expect(bySession.status).toBe(404)
+      expect(byToken.status).toBe(200)
     })
   })
 

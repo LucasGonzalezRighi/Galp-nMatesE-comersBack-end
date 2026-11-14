@@ -88,6 +88,7 @@ describe('AdminAuthController (HTTP con casos de uso simulados)', () => {
     expect(adminLogin.execute).toHaveBeenCalledWith({
       email: ADMIN_EMAIL,
       password: 'galpon-demo-2026',
+      clientIp: expect.any(String) as unknown,
     })
   })
 
@@ -158,10 +159,11 @@ describe('AdminAuthController (HTTP con casos de uso simulados)', () => {
       message: 'La contraseña actual no es correcta',
     })
     expect(done.status).toBe(204)
-    expect(changePassword.execute).toHaveBeenCalledWith('admin-1', {
-      currentPassword: CHANGE.currentPassword,
-      newPassword: CHANGE.newPassword,
-    })
+    expect(changePassword.execute).toHaveBeenCalledWith(
+      'admin-1',
+      { currentPassword: CHANGE.currentPassword, newPassword: CHANGE.newPassword },
+      session.id,
+    )
   })
 
   it('POST /admin/auth/password con una contraseña nueva débil → 422 en newPassword', async () => {

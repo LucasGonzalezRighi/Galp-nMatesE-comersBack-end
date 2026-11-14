@@ -90,7 +90,7 @@ describe('AuthController (HTTP con casos de uso simulados)', () => {
     return `${CUSTOMER_SESSION_COOKIE}=${session.id}`
   }
 
-  it('GET /auth/csrf sin cookie abre una sesión anónima y manda su cookie de 24 h', async () => {
+  it('GET /auth/csrf sin cookie abre una sesión anónima y manda su cookie de 30 minutos', async () => {
     const response = await request(server()).get('/auth/csrf')
 
     expect(response.status).toBe(200)
@@ -98,7 +98,7 @@ describe('AuthController (HTTP con casos de uso simulados)', () => {
     expect(created?.kind).toBe('anonymous')
     expect(response.body).toEqual({ csrfToken: created?.csrfToken })
     expect(setCookies(response)).toEqual([
-      `__Host-galpon_session=${created?.id ?? ''}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
+      `__Host-galpon_session=${created?.id ?? ''}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=1800`,
     ])
   })
 
@@ -220,7 +220,7 @@ describe('AuthController (HTTP con casos de uso simulados)', () => {
     expect(ok200.body).toEqual(ANA)
     expect(setCookies(ok200)[0]).toContain(`__Host-galpon_session=${next.id};`)
     expect(login.execute).toHaveBeenCalledWith(
-      { email: 'ana@mail.com', password: 'cualquiera' },
+      { email: 'ana@mail.com', password: 'cualquiera', clientIp: expect.any(String) as unknown },
       anon.id,
     )
     expect(empty.status).toBe(422)

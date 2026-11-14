@@ -6,6 +6,7 @@ import { PrismaHealthIndicator } from './prisma.health'
 import { PrismaService } from './prisma.service'
 
 const env = parseEnv({
+  NODE_ENV: 'test',
   DATABASE_URL: 'postgresql://galpon:clave-secreta@127.0.0.1:1/galpon',
   REDIS_URL: 'redis://127.0.0.1:1',
 })

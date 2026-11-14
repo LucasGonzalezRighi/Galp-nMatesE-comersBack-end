@@ -4,8 +4,17 @@ import { MEDIA_CLOUDINARY_MISSING_MESSAGE, MEDIA_PRODUCTION_SIMULATED_MESSAGE } 
 
 /** Configuración de la API, ya validada y con los valores por defecto aplicados. */
 export interface Env {
-  /** Entorno de ejecución (por defecto `development`): en `test` el logger no escribe nada. */
+  /**
+   * Entorno de ejecución, obligatorio y explícito (NV-07): sin él la API no arranca, así un
+   * despliegue que se olvida de definirlo no corre como desarrollo (Swagger, simulador de pagos,
+   * links de recuperación en el log). En `test` el logger no escribe nada.
+   */
   NODE_ENV: 'development' | 'test' | 'production'
+  /**
+   * Interfaz en la que escucha la API (NV-31): una IP o `localhost`. Por defecto `127.0.0.1` fuera
+   * de producción (solo esta máquina) y `0.0.0.0` en producción (detrás del proxy o del contenedor).
+   */
+  HOST: string
   /** Puerto HTTP (por defecto 3001, donde la tienda y el admin esperan el back). */
   PORT: number
   /** Conexión a Postgres: `postgresql://usuario:clave@host:5432/base`. */
@@ -68,6 +77,16 @@ export const MP_PRODUCTION_SIMULATED_MESSAGE = 'En producción MP_MODE tiene que
 export const STORE_REVALIDATE_PRODUCTION_MESSAGE =
   'En producción hace falta STORE_REVALIDATE_SECRET (el mismo REVALIDATE_SECRET de la tienda).'
 
+/**
+ * `HOST` por defecto: todas las interfaces solo en producción; si no, solo esta máquina.
+ *
+ * @param nodeEnv - Entorno de ejecución.
+ * @returns `0.0.0.0` en producción; `127.0.0.1` en desarrollo y en test.
+ */
+export function defaultHost(nodeEnv: Env['NODE_ENV']): string {
+  return nodeEnv === 'production' ? '0.0.0.0' : '127.0.0.1'
+}
+
 /** Indica si `value` es un origen sin ruta, query ni barra final (`https://host[:puerto]`). */
 function isBareOrigin(value: string): boolean {
   return URL.canParse(value) && new URL(value).origin === value
@@ -75,14 +94,16 @@ function isBareOrigin(value: string): boolean {
 
 /**
  * Esquema zod de las variables de entorno. Los nombres son los de `.env.example`; `PORT` llega
- * como texto y se convierte a número. Las reglas entre variables (`MP_MODE=live` exige sus tres
- * credenciales; `production` exige `live` y `STORE_REVALIDATE_SECRET`) se revisan solo si cada
- * variable es válida por sí sola; lo mismo `MEDIA_MODE=cloudinary` con sus tres credenciales y
- * `production` con `cloudinary`.
+ * como texto y se convierte a número. `NODE_ENV` no tiene valor por defecto. Las reglas entre
+ * variables (`MP_MODE=live` exige sus tres credenciales; `production` exige `live` y
+ * `STORE_REVALIDATE_SECRET`) se revisan solo si cada variable es válida por sí sola; lo mismo
+ * `MEDIA_MODE=cloudinary` con sus tres credenciales y `production` con `cloudinary`. Al final,
+ * `HOST` toma su valor por defecto según el entorno ({@link defaultHost}).
  */
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    NODE_ENV: z.enum(['development', 'test', 'production']),
+    HOST: z.union([z.ipv4(), z.ipv6(), z.literal('localhost')]).optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }),
@@ -122,11 +143,17 @@ export const envSchema = z
     if (env.NODE_ENV === 'production' && !cloudinary) {
       ctx.addIssue({ code: 'custom', message: MEDIA_PRODUCTION_SIMULATED_MESSAGE, path: [] })
     }
-  }) satisfies z.ZodType<Env>
+  })
+  .transform(({ HOST, ...env }) => ({
+    ...env,
+    HOST: HOST ?? defaultHost(env.NODE_ENV),
+  })) satisfies z.ZodType<Env>
 
 /** Qué se espera en cada variable, para el mensaje de error de `parseEnv`. */
 export const ENV_HINTS: Record<keyof Env, string> = {
-  NODE_ENV: 'development, test o production',
+  NODE_ENV:
+    'development, test o production (sin NODE_ENV el back no arranca: tiene que decirse explícito)',
+  HOST: 'una IP (por ejemplo 127.0.0.1 o 0.0.0.0) o localhost',
   PORT: 'un número entero entre 1 y 65535',
   DATABASE_URL: 'una URL de Postgres (postgresql://usuario:clave@host:5432/base)',
   REDIS_URL: 'una URL de Redis (redis://host:6379)',

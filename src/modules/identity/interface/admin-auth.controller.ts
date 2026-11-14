@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Res, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Ip,
+  Post,
+  Res,
+  UseGuards,
+} from '@nestjs/common'
 import {
   ApiCookieAuth,
   ApiNoContentResponse,
@@ -39,6 +49,7 @@ import { AdminLoginResultDto, AdminSessionDto, CsrfTokenDto } from './dto/identi
 import {
   adminUserIdOf,
   AUTH_WRITE_THROTTLE,
+  clientIpOf,
   type CookieResponse,
   type CsrfTokenView,
 } from './identity-http'
@@ -91,6 +102,7 @@ export class AdminAuthController {
    * Inicia la sesión del admin: la cookie de 8 h viaja en `Set-Cookie` y el CSRF en el cuerpo.
    *
    * @param body - Email y contraseña.
+   * @param ip - IP del cliente (el bloqueo por intentos cuenta por email y por IP).
    * @param res - Respuesta (para la cookie).
    * @returns Email, token CSRF y vencimiento.
    * @throws {InvalidCredentialsError} 401 `invalid_credentials`.
@@ -104,11 +116,13 @@ export class AdminAuthController {
   @ApiProblemResponses(401, 422, 429, 500)
   async login(
     @Body() body: AdminLoginDto,
+    @Ip() ip: string | undefined,
     @Res({ passthrough: true }) res: CookieResponse,
   ): Promise<AdminLoginResultView> {
     const { email, session } = await this.adminLogin.execute({
       email: body.email,
       password: body.password,
+      clientIp: clientIpOf(ip),
     })
     res.setHeader(
       'Set-Cookie',
@@ -174,7 +188,8 @@ export class AdminAuthController {
   }
 
   /**
-   * Cambia la contraseña del admin; la sesión actual sigue valiendo.
+   * Cambia la contraseña del admin: la sesión actual sigue valiendo (mismo CSRF) y las otras
+   * sesiones del admin se cierran.
    *
    * @param body - Contraseña actual, nueva y su confirmación.
    * @param session - Sesión del admin.
@@ -198,10 +213,11 @@ export class AdminAuthController {
     if (body.confirmation !== body.newPassword) {
       throw validationProblem([{ ...PASSWORD_MISMATCH }])
     }
-    const result = await this.changePassword.execute(adminUserIdOf(session), {
-      currentPassword: body.currentPassword,
-      newPassword: body.newPassword,
-    })
+    const result = await this.changePassword.execute(
+      adminUserIdOf(session),
+      { currentPassword: body.currentPassword, newPassword: body.newPassword },
+      session.id,
+    )
     if (!result.ok) throw validationProblem([{ ...WRONG_CURRENT_PASSWORD }])
   }
 }

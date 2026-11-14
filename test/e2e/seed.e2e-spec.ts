@@ -3,7 +3,7 @@ import { argon2id, hash, verify } from 'argon2'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { comboSeedId, seed } from '../../prisma/seed'
-import { SEED_ADMIN } from '../../prisma/seed-data/admin'
+import { SEED_ADMIN, seedAdminCredentials } from '../../prisma/seed-data/admin'
 import { PrismaClient } from '../../src/generated/prisma/client'
 import { startContainers, type TestContainers } from '../support/containers'
 
@@ -294,6 +294,20 @@ describe('seed', () => {
     expect(await db().contentBlock.count({ where: { updatedBy: { not: null } } })).toBe(0)
   })
 
+  it('con credenciales propias crea ese admin y no el de demostración (NV-10)', async () => {
+    const own = { email: 'duena@galponmates.com.ar', password: 'una-clave-larga-2026' }
+
+    try {
+      await expect(seed(db(), own)).resolves.toMatchObject({ users: 1 })
+
+      const created = await db().user.findUniqueOrThrow({ where: { email: own.email } })
+      expect(created).toMatchObject({ role: 'admin', status: 'active' })
+      expect(await verify(created.passwordHash, own.password)).toBe(true)
+    } finally {
+      await db().user.deleteMany({ where: { email: own.email } })
+    }
+  })
+
   it('una nueva corrida no pisa la contraseña que se cambió desde el panel', async () => {
     const changed = await hash('otra-clave-2026', { type: argon2id })
     await db().user.update({
@@ -389,6 +403,58 @@ describe('seed', () => {
     })
     const history = await db().productSlugHistory.findMany({ where: { productId: galleta.id } })
     expect(history.map((h) => h.slug)).toEqual(['mate-galleta-renovado'])
+  })
+})
+
+describe('seedAdminCredentials (sin base, NV-10)', () => {
+  /** Credenciales propias válidas para producción. */
+  const OWN = { ADMIN_EMAIL: ' Duena@GalponMates.com.ar ', ADMIN_PASSWORD: 'una-clave-larga-2026' }
+
+  it('en producción exige ADMIN_EMAIL y ADMIN_PASSWORD propios y falla si faltan', () => {
+    expect(() => seedAdminCredentials({ NODE_ENV: 'production' })).toThrow(
+      'En producción el seed necesita ADMIN_EMAIL y ADMIN_PASSWORD (12 caracteres o más, distinta de la de demostración).',
+    )
+    expect(() =>
+      seedAdminCredentials({ NODE_ENV: 'production', ADMIN_EMAIL: OWN.ADMIN_EMAIL }),
+    ).toThrow('ADMIN_PASSWORD')
+    expect(() =>
+      seedAdminCredentials({ NODE_ENV: 'production', ADMIN_PASSWORD: OWN.ADMIN_PASSWORD }),
+    ).toThrow('ADMIN_EMAIL')
+  })
+
+  it('en producción rechaza una contraseña corta o la de demostración, sin mostrarla', () => {
+    const short = (): unknown =>
+      seedAdminCredentials({ ...OWN, NODE_ENV: 'production', ADMIN_PASSWORD: 'corta-2026' })
+    const demo = (): unknown =>
+      seedAdminCredentials({ ...OWN, NODE_ENV: 'production', ADMIN_PASSWORD: SEED_ADMIN.password })
+
+    expect(short).toThrow('12 caracteres o más')
+    expect(short).not.toThrow('corta-2026')
+    expect(demo).toThrow('distinta de la de demostración')
+    expect(demo).not.toThrow(SEED_ADMIN.password)
+  })
+
+  it('en producción con las dos variables usa esas, con el email normalizado', () => {
+    expect(seedAdminCredentials({ ...OWN, NODE_ENV: 'production' })).toEqual({
+      email: 'duena@galponmates.com.ar',
+      password: 'una-clave-larga-2026',
+    })
+  })
+
+  it('fuera de producción usa la de demostración si no vienen otras', () => {
+    expect(seedAdminCredentials({ NODE_ENV: 'development' })).toEqual(SEED_ADMIN)
+    expect(seedAdminCredentials({ NODE_ENV: 'test' })).toEqual(SEED_ADMIN)
+    expect(seedAdminCredentials({ ...OWN, NODE_ENV: 'development' })).toEqual({
+      email: 'duena@galponmates.com.ar',
+      password: 'una-clave-larga-2026',
+    })
+  })
+
+  it('sin NODE_ENV (o con uno desconocido) no corre', () => {
+    expect(() => seedAdminCredentials({})).toThrow(
+      'NODE_ENV tiene que ser development, test o production',
+    )
+    expect(() => seedAdminCredentials({ NODE_ENV: 'prod' })).toThrow('NODE_ENV')
   })
 })
 

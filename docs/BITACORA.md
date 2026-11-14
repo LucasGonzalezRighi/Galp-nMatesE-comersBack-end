@@ -1689,3 +1689,37 @@ B6 no instaló nada. Para la prueba en vivo se usó lo del worktree del front: N
 - Entradas de Redis de antes del deploy (sin `leathers`) se leen hasta que vencen (60 s).
 - Una pestaña de la tienda abierta antes del cambio de cueros manda `ferrule` y recibe 422 hasta
   recargar (B-70).
+
+## Seguridad: arreglos de la auditoría (2026-11-14)
+
+Pistas de la auditoría con la skill de Cloudflare (`security-audit-skill/galpon-backend/run-1`,
+`NEEDS-VALIDATION.md`). Cada una se releyó en el código, se mostró con un test en rojo y se arregló
+en la raíz sin tocar el contrato. Entre paréntesis, el número de `findings.json`.
+
+### Tanda A · cuentas, sesiones y configuración
+
+- **NV-02 (7)** arreglada: el registro nunca adopta al invitado del mismo email (crea su propio
+  cliente; los pedidos de invitado siguen por token). Migración: el email de `customers` deja de ser
+  único y queda un índice único parcial por invitado (`customers_guest_email_key`). Pendiente del
+  front: la tienda todavía promete "tus pedidos aparecen en tu cuenta apenas la creás".
+- **NV-10 (18)** arreglada: en producción el seed exige `ADMIN_EMAIL` y `ADMIN_PASSWORD` propios (12
+  o más, distinta de la de demostración) y sin `NODE_ENV` no corre.
+- **NV-32 (25)** arreglada: cambiar la contraseña del admin cierra sus otras sesiones y renueva la
+  actual (mismo CSRF).
+- **NV-03 (8)** arreglada: marca de credenciales por usuario; se rechaza toda sesión autenticada
+  hasta el cambio, aunque se cree después.
+- **NV-24 (31)** arreglada: la marca va primero y el borrado es de mejor esfuerzo, de a 100; ya no da
+  503 ni deja sesiones vivas.
+- **Candidato sin resolver (sesiones por usuario)** arreglado: tope de 20 sesiones; al abrir la 21 se
+  cierra la más vieja.
+- **NV-08 (4)** arreglada: el contador sube con `INCR` antes de verificar; de 15 intentos a la vez se
+  verifican 10.
+- **NV-09 (5)** arreglada: el bloqueo cuenta por email e IP (`req.ip`, la del límite por IP; con
+  `trust proxy` de otra tanda pasa a ser la del cliente real).
+- **NV-19 (26)** arreglada: la sesión anónima dura 30 minutos (antes 24 h).
+- **NV-26 (6)** aceptada: el 409 `email_already_registered` lo fija el contrato.
+- **NV-20 (27)** pendiente: se resuelve con el mail de verificación de la ronda de mails (B7).
+- **NV-07 (20)** arreglada: sin `NODE_ENV` explícito la API no arranca y el error lo dice.
+- **NV-31 (21)** arreglada: variable `HOST`, por defecto `127.0.0.1` fuera de producción y `0.0.0.0`
+  en producción.
+- **NV-33 (2)** arreglada: `docker-compose.yml` publica Postgres y Redis solo en `127.0.0.1`.

@@ -37,17 +37,27 @@ export interface CustomerRepository {
   findByUserId(userId: string): Promise<Customer | null>
 
   /**
-   * Busca un cliente por email, sin importar mayúsculas (con cuenta o invitado).
+   * Busca el cliente de un email, sin importar mayúsculas: el de la cuenta si la hay; si no, el
+   * invitado. Un email puede tener los dos (el registro nunca adopta al invitado).
    *
    * @param email - Email normalizado.
    */
   findByEmail(email: string): Promise<Customer | null>
 
   /**
+   * Busca el invitado (cliente sin cuenta) de un email, sin importar mayúsculas: hay uno como mucho.
+   *
+   * @param email - Email normalizado.
+   */
+  findGuestByEmail(email: string): Promise<Customer | null>
+
+  /**
    * Crea un cliente.
    *
    * @param input - Datos del cliente.
    * @returns El cliente creado.
+   * @throws {Error} La violación de unicidad de la base (`P2002`) si ya hay un invitado con ese
+   *   email.
    */
   create(input: NewCustomer): Promise<Customer>
 
@@ -58,28 +68,11 @@ export interface CustomerRepository {
    * @param user - Datos del usuario.
    * @param customer - Datos del cliente; su `userId` es el id de `user`.
    * @returns El cliente creado, ya con su `userId`.
-   * @throws {EmailAlreadyRegisteredError} Si el email ya está tomado por un usuario o por otro
-   *   cliente (por ejemplo, un invitado que apareció entre la consulta y el alta). Se traduce
-   *   desde la unicidad de la base, no desde una consulta previa.
+   * @throws {EmailAlreadyRegisteredError} Si el email ya tiene una cuenta (por ejemplo, otro
+   *   registro que ganó entre la consulta y el alta). Se traduce desde la unicidad de la base, no
+   *   desde una consulta previa. Un invitado con ese email no molesta: queda como estaba.
    */
   createWithUser(user: NewUser, customer: Omit<NewCustomer, 'userId'>): Promise<Customer>
-
-  /**
-   * Convierte un invitado en cliente con cuenta, en una sola operación atómica: crea el usuario,
-   * se lo asigna al cliente y actualiza el nombre. Si algo falla, no queda ningún usuario.
-   *
-   * @param customerId - Id del cliente invitado.
-   * @param user - Datos del usuario nuevo.
-   * @param names - Nombre y apellido con los que se registró.
-   * @returns El cliente actualizado (mismo id).
-   * @throws {EmailAlreadyRegisteredError} Si el email ya tiene un usuario o si el cliente dejó de
-   *   ser un invitado (otro registro lo ganó).
-   */
-  attachUser(
-    customerId: string,
-    user: NewUser,
-    names: { firstName: string; lastName: string },
-  ): Promise<Customer>
 
   /**
    * Cambia los datos de un cliente.

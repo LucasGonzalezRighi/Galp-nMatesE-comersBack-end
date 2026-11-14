@@ -7,7 +7,11 @@ import type {
   CustomerRepository,
   NewCustomer,
 } from '../../src/modules/identity/application/ports/customer.repository.port'
-import type { LoginAttemptsPort } from '../../src/modules/identity/application/ports/login-attempts.port'
+import type {
+  LoginAttempt,
+  LoginAttemptKey,
+  LoginAttemptsPort,
+} from '../../src/modules/identity/application/ports/login-attempts.port'
 import type {
   MailerPort,
   PasswordResetMail,
@@ -105,9 +109,10 @@ export class InMemoryUserRepository implements UserRepository {
 }
 
 /**
- * {@link CustomerRepository} en memoria; el email es único sin importar mayúsculas. Comparte los
- * usuarios con el {@link InMemoryUserRepository} que recibe, para que `createWithUser` y
- * `attachUser` sean atómicos como la transacción real: validan todo antes de escribir.
+ * {@link CustomerRepository} en memoria, con las reglas de la base: un solo invitado por email (sin
+ * importar mayúsculas) y una sola cuenta por email, que pueden convivir. Comparte los usuarios con
+ * el {@link InMemoryUserRepository} que recibe, para que `createWithUser` sea atómico como la
+ * transacción real: valida todo antes de escribir.
  */
 export class InMemoryCustomerRepository implements CustomerRepository {
   /** Clientes por id (los tests pueden mirarlos o sembrarlos). */
@@ -122,13 +127,26 @@ export class InMemoryCustomerRepository implements CustomerRepository {
   }
 
   /** {@inheritDoc CustomerRepository.findByEmail} */
-  findByEmail(email: string): Promise<Customer | null> {
-    return this.find((customer) => sameEmail(customer.email, email))
+  async findByEmail(email: string): Promise<Customer | null> {
+    const account = await this.find(
+      (customer) => customer.userId !== null && sameEmail(customer.email, email),
+    )
+    return account ?? this.findGuestByEmail(email)
+  }
+
+  /** {@inheritDoc CustomerRepository.findGuestByEmail} */
+  findGuestByEmail(email: string): Promise<Customer | null> {
+    return this.find((customer) => customer.userId === null && sameEmail(customer.email, email))
   }
 
   /** {@inheritDoc CustomerRepository.create} */
   create(input: NewCustomer): Promise<Customer> {
-    if ([...this.customers.values()].some((customer) => sameEmail(customer.email, input.email))) {
+    const taken = [...this.customers.values()].some(
+      (customer) =>
+        (customer.userId === null) === (input.userId === null) &&
+        sameEmail(customer.email, input.email),
+    )
+    if (taken) {
       return Promise.reject(new Error(`Ya hay un cliente con el email ${input.email}`))
     }
     this.customers.set(input.id, { ...input })
@@ -139,27 +157,14 @@ export class InMemoryCustomerRepository implements CustomerRepository {
   async createWithUser(user: NewUser, customer: Omit<NewCustomer, 'userId'>): Promise<Customer> {
     const emailTaken =
       (await this.userRepository.findByEmail(user.email)) !== null ||
-      [...this.customers.values()].some((candidate) => sameEmail(candidate.email, customer.email))
+      [...this.customers.values()].some(
+        (candidate) => candidate.userId !== null && sameEmail(candidate.email, customer.email),
+      )
     if (emailTaken) throw new EmailAlreadyRegisteredError()
     await this.userRepository.create(user)
     const created: Customer = { ...customer, userId: user.id }
     this.customers.set(created.id, created)
     return { ...created }
-  }
-
-  /** {@inheritDoc CustomerRepository.attachUser} */
-  async attachUser(
-    customerId: string,
-    user: NewUser,
-    names: { firstName: string; lastName: string },
-  ): Promise<Customer> {
-    const guest = this.customers.get(customerId)
-    if (guest === undefined) throw new Error(`No existe el cliente ${customerId}`)
-    if (guest.userId !== null || (await this.userRepository.findByEmail(user.email)) !== null) {
-      throw new EmailAlreadyRegisteredError()
-    }
-    await this.userRepository.create(user)
-    return this.change(customerId, { userId: user.id, ...names })
   }
 
   /** {@inheritDoc CustomerRepository.update} */
@@ -303,22 +308,24 @@ export class RecordingMailer implements MailerPort {
   }
 }
 
-/** Fallos de un email dentro de su ventana. */
-interface FailureWindow {
+/** Intentos de un par email + IP dentro de su ventana. */
+interface AttemptWindow {
   count: number
   windowEndsAt: number
 }
 
 /**
- * {@link LoginAttemptsPort} en memoria con las reglas del de Redis: la ventana de 15 minutos
- * arranca con el primer fallo y, desde el décimo, el email queda bloqueado hasta que termina.
+ * {@link LoginAttemptsPort} en memoria con las reglas del de Redis: cuenta cada intento por email e
+ * IP antes de verificar (de forma atómica: suma en el momento de la llamada), la ventana de 15
+ * minutos arranca con el primero, el décimo todavía se verifica y del once en adelante el par
+ * queda bloqueado hasta que termina.
  */
 export class InMemoryLoginAttempts implements LoginAttemptsPort {
-  private readonly failures = new Map<string, FailureWindow>()
+  private readonly attempts = new Map<string, AttemptWindow>()
 
   /**
    * @param clock - Reloj para la ventana.
-   * @param limit - Fallos que bloquean (10).
+   * @param limit - Intentos que se verifican (10).
    * @param windowSeconds - Duración de la ventana en segundos (900).
    */
   constructor(
@@ -327,48 +334,48 @@ export class InMemoryLoginAttempts implements LoginAttemptsPort {
     private readonly windowSeconds = 900,
   ) {}
 
-  /** {@inheritDoc LoginAttemptsPort.fail} */
-  fail(email: string): Promise<{ blockedForSeconds: number | null }> {
+  /** {@inheritDoc LoginAttemptsPort.attempt} */
+  attempt(key: LoginAttemptKey): Promise<LoginAttempt> {
     const now = this.clock.now().getTime()
-    const entry = this.current(email, now) ?? {
+    const id = attemptId(key)
+    const entry = this.current(id, now) ?? {
       count: 0,
       windowEndsAt: now + this.windowSeconds * 1000,
     }
     entry.count += 1
-    this.failures.set(email, entry)
-    return Promise.resolve({ blockedForSeconds: this.remaining(entry, now) })
-  }
-
-  /** {@inheritDoc LoginAttemptsPort.blockedFor} */
-  blockedFor(email: string): Promise<number | null> {
-    const now = this.clock.now().getTime()
-    const entry = this.current(email, now)
-    return Promise.resolve(entry === null ? null : this.remaining(entry, now))
+    this.attempts.set(id, entry)
+    const remaining = Math.ceil((entry.windowEndsAt - now) / 1000)
+    return Promise.resolve({
+      blockedForSeconds: entry.count > this.limit ? remaining : null,
+      lockedIfFailsSeconds: entry.count === this.limit ? remaining : null,
+    })
   }
 
   /** {@inheritDoc LoginAttemptsPort.clear} */
-  clear(email: string): Promise<void> {
-    this.failures.delete(email)
+  clear(key: LoginAttemptKey): Promise<void> {
+    this.attempts.delete(attemptId(key))
     return Promise.resolve()
   }
 
   /**
-   * Fallos registrados para un email en la ventana vigente.
+   * Intentos registrados para un par en la ventana vigente.
    *
    * @param email - Email normalizado.
+   * @param clientIp - IP del cliente.
    * @returns La cantidad, o 0 si no hay ventana abierta.
    */
-  count(email: string): number {
-    return this.current(email, this.clock.now().getTime())?.count ?? 0
+  count(email: string, clientIp: string): number {
+    return this.current(attemptId({ email, clientIp }), this.clock.now().getTime())?.count ?? 0
   }
 
-  private current(email: string, now: number): FailureWindow | null {
-    const entry = this.failures.get(email)
+  private current(id: string, now: number): AttemptWindow | null {
+    const entry = this.attempts.get(id)
     if (entry === undefined || entry.windowEndsAt <= now) return null
     return entry
   }
+}
 
-  private remaining(entry: FailureWindow, now: number): number | null {
-    return entry.count >= this.limit ? Math.ceil((entry.windowEndsAt - now) / 1000) : null
-  }
+/** Clave del par email + IP. */
+function attemptId({ email, clientIp }: LoginAttemptKey): string {
+  return `${encodeURIComponent(clientIp)}:${email}`
 }

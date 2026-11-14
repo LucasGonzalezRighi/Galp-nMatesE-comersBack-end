@@ -5,7 +5,7 @@ import { CurrentPasswordField, EmailField } from './identity-fields'
 
 /** Cuerpo de `POST /admin/auth/login` (`AdminLoginInput` del contrato). */
 @ApiSchema({ name: 'AdminLoginInput' })
-export class AdminLoginDto implements Credentials {
+export class AdminLoginDto implements Omit<Credentials, 'clientIp'> {
   /** Email del administrador, recortado y en minúsculas. */
   @EmailField()
   email!: string

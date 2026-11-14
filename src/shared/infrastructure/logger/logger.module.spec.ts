@@ -6,6 +6,7 @@ import { buildPinoHttpOptions } from './logger.module'
 
 const BASE: Env = {
   NODE_ENV: 'production',
+  HOST: '127.0.0.1',
   PORT: 3001,
   DATABASE_URL: 'postgresql://galpon:galpon@localhost:5432/galpon',
   REDIS_URL: 'redis://localhost:6379',

@@ -215,9 +215,9 @@ import { MeController } from './interface/me.controller'
     },
     {
       provide: ChangeAdminPasswordCommand,
-      useFactory: (users: UserRepository, hasher: PasswordHasher) =>
-        new ChangeAdminPasswordCommand(users, hasher),
-      inject: [USER_REPOSITORY, PASSWORD_HASHER],
+      useFactory: (users: UserRepository, hasher: PasswordHasher, sessions: SessionPort) =>
+        new ChangeAdminPasswordCommand(users, hasher, sessions),
+      inject: [USER_REPOSITORY, PASSWORD_HASHER, SESSION_PORT],
     },
   ],
   exports: [GetMeQuery, CUSTOMER_REPOSITORY],

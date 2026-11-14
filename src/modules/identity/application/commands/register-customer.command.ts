@@ -31,14 +31,16 @@ export interface CustomerSessionResult {
 }
 
 /**
- * Crea una cuenta de cliente. Si el email ya compró como invitado, la cuenta se le adjunta a ese
- * cliente (conserva su id, y con él sus pedidos). Abre una sesión de cliente y cierra la actual.
- * El alta del usuario y la del cliente son una sola operación atómica del repositorio de clientes.
+ * Crea una cuenta de cliente con un cliente nuevo. Nunca adopta al invitado que compró con ese
+ * email (NV-02): escribir un email no prueba que sea de quien se registra, así que los pedidos y
+ * los datos del invitado quedan con el invitado (se leen por token, como siempre) y la cuenta nueva
+ * no los ve. Abre una sesión de cliente y cierra la actual. El alta del usuario y la del cliente
+ * son una sola operación atómica del repositorio de clientes.
  */
 export class RegisterCustomerCommand {
   /**
    * @param users - Usuarios (solo para consultar si el email ya está registrado).
-   * @param customers - Clientes (crea usuario y cliente juntos).
+   * @param customers - Clientes (crea usuario y cliente juntos, sin tocar al invitado).
    * @param hasher - Hash de contraseñas.
    * @param sessions - Almacén de sesiones.
    */
@@ -65,8 +67,6 @@ export class RegisterCustomerCommand {
     const firstName = normalizePersonName(input.firstName)
     const lastName = normalizePersonName(input.lastName)
     if ((await this.users.findByEmail(email)) !== null) throw new EmailAlreadyRegisteredError()
-    const guest = await this.customers.findByEmail(email)
-    if (guest !== null && guest.userId !== null) throw new EmailAlreadyRegisteredError()
 
     const user: NewUser = {
       id: newId(),
@@ -77,16 +77,13 @@ export class RegisterCustomerCommand {
     }
     // Usuario y cliente se crean en una sola operación atómica del repositorio de clientes: si
     // falla, no queda un usuario sin cliente que bloquee la cuenta.
-    const customer =
-      guest === null
-        ? await this.customers.createWithUser(user, {
-            id: newId(),
-            email,
-            firstName,
-            lastName,
-            phone: null,
-          })
-        : await this.customers.attachUser(guest.id, user, { firstName, lastName })
+    const customer = await this.customers.createWithUser(user, {
+      id: newId(),
+      email,
+      firstName,
+      lastName,
+      phone: null,
+    })
 
     const session = await rotateSession(this.sessions, currentSessionId, {
       kind: 'customer',

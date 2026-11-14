@@ -14,6 +14,7 @@ function adminSession(userId: string): SessionRecord {
     customerId: null,
     csrfToken: 'b'.repeat(64),
     createdAt: '2026-11-02T12:00:00.000Z',
+    authenticatedAt: '2026-11-02T12:00:00.000Z',
     expiresAt: '2026-11-02T20:00:00.000Z',
   }
 }

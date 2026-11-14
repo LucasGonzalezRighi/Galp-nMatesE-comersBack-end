@@ -11,7 +11,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { argon2id, hash } from 'argon2'
 
 import { Prisma, PrismaClient } from '../src/generated/prisma/client'
-import { SEED_ADMIN } from './seed-data/admin'
+import { type SeedAdminCredentials, seedAdminCredentials } from './seed-data/admin'
 import { SEED_CATEGORIES } from './seed-data/categories'
 import { SEED_COMBOS } from './seed-data/combos'
 import { SEED_CONTENT_BLOCKS } from './seed-data/content'
@@ -325,22 +325,23 @@ async function seedContentAndSettings(tx: Tx): Promise<void> {
 }
 
 /**
- * Crea el admin semilla ({@link SEED_ADMIN}) si no existe, con la contraseña hasheada con
+ * Crea el admin del panel con esas credenciales si no existe, con la contraseña hasheada con
  * argon2id. Si ya existe no toca nada: ni la contraseña (puede haberse cambiado desde el panel),
  * ni el rol, ni el estado.
  *
+ * @param admin - Email y contraseña del admin ({@link seedAdminCredentials}).
  * @returns Cuántos usuarios semilla quedaron en la base (siempre 1).
  */
-async function seedAdmin(tx: Tx): Promise<number> {
+async function seedAdmin(tx: Tx, admin: SeedAdminCredentials): Promise<number> {
   const existing = await tx.user.findUnique({
-    where: { email: SEED_ADMIN.email },
+    where: { email: admin.email },
     select: { id: true },
   })
   if (existing === null) {
     await tx.user.create({
       data: {
-        email: SEED_ADMIN.email,
-        passwordHash: await hash(SEED_ADMIN.password, PASSWORD_HASH_OPTIONS),
+        email: admin.email,
+        passwordHash: await hash(admin.password, PASSWORD_HASH_OPTIONS),
         role: 'admin',
         status: 'active',
       },
@@ -352,7 +353,8 @@ async function seedAdmin(tx: Tx): Promise<number> {
 /**
  * Carga en la base los datos del diseño: 6 líneas, 27 productos publicados con fotos y stock,
  * 18 reseñas aprobadas, los 7 contenidos editables, los ajustes, las opciones de envío, los 5
- * combos (4 publicados y un borrador) y el admin semilla del panel.
+ * combos (4 publicados y un borrador) y el admin del panel: el de demostración fuera de producción;
+ * en producción, el de `ADMIN_EMAIL` y `ADMIN_PASSWORD` ({@link seedAdminCredentials}).
  *
  * Es idempotente (todo es `upsert` por `slug` de la línea, `sequence` del producto,
  * `(productId, position)`, `key`, `id = 1`, `method` o el id determinístico de la reseña o del
@@ -364,14 +366,20 @@ async function seedAdmin(tx: Tx): Promise<number> {
  * null).
  *
  * @param prisma - Cliente de Prisma conectado a una base ya migrada.
+ * @param admin - Credenciales del admin; por defecto, las que decide
+ *   {@link seedAdminCredentials} con `process.env`.
  * @returns Cuántas filas de cada tipo dejó sembradas.
- * @throws {Error} Si un producto, una reseña o un combo apunta a algo que no está en el seed, o si
- *   la base rechaza una fila (la transacción se deshace entera).
+ * @throws {Error} Si un producto, una reseña o un combo apunta a algo que no está en el seed, si
+ *   la base rechaza una fila (la transacción se deshace entera) o si las credenciales del admin no
+ *   se pueden decidir (por ejemplo, en producción sin `ADMIN_PASSWORD`).
  * @example
  * const summary = await seed(prisma)
  * // { categories: 6, products: 27, reviews: 18, contentBlocks: 7, combos: 5, users: 1 }
  */
-export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
+export async function seed(
+  prisma: PrismaClient,
+  admin: SeedAdminCredentials = seedAdminCredentials(process.env),
+): Promise<SeedSummary> {
   return prisma.$transaction(
     async (tx) => {
       const categoryIds = await seedCategories(tx)
@@ -380,7 +388,7 @@ export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
       await seedReviews(tx)
       await seedContentAndSettings(tx)
       await seedCombos(tx)
-      const users = await seedAdmin(tx)
+      const users = await seedAdmin(tx, admin)
       return {
         categories: SEED_CATEGORIES.length,
         products: SEED_PRODUCTS.length,
@@ -396,9 +404,10 @@ export async function seed(prisma: PrismaClient): Promise<SeedSummary> {
 
 /**
  * Entrada de `npm run db:seed` / `prisma db seed`: siembra la base de `DATABASE_URL` (del entorno
- * o de `.env`) y cierra la conexión.
+ * o de `.env`) y cierra la conexión. Decide las credenciales del admin antes de conectarse.
  *
- * @throws {Error} Si falta `DATABASE_URL` o si el seed falla.
+ * @throws {Error} Si falta `DATABASE_URL`, si las credenciales del admin no se pueden decidir o si
+ *   el seed falla.
  */
 async function main(): Promise<void> {
   try {
@@ -410,14 +419,15 @@ async function main(): Promise<void> {
   if (connectionString === undefined || connectionString === '') {
     throw new Error('Falta DATABASE_URL: definila en el entorno o en .env para correr el seed')
   }
+  const admin = seedAdminCredentials(process.env)
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
   try {
-    const summary = await seed(prisma)
+    const summary = await seed(prisma, admin)
     process.stdout.write(
       `Seed listo: ${String(summary.categories)} categorías, ${String(summary.products)} productos, ` +
         `${String(summary.reviews)} reseñas, ${String(summary.contentBlocks)} contenidos, ` +
         `${String(summary.combos)} combos y ` +
-        `${String(summary.users)} usuario admin (${SEED_ADMIN.email}).\n`,
+        `${String(summary.users)} usuario admin (${admin.email}).\n`,
     )
   } finally {
     await prisma.$disconnect()
