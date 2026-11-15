@@ -151,6 +151,151 @@ describe('límites y recursos (tanda C de la auditoría, HTTP + Postgres + Redis
     })
   })
 
+  describe('NV-09: bloqueo de login por cliente normalizado y tope por email', () => {
+    /** Navegador con su CSRF (lo pide desde `ip`). */
+    async function browserFrom(ip: string): Promise<Jar> {
+      const jar = newJar()
+      const csrf = await send(jar, 'get', '/auth/csrf', { headers: from(ip) })
+      jar.csrf = (csrf.body as { csrfToken: string }).csrfToken
+      return jar
+    }
+
+    /** Inicio de sesión desde `ip`. */
+    function loginFrom(
+      jar: Jar,
+      ip: string,
+      email: string,
+      password: string,
+    ): Promise<request.Response> {
+      return send(jar, 'post', '/auth/login', { body: { email, password }, headers: from(ip) })
+    }
+
+    it('las direcciones de una misma red IPv6 /64 son un solo cliente: la décima falla bloquea a toda la red; otra /64 sigue', async () => {
+      const jar = await browserFrom('2001:db8:9:1::1')
+      const statuses: number[] = []
+      for (let host = 1; host <= 10; host += 1) {
+        const ip = `2001:db8:9:1::${host.toString(16)}`
+        statuses.push((await loginFrom(jar, ip, 'red@ejemplo.com', 'no-es-la-clave-1')).status)
+      }
+      const sameNetwork = await loginFrom(
+        jar,
+        '2001:db8:9:1:ffff:ffff:ffff:fffe',
+        'red@ejemplo.com',
+        'no-es-la-clave-1',
+      )
+      const otherNetwork = await loginFrom(
+        jar,
+        '2001:db8:9:2::1',
+        'red@ejemplo.com',
+        'no-es-la-clave-1',
+      )
+
+      expect(statuses).toEqual([...Array<number>(9).fill(401), 429])
+      expect(sameNetwork.status).toBe(429)
+      expect(otherNetwork.status).toBe(401)
+    })
+
+    it('una IPv4 mapeada (::ffff:) cuenta como la misma IPv4', async () => {
+      const jar = await browserFrom('203.0.113.20')
+      const statuses: number[] = []
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const ip = attempt % 2 === 0 ? '::ffff:203.0.113.20' : '203.0.113.20'
+        statuses.push((await loginFrom(jar, ip, 'mapeada@ejemplo.com', 'no-es-la-clave-1')).status)
+      }
+
+      expect(statuses).toEqual([...Array<number>(9).fill(401), 429])
+    })
+
+    it('rotando IPs, con 100 fallos en la hora el email queda frenado desde cualquier IP (429, también con la contraseña correcta)', async () => {
+      const email = 'rotada@ejemplo.com'
+      const password = 'mate-con-yerba-2026'
+      const owner = await browserFrom('192.0.2.50')
+      const registered = await send(owner, 'post', '/auth/register', {
+        body: { email, firstName: 'Rita', lastName: 'Sosa', password },
+        headers: from('192.0.2.50'),
+      })
+      expect(registered.status).toBe(201)
+
+      const attacker = await browserFrom('198.51.100.200')
+      const statuses: number[] = []
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const ip = `198.51.100.${String(100 + Math.floor(attempt / 9))}`
+        statuses.push((await loginFrom(attacker, ip, email, 'no-es-la-clave-1')).status)
+      }
+      const fresh = await browserFrom('192.0.2.51')
+      const locked = await loginFrom(fresh, '192.0.2.51', email, password)
+
+      expect(statuses.slice(0, 99)).toEqual(Array<number>(99).fill(401))
+      expect(statuses[99]).toBe(429)
+      expect(locked.status).toBe(429)
+      expect(locked.body).toMatchObject({ type: 'rate_limited', status: 429 })
+      expect(Number(locked.headers['retry-after'])).toBeGreaterThan(3_000)
+    })
+  })
+
+  describe('NV-16: rutas de pago con límite por IP real del cliente', () => {
+    /** Pedido nuevo de la tienda (sin X-Forwarded-For) con su token. */
+    async function newOrder(): Promise<{ number: string; token: string }> {
+      const { orderBody, createdOrder } = ordersHttp(server)
+      const { order, orderToken } = await createdOrder(
+        newJar(),
+        await orderBody([mateLine(mateId)], `pagos-${randomUUID()}@ejemplo.com`),
+      )
+      return { number: order.number, token: orderToken }
+    }
+
+    /** Repite `POST path` con el token del pedido; devuelve los códigos. */
+    async function repeatPost(
+      path: string,
+      token: string,
+      times: number,
+      body?: object,
+      headers: Record<string, string> = {},
+    ): Promise<number[]> {
+      const statuses: number[] = []
+      for (let i = 0; i < times; i += 1) {
+        const options = { headers: { ...headers, 'X-Order-Token': token } }
+        const response = await send(
+          newJar(),
+          'post',
+          path,
+          body === undefined ? options : { ...options, body },
+        )
+        statuses.push(response.status)
+      }
+      return statuses
+    }
+
+    const INSTALLMENTS = { bin: '45031234', paymentTypeId: 'credit_card' }
+
+    it('las cuotas dejan 60 por minuto al cliente y la 61 → 429; la tienda sin X-Forwarded-For no se cuenta', async () => {
+      const { number, token } = await newOrder()
+      const path = `/orders/${number}/payments/mercadopago/installments`
+
+      const client = await repeatPost(path, token, 61, INSTALLMENTS, from('203.0.113.60'))
+      const store = await repeatPost(path, token, 61, INSTALLMENTS)
+
+      expect(client.slice(0, 60)).toEqual(Array<number>(60).fill(200))
+      expect(client[60]).toBe(429)
+      expect(store).toEqual(Array<number>(61).fill(200))
+    })
+
+    it('cancelar el intento deja 30 por minuto al cliente y el 31 → 429', async () => {
+      const { number, token } = await newOrder()
+
+      const statuses = await repeatPost(
+        `/orders/${number}/cancel-payment`,
+        token,
+        31,
+        undefined,
+        from('203.0.113.61'),
+      )
+
+      expect(statuses.slice(0, 30)).toEqual(Array<number>(30).fill(204))
+      expect(statuses[30]).toBe(429)
+    })
+  })
+
   describe('NV-17 (22): body parsers', () => {
     it('un JSON comprimido (Content-Encoding: gzip) → 415 problem+json en español', async () => {
       const body = gzipSync(JSON.stringify({ items: [mateLine(mateId)] }))

@@ -329,42 +329,47 @@ interface AttemptWindow {
  * {@link LoginAttemptsPort} en memoria con las reglas del de Redis: cuenta cada intento por email e
  * IP antes de verificar (de forma atómica: suma en el momento de la llamada), la ventana de 15
  * minutos arranca con el primero, el décimo todavía se verifica y del once en adelante el par
- * queda bloqueado hasta que termina.
+ * queda bloqueado hasta que termina. Además, el tope por email (NV-09): lo que el par deja
+ * verificar suma a un contador del email de una hora; el intento 100 todavía se verifica y del 101
+ * en adelante el email queda bloqueado desde cualquier IP. Si los dos avisan, arranca el más largo.
  */
 export class InMemoryLoginAttempts implements LoginAttemptsPort {
   private readonly attempts = new Map<string, AttemptWindow>()
 
   /**
    * @param clock - Reloj para la ventana.
-   * @param limit - Intentos que se verifican (10).
-   * @param windowSeconds - Duración de la ventana en segundos (900).
+   * @param limit - Intentos que se verifican por par (10).
+   * @param windowSeconds - Duración de la ventana del par en segundos (900).
+   * @param emailLimit - Intentos que se verifican por email (100).
+   * @param emailWindowSeconds - Duración de la ventana del email en segundos (3600).
    */
   constructor(
     private readonly clock: Clock,
     private readonly limit = 10,
     private readonly windowSeconds = 900,
+    private readonly emailLimit = 100,
+    private readonly emailWindowSeconds = 3_600,
   ) {}
 
   /** {@inheritDoc LoginAttemptsPort.attempt} */
   attempt(key: LoginAttemptKey): Promise<LoginAttempt> {
-    const now = this.clock.now().getTime()
-    const id = attemptId(key)
-    const entry = this.current(id, now) ?? {
-      count: 0,
-      windowEndsAt: now + this.windowSeconds * 1000,
-    }
-    entry.count += 1
-    this.attempts.set(id, entry)
-    const remaining = Math.ceil((entry.windowEndsAt - now) / 1000)
+    const pair = this.bump(attemptId(key), this.limit, this.windowSeconds)
+    if (pair.blockedForSeconds !== null) return Promise.resolve(pair)
+    const email = this.bump(emailId(key.email), this.emailLimit, this.emailWindowSeconds)
+    if (email.blockedForSeconds !== null) return Promise.resolve(email)
+    const locks = [pair.lockedIfFailsSeconds, email.lockedIfFailsSeconds].filter(
+      (seconds) => seconds !== null,
+    )
     return Promise.resolve({
-      blockedForSeconds: entry.count > this.limit ? remaining : null,
-      lockedIfFailsSeconds: entry.count === this.limit ? remaining : null,
+      blockedForSeconds: null,
+      lockedIfFailsSeconds: locks.length === 0 ? null : Math.max(...locks),
     })
   }
 
   /** {@inheritDoc LoginAttemptsPort.clear} */
   clear(key: LoginAttemptKey): Promise<void> {
     this.attempts.delete(attemptId(key))
+    this.attempts.delete(emailId(key.email))
     return Promise.resolve()
   }
 
@@ -379,6 +384,19 @@ export class InMemoryLoginAttempts implements LoginAttemptsPort {
     return this.current(attemptId({ email, clientIp }), this.clock.now().getTime())?.count ?? 0
   }
 
+  /** Suma un intento al contador `id` y dice si se verifica, si bloquea al fallar o si ya bloqueó. */
+  private bump(id: string, limit: number, windowSeconds: number): LoginAttempt {
+    const now = this.clock.now().getTime()
+    const entry = this.current(id, now) ?? { count: 0, windowEndsAt: now + windowSeconds * 1000 }
+    entry.count += 1
+    this.attempts.set(id, entry)
+    const remaining = Math.ceil((entry.windowEndsAt - now) / 1000)
+    return {
+      blockedForSeconds: entry.count > limit ? remaining : null,
+      lockedIfFailsSeconds: entry.count === limit ? remaining : null,
+    }
+  }
+
   private current(id: string, now: number): AttemptWindow | null {
     const entry = this.attempts.get(id)
     if (entry === undefined || entry.windowEndsAt <= now) return null
@@ -389,4 +407,9 @@ export class InMemoryLoginAttempts implements LoginAttemptsPort {
 /** Clave del par email + IP. */
 function attemptId({ email, clientIp }: LoginAttemptKey): string {
   return `${encodeURIComponent(clientIp)}:${email}`
+}
+
+/** Clave del tope por email (no choca con las del par: esas siempre llevan `:`). */
+function emailId(email: string): string {
+  return `email|${email}`
 }

@@ -1,8 +1,7 @@
 import { applyDecorators, type ExecutionContext, SetMetadata } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
-import { Throttle } from '@nestjs/throttler'
 
-import { type ClientIpRequest, knownClientIp } from '../http/client-ip'
+import { ClientRateLimit } from './client-rate-limit'
 
 /** Límite de las lecturas públicas (NV-18): 300 pedidos por minuto por IP real del cliente. */
 export const PUBLIC_READ_RATE_LIMIT = { ttl: 60_000, limit: 300 } as const
@@ -17,8 +16,8 @@ const reflector = new Reflector()
  * en el método:
  *
  * - lleva el límite {@link PUBLIC_READ_RATE_LIMIT} por IP real del cliente, que solo se cuenta si
- *   se conoce esa IP ({@link skipPublicReadWithoutClientIp}): el servidor de la tienda, que lee
- *   para armar sus páginas, nunca se limita;
+ *   se conoce esa IP ({@link ClientRateLimit}): el servidor de la tienda, que lee para armar sus
+ *   páginas, nunca se limita;
  * - no lleva `Cache-Control: no-store` (la respuesta no depende de la sesión).
  *
  * @returns El decorador.
@@ -26,7 +25,7 @@ const reflector = new Reflector()
 export function PublicRead(): ClassDecorator & MethodDecorator {
   return applyDecorators(
     SetMetadata(PUBLIC_READ_KEY, true),
-    Throttle({ default: PUBLIC_READ_RATE_LIMIT }),
+    ClientRateLimit(PUBLIC_READ_RATE_LIMIT),
   )
 }
 
@@ -43,18 +42,4 @@ export function isPublicRead(context: ExecutionContext): boolean {
       context.getClass(),
     ]) === true
   )
-}
-
-/**
- * `skipIf` del límite por IP (NV-18): una lectura pública no se cuenta cuando no se conoce la IP
- * real del cliente ({@link knownClientIp}): sin `TRUST_PROXY` (todo llega con la IP de la tienda y
- * un límite frenaría a toda la tienda) o cuando la pide el propio servidor de la tienda. Las demás
- * rutas se cuentan siempre.
- *
- * @param context - Contexto de ejecución de Nest.
- * @returns `true` si el guard no tiene que contar este pedido.
- */
-export function skipPublicReadWithoutClientIp(context: ExecutionContext): boolean {
-  if (!isPublicRead(context)) return false
-  return knownClientIp(context.switchToHttp().getRequest<ClientIpRequest>()) === null
 }

@@ -305,6 +305,23 @@ describe('LoginCustomerCommand', () => {
     ).resolves.toMatchObject({ customer: { email: 'ana@mail.com' } })
   })
 
+  it('rotar IPs no da intentos sin fin: con 100 fallos en la hora el email queda frenado desde cualquier IP (NV-09)', async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const clientIp = `198.51.100.${String(Math.floor(attempt / 9))}`
+      await login
+        .execute({ email: 'ana@mail.com', password: 'otra-cosa-1', clientIp }, null)
+        .catch(() => undefined)
+    }
+
+    await expect(
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: IP }, null),
+    ).rejects.toBeInstanceOf(LoginLockedError)
+    deps.clock.advance(60 * 60 * 1000)
+    await expect(
+      login.execute({ email: 'ana@mail.com', password: PASSWORD, clientIp: IP }, null),
+    ).resolves.toMatchObject({ customer: { email: 'ana@mail.com' } })
+  })
+
   it('un admin no entra por la ruta del cliente', async () => {
     seedUser(deps, { id: 'usr-admin', email: 'admin@galponmates.com.ar', role: 'admin' })
 

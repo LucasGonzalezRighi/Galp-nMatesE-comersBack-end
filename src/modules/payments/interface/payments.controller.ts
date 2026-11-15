@@ -10,10 +10,10 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger'
-import { SkipThrottle } from '@nestjs/throttler'
 
 import { ApiProblemResponses, schemaRef } from '../../../shared/infrastructure/http/openapi'
 import { Idempotent } from '../../../shared/infrastructure/idempotency/idempotency.interceptor'
+import { ClientRateLimit } from '../../../shared/infrastructure/throttler/client-rate-limit'
 import { OrderNumberParamDto } from '../../orders/interface/dto/order-number.param'
 import { PaymentChallengeDto } from '../../orders/interface/dto/orders.response.dto'
 import {
@@ -39,17 +39,31 @@ import {
 } from './dto/payments.response.dto'
 import { IdempotencyKeyHeader, orderAccess } from './payments-http'
 
+/** Límite de cada ruta de pago (NV-16): 30 pedidos por minuto por IP real del cliente. */
+export const PAYMENT_RATE_LIMIT = { ttl: 60_000, limit: 30 } as const
+
+/**
+ * Límite de las cuotas (NV-16): 60 pedidos por minuto por IP real del cliente. Es más alto porque
+ * la tienda las vuelve a pedir cuando cambia la tarjeta, y cada una llama a Mercado Pago.
+ */
+export const INSTALLMENTS_RATE_LIMIT = { ttl: 60_000, limit: 60 } as const
+
 /**
  * Pagos de un pedido con Mercado Pago (`/orders/{number}/…`): preferencia de Checkout Pro, tarjeta
  * con 3-D Secure, cuotas y cancelación del intento activo. Solo con `X-Order-Token` (nunca la
  * sesión sola): sin token, con un token ajeno o con un pedido que no existe responden el mismo 404,
- * nunca 401; un `X-CSRF-Token` que llegue se ignora. Sin límite por IP (Ruling B-52): la tienda
- * llega desde la IP de Next. La preferencia y la tarjeta son idempotentes.
+ * nunca 401; un `X-CSRF-Token` que llegue se ignora. La preferencia y la tarjeta son idempotentes.
+ *
+ * Límite por IP real del cliente (`@ClientRateLimit()`, NV-16; antes, sin límite por el Ruling
+ * B-52): {@link PAYMENT_RATE_LIMIT} por ruta y {@link INSTALLMENTS_RATE_LIMIT} en las cuotas. Solo
+ * cuenta con `TRUST_PROXY` y un cliente conocido: sin él, todo llega con la IP del servidor de la
+ * tienda y un límite frenaría a toda la tienda; los pedidos que origina el servidor de la tienda
+ * tampoco se cuentan. El webhook de Mercado Pago es otro controlador y sigue sin límite.
  */
 @ApiTags('payments')
 @ApiExtraModels(InstallmentOptionDto, PaymentChallengeDto)
 @ApiSecurity('orderToken')
-@SkipThrottle()
+@ClientRateLimit(PAYMENT_RATE_LIMIT)
 @Controller('orders/:number')
 export class PaymentsController {
   /**
@@ -140,7 +154,8 @@ export class PaymentsController {
   }
 
   /**
-   * Opciones de cuotas para la tarjeta que empieza con `bin`, sobre el total del pedido.
+   * Opciones de cuotas para la tarjeta que empieza con `bin`, sobre el total del pedido. Con su
+   * propio límite por cliente ({@link INSTALLMENTS_RATE_LIMIT}).
    *
    * @param params - Número del pedido, ya validado.
    * @param token - `X-Order-Token`, o `null`.
@@ -152,6 +167,7 @@ export class PaymentsController {
    */
   @Post('payments/mercadopago/installments')
   @HttpCode(HttpStatus.OK)
+  @ClientRateLimit(INSTALLMENTS_RATE_LIMIT)
   @ApiOperation({ operationId: 'getInstallments', summary: 'Consultar las cuotas de una tarjeta' })
   @ApiParam(ORDER_NUMBER_PARAM)
   @ApiBody({ type: InstallmentsInputDto })

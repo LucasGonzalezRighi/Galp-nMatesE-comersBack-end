@@ -363,6 +363,46 @@ describe('adaptadores de identidad (Postgres + Redis)', () => {
       await attempts.clear(key)
       await expect(attempts.attempt(key)).resolves.toEqual(free)
     })
+
+    it('tope por email (NV-09): de 120 intentos a la vez desde 12 IPs se verifican 100 y la IP 13 queda bloqueada; clear lo olvida', async () => {
+      const attempts = get<LoginAttemptsPort>(LOGIN_ATTEMPTS_PORT)
+      const email = 'rotando@mail.com'
+      const keys = Array.from({ length: 12 }, (_, ip) => ({
+        email,
+        clientIp: `198.51.100.${String(ip + 1)}`,
+      }))
+
+      const results = await Promise.all(
+        keys.flatMap((key) => Array.from({ length: 10 }, () => attempts.attempt(key))),
+      )
+
+      const verified = results.filter((result) => result.blockedForSeconds === null)
+      expect(verified).toHaveLength(100)
+      for (const result of results.filter((candidate) => candidate.blockedForSeconds !== null)) {
+        expect(result.blockedForSeconds).toBeGreaterThan(3_590)
+        expect(result.blockedForSeconds).toBeLessThanOrEqual(3_600)
+      }
+      const fresh = { email, clientIp: '192.0.2.13' }
+      const blocked = await attempts.attempt(fresh)
+      expect(blocked.blockedForSeconds).toBeGreaterThan(3_590)
+
+      await attempts.clear(fresh)
+      await expect(attempts.attempt({ email, clientIp: '192.0.2.14' })).resolves.toEqual({
+        blockedForSeconds: null,
+        lockedIfFailsSeconds: null,
+      })
+    })
+
+    it('tope por email (NV-09): lo que el bloqueo por IP ya frenó no suma, así desde una IP no se bloquea al dueño', async () => {
+      const attempts = get<LoginAttemptsPort>(LOGIN_ATTEMPTS_PORT)
+      const key = { email: 'insistente@mail.com', clientIp: '203.0.113.8' }
+
+      await Promise.all(Array.from({ length: 150 }, () => attempts.attempt(key)))
+
+      await expect(
+        attempts.attempt({ email: key.email, clientIp: '203.0.113.9' }),
+      ).resolves.toEqual({ blockedForSeconds: null, lockedIfFailsSeconds: null })
+    })
   })
 
   it('el módulo exporta GetMeQuery', () => {

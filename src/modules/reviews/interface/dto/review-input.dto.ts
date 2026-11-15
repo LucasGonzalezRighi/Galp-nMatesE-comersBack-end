@@ -2,8 +2,13 @@ import { ApiSchema } from '@nestjs/swagger'
 import { IsNumber, IsString, Max, MaxLength, Min, MinLength, ValidateBy } from 'class-validator'
 
 import { ApiSchemaProperty } from '../../../../shared/infrastructure/http/openapi'
+import { StorableText } from '../../../../shared/infrastructure/http/storable-text.validator'
 import { maxMessage, RawValue, Trimmed } from '../../../identity/interface/dto/identity-fields'
-import { HoneypotField, NullableTextField } from '../../../support/interface/dto/public-form-fields'
+import {
+  HoneypotField,
+  NullableTextField,
+  PUBLIC_FORM_MESSAGES,
+} from '../../../support/interface/dto/public-form-fields'
 import type { ReviewInput } from '../../application/commands/submit-review.command'
 import { AUTHOR_NAME_MAX_LENGTH } from '../../domain/review-moderation'
 
@@ -41,9 +46,10 @@ export class ReviewInputDto {
   @NullableTextField(AUTHOR_NAME_MAX_LENGTH, maxMessage(AUTHOR_NAME_MAX_LENGTH))
   authorName!: string | null
 
-  /** Texto recortado, de 10 a 600 caracteres. */
+  /** Texto recortado, de 10 a 600 caracteres, que Postgres pueda guardar. */
   @ApiSchemaProperty({ type: 'string', minLength: 10, maxLength: 600 })
   @Trimmed()
+  @StorableText(PUBLIC_FORM_MESSAGES.invalidText)
   @MaxLength(600, { message: maxMessage(600) })
   @MinLength(10, { message: REVIEW_INPUT_MESSAGES.text })
   @IsString({ message: REVIEW_INPUT_MESSAGES.text })

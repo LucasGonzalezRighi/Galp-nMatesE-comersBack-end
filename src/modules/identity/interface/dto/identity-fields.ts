@@ -7,8 +7,17 @@
 import { applyDecorators } from '@nestjs/common'
 import { ApiProperty } from '@nestjs/swagger'
 import { Transform, type TransformFnParams } from 'class-transformer'
-import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator'
+import {
+  isEmail,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+  ValidateBy,
+} from 'class-validator'
 
+import { isStorableText } from '../../../../shared/domain/storable-text'
 import { ApiSchemaProperty, namedRef } from '../../../../shared/infrastructure/http/openapi'
 
 /** Textos de error de los formularios, los mismos que `MESSAGES` del front. */
@@ -108,8 +117,30 @@ export function Trimmed(letterCase?: 'upper' | 'lower'): PropertyDecorator {
 }
 
 /**
+ * `@IsEmail` que no rompe con un texto que Postgres no guarda: `isEmail` de validator.js lanza
+ * `URIError` (`encodeURI`) con una mitad suelta de un par sustituto, y el pedido respondía 500
+ * en vez de 422. Con el nombre `isEmail` el error sigue llevando `code: invalid_email`.
+ *
+ * @param message - Mensaje del error.
+ * @returns El decorador de la propiedad.
+ */
+function IsStorableEmail(message: string): PropertyDecorator {
+  return ValidateBy(
+    {
+      name: 'isEmail',
+      validator: {
+        validate: (value: unknown) =>
+          typeof value === 'string' && isStorableText(value) && isEmail(value),
+      },
+    },
+    { message },
+  )
+}
+
+/**
  * Email obligatorio (`Email`): recortado y en minúsculas, con formato válido y hasta 254
- * caracteres. Todos los errores dicen "Ingresá un email válido".
+ * caracteres. Todos los errores dicen "Ingresá un email válido" (también uno con U+0000 o con una
+ * mitad suelta de un par sustituto).
  *
  * @returns El decorador de la propiedad.
  */
@@ -120,7 +151,7 @@ export function EmailField(): PropertyDecorator {
     Trimmed('lower'),
     IsString({ message }),
     MaxLength(EMAIL_MAX_LENGTH, { message }),
-    IsEmail({}, { message }),
+    IsStorableEmail(message),
   )
 }
 

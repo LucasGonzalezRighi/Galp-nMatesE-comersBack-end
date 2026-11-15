@@ -14,7 +14,7 @@ export class LoginCustomerCommand {
    * @param users - Usuarios.
    * @param customers - Clientes.
    * @param hasher - Hash de contraseñas.
-   * @param attempts - Intentos por email e IP.
+   * @param attempts - Intentos por email e IP y por email solo.
    * @param sessions - Almacén de sesiones.
    * @param clock - Reloj, para `lastLoginAt`.
    */
@@ -33,7 +33,8 @@ export class LoginCustomerCommand {
    * @returns El cliente y su sesión nueva.
    * @throws {InvalidCredentialsError} Si el email no es de un cliente activo o la contraseña no
    *   coincide (sin decir cuál).
-   * @throws {LoginLockedError} Si el email está bloqueado para esa IP por intentos fallidos.
+   * @throws {LoginLockedError} Si el email está bloqueado para esa IP, o para todas por el tope
+   *   por email, por intentos fallidos.
    * @throws {Error} En español, si la cuenta no tiene cliente (dato inconsistente).
    */
   async execute(

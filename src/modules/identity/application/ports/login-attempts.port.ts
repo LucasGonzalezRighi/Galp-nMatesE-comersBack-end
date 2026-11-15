@@ -2,7 +2,7 @@
 export interface LoginAttemptKey {
   /** Email normalizado (exista o no la cuenta). */
   email: string
-  /** IP del cliente que intenta entrar. */
+  /** Cliente que intenta entrar: su IPv4, o la red /64 de su IPv6 (`clientIpOf`). */
   clientIp: string
 }
 
@@ -25,9 +25,13 @@ export interface LoginAttempt {
  * auditoría: NV-08 y NV-09): cada intento suma de forma atómica **antes** de verificar la
  * contraseña, así ni los intentos a la vez pasan el tope; con 10 en una ventana de 15 minutos (que
  * arranca con el primero) el par queda bloqueado por el resto de la ventana. Desde otra IP el mismo
- * email sigue entrando, así un anónimo no deja afuera al dueño de la cuenta. Un inicio de sesión
- * correcto borra la cuenta del par. **Falla abierta**: si el almacén no responde, nada queda
- * bloqueado y ninguna operación lanza.
+ * email sigue entrando, así un anónimo no deja afuera al dueño de la cuenta con pocos intentos.
+ *
+ * Además hay un **tope por email** (NV-09): los intentos que el par deja verificar suman a una
+ * ventana de una hora del email, y con 100 el email queda bloqueado desde cualquier IP (el mismo
+ * 429), así quien rota IPs tampoco prueba sin límite. La IP llega normalizada (IPv4, o la red /64
+ * de una IPv6). Un inicio de sesión correcto borra la cuenta del par y la del email. **Falla
+ * abierta**: si el almacén no responde, nada queda bloqueado y ninguna operación lanza.
  */
 export interface LoginAttemptsPort {
   /**
@@ -40,7 +44,7 @@ export interface LoginAttemptsPort {
   attempt(key: LoginAttemptKey): Promise<LoginAttempt>
 
   /**
-   * Olvida los intentos de un par (después de un inicio de sesión correcto).
+   * Olvida los intentos de un par y los del email (después de un inicio de sesión correcto).
    *
    * @param key - Email normalizado e IP del cliente.
    */

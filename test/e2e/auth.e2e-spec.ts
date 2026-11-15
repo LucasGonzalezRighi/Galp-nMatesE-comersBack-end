@@ -193,6 +193,26 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
       expect(after.body).toEqual([{ ...HOME, apartment: '5° B', label: null, id: firstId }])
     })
 
+    it('una etiqueta que Postgres no puede guardar → 422 en label (antes, 500); un email con una mitad suelta → 422', async () => {
+      const before = await call(browser, 'get', '/me/addresses')
+
+      const label = await call(browser, 'post', '/me/addresses', {
+        body: { ...HOME, label: 'Ca\u0000sa' },
+      })
+      const jar = newJar()
+      await refreshCsrf(jar)
+      const login = await call(jar, 'post', '/auth/login', {
+        body: { email: 'ana\udfff@mail.com', password: PASSWORD },
+      })
+      const after = await call(browser, 'get', '/me/addresses')
+
+      expect(label.status).toBe(422)
+      expect(firstError(label)).toMatchObject({ field: 'label', message: 'Ingresá un texto' })
+      expect(login.status).toBe(422)
+      expect(firstError(login)).toMatchObject({ field: 'email', code: 'invalid_email' })
+      expect(after.body).toEqual(before.body)
+    })
+
     it('POST /auth/logout → 204, cookie borrada y GET /me después → 401', async () => {
       const closed = { ...browser }
 

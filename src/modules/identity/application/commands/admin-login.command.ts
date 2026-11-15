@@ -18,7 +18,7 @@ export class AdminLoginCommand {
   /**
    * @param users - Usuarios.
    * @param hasher - Hash de contraseñas.
-   * @param attempts - Intentos por email e IP.
+   * @param attempts - Intentos por email e IP y por email solo.
    * @param sessions - Almacén de sesiones.
    * @param clock - Reloj, para `lastLoginAt`.
    */
@@ -35,7 +35,8 @@ export class AdminLoginCommand {
    * @returns El email y la sesión de admin nueva.
    * @throws {InvalidCredentialsError} Si el email no es de un admin activo o la contraseña no
    *   coincide (sin decir cuál).
-   * @throws {LoginLockedError} Si el email está bloqueado para esa IP por intentos fallidos.
+   * @throws {LoginLockedError} Si el email está bloqueado para esa IP, o para todas por el tope
+   *   por email, por intentos fallidos.
    */
   async execute(credentials: Credentials): Promise<AdminLoginResult> {
     const { users, hasher, attempts, clock } = this

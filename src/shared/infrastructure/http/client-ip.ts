@@ -1,3 +1,5 @@
+import { isIPv4, isIPv6 } from 'node:net'
+
 /** La parte de la app de Express que se usa para `trust proxy`. */
 export interface TrustProxyApp {
   /** `app.set` de Express. */
@@ -52,4 +54,66 @@ export function knownClientIp(req: ClientIpRequest): string | null {
   const trust = req.app.get('trust proxy fn')
   if (!isTrustProxyOn(req.app.get('trust proxy')) || !isTrustFn(trust)) return null
   return trust(ip, 0) ? null : ip
+}
+
+/** Grupos de 16 bits de una IPv6. */
+const IPV6_GROUPS = 8
+
+/** Grupos de la red /64 de una IPv6. */
+const NETWORK_GROUPS = 4
+
+/**
+ * Cliente con el que se cuentan los intentos (NV-09): una IPv4 queda igual; una IPv4 mapeada en
+ * IPv6 (`::ffff:203.0.113.7`, también en hexadecimal) cuenta como esa IPv4; una IPv6 cuenta como su
+ * red /64 (`2001:db8:1:2::/64`), porque quien tiene una IPv6 suele tener la /64 entera y podría
+ * estrenar una dirección en cada intento. La zona (`%eth0`) se ignora. Lo que no es una IP queda
+ * igual (recortado).
+ *
+ * @param ip - IP del cliente (`req.ip`).
+ * @returns La IPv4, la red /64 o el texto recortado.
+ * @example
+ * clientNetworkOf('::ffff:203.0.113.7') // '203.0.113.7'
+ * clientNetworkOf('2001:db8:1:2:aaaa::1') // '2001:db8:1:2::/64'
+ */
+export function clientNetworkOf(ip: string): string {
+  const address = ip.trim()
+  if (isIPv4(address)) return address
+  const [withoutZone = ''] = address.split('%')
+  if (!isIPv6(withoutZone)) return address
+  const groups = ipv6Groups(withoutZone)
+  const mapped = mappedIPv4Of(groups)
+  if (mapped !== null) return mapped
+  const network = groups.slice(0, NETWORK_GROUPS).map((group) => group.toString(16))
+  return `${network.join(':')}::/64`
+}
+
+/**
+ * Los 8 grupos de una IPv6 ya validada (`isIPv6`): expande `::` y pasa a dos grupos la IPv4 del
+ * final (`::ffff:1.2.3.4`).
+ */
+function ipv6Groups(address: string): number[] {
+  let text = address.toLowerCase()
+  const lastColon = text.lastIndexOf(':')
+  const tail = text.slice(lastColon + 1)
+  if (tail.includes('.')) {
+    const [a = 0, b = 0, c = 0, d = 0] = tail.split('.').map(Number)
+    const high = ((a << 8) | b).toString(16)
+    const low = ((c << 8) | d).toString(16)
+    text = `${text.slice(0, lastColon + 1)}${high}:${low}`
+  }
+  const parse = (part: string | undefined): number[] =>
+    part === undefined || part === '' ? [] : part.split(':').map((group) => parseInt(group, 16))
+  const [head, rest] = text.split('::')
+  const left = parse(head)
+  if (rest === undefined) return left
+  const right = parse(rest)
+  const zeros = Array<number>(IPV6_GROUPS - left.length - right.length).fill(0)
+  return [...left, ...zeros, ...right]
+}
+
+/** La IPv4 de una IPv6 mapeada (`::ffff:a.b.c.d`: 80 bits en 0 y 16 en 1), o `null`. */
+function mappedIPv4Of(groups: readonly number[]): string | null {
+  const [g0, g1, g2, g3, g4, g5, g6 = 0, g7 = 0] = groups
+  if (g0 !== 0 || g1 !== 0 || g2 !== 0 || g3 !== 0 || g4 !== 0 || g5 !== 0xffff) return null
+  return [g6 >> 8, g6 & 0xff, g7 >> 8, g7 & 0xff].join('.')
 }

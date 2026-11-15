@@ -25,7 +25,8 @@ import { SettingsController } from '../../../modules/settings/interface/settings
 import { applyTrustProxy } from '../http/client-ip'
 import { ProblemFilter } from '../http/problem.filter'
 import { createValidationPipe } from '../http/validation.pipe'
-import { PUBLIC_READ_RATE_LIMIT, skipPublicReadWithoutClientIp } from './public-read'
+import { skipWithoutKnownClientIp } from './client-rate-limit'
+import { PUBLIC_READ_RATE_LIMIT } from './public-read'
 
 /** Límite global de la app de prueba: chico (en producción son 120). */
 const TEST_LIMIT = 2
@@ -70,7 +71,7 @@ async function publicReadsApp(trustProxy: readonly string[]): Promise<NestExpres
     imports: [
       ThrottlerModule.forRoot({
         throttlers: [{ ttl: 60_000, limit: TEST_LIMIT }],
-        skipIf: skipPublicReadWithoutClientIp,
+        skipIf: skipWithoutKnownClientIp,
       }),
     ],
     controllers: [

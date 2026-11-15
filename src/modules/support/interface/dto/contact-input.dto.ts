@@ -2,6 +2,7 @@ import { ApiSchema } from '@nestjs/swagger'
 import { IsIn, IsString, MaxLength, MinLength } from 'class-validator'
 
 import { ApiSchemaProperty, namedRef } from '../../../../shared/infrastructure/http/openapi'
+import { StorableText } from '../../../../shared/infrastructure/http/storable-text.validator'
 import {
   EmailField,
   maxMessage,
@@ -25,9 +26,10 @@ import {
  */
 @ApiSchema({ name: 'ContactInput' })
 export class ContactInputDto {
-  /** Nombre, recortado, de 2 a 50 caracteres. */
+  /** Nombre, recortado, de 2 a 50 caracteres, que Postgres pueda guardar. */
   @ApiSchemaProperty({ type: 'string', minLength: 2, maxLength: 50 })
   @Trimmed()
+  @StorableText(PUBLIC_FORM_MESSAGES.invalidText)
   @MaxLength(50, { message: maxMessage(50) })
   @MinLength(2, { message: PUBLIC_FORM_MESSAGES.contactName })
   @IsString({ message: PUBLIC_FORM_MESSAGES.contactName })
@@ -47,9 +49,13 @@ export class ContactInputDto {
   @IsIn(CONTACT_REASONS, { message: PUBLIC_FORM_MESSAGES.invalidContactReason })
   reason!: ContactReason
 
-  /** Mensaje, recortado, de 10 a 2000 caracteres. */
+  /**
+   * Mensaje, recortado, de 10 a 2000 caracteres, que Postgres pueda guardar (con U+0000 llegaba a
+   * la base y respondía 500).
+   */
   @ApiSchemaProperty({ type: 'string', minLength: 10, maxLength: 2000 })
   @Trimmed()
+  @StorableText(PUBLIC_FORM_MESSAGES.invalidText)
   @MaxLength(2000, { message: maxMessage(2000) })
   @MinLength(10, { message: PUBLIC_FORM_MESSAGES.contactMessage })
   @IsString({ message: PUBLIC_FORM_MESSAGES.contactMessage })

@@ -276,6 +276,29 @@ describe('contacto, arrepentimiento y bandeja del dashboard (HTTP + Postgres + R
     expect(after).toEqual(before)
   })
 
+  it('el mensaje, el nombre y el email del contacto que Postgres no puede guardar → 422 sin guardar (antes, 500)', async () => {
+    const before = (await rows()).length
+
+    const message = await store('post', '/contact', {
+      ...CONTACT,
+      message: 'Pedí un mate\u0000 y no llegó todavía.',
+    })
+    const name = await store('post', '/contact', { ...CONTACT, name: 'Lucía\u0000 Gómez' })
+    const email = await store('post', '/contact', { ...CONTACT, email: 'lucia\ud800@example.com' })
+
+    expect(message.status).toBe(422)
+    expect(firstError(message)).toMatchObject({ field: 'message', message: 'Ingresá un texto' })
+    expect(name.status).toBe(422)
+    expect(firstError(name)).toMatchObject({ field: 'name', message: 'Ingresá un texto' })
+    expect(email.status).toBe(422)
+    expect(firstError(email)).toMatchObject({
+      field: 'email',
+      code: 'invalid_email',
+      message: 'Ingresá un email válido',
+    })
+    expect(await rows()).toHaveLength(before)
+  })
+
   it('NV-12: un comentario de varias líneas (el textarea de la tienda) se guarda igual', async () => {
     const comment = 'Me arrepentí de la compra.\nLlegó bien.\r\n\tGracias'
 

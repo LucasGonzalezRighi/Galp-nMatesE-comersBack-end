@@ -1827,3 +1827,42 @@ mutaciones: unitarias y, para lo que vive en Prisma o Redis, E2E con Testcontain
 - **NV-26 (6)** aceptada: motivo cierto (el 409 está en el contrato). **NV-20 (27)** pendiente (B7).
 - Riesgo nuevo anotado: NV-09 cuenta por email e IP, así que quien rota IPs (con IPv6, una red /64
   entera) ya no queda frenado por email.
+
+### Restos de la verificación (2026-11-15)
+
+Las tres decisiones de Lucas sobre lo que la verificación dejó pendiente. Cada punto, con su test en
+rojo antes del arreglo (unitario y E2E con Testcontainers).
+
+- **NV-09 (5)** arreglada del todo: el bloqueo de login cuenta por cliente normalizado
+  (`clientNetworkOf`: una IPv4 mapeada `::ffff:` es la misma IPv4, también en hexadecimal; una IPv6
+  cuenta por su red /64, así estrenar direcciones de la misma red no da intentos nuevos). Además hay
+  un tope por email (`login-fail-email:{email}`): 100 intentos verificados en una hora (desde el
+  primero) frenan ese email desde cualquier IP con el mismo 429 `rate_limited` y `Retry-After`. Solo
+  suma lo que el par email + IP deja verificar, así que desde una sola IP (40 por hora como mucho)
+  nadie bloquea al dueño: hacen falta al menos tres redes en la hora. Un inicio de sesión correcto
+  borra los dos contadores. Riesgo aceptado: con 100 fallos desde varias redes un anónimo deja al
+  admin afuera hasta una hora; el límite por IP del throttler (y el cupo de reseñas) sigue contando
+  por dirección, sin agrupar por /64.
+- **NV-16 (16)** arreglada del todo: `PaymentsController` ya no lleva `@SkipThrottle()`. Lleva
+  `@ClientRateLimit()`, el mecanismo de `@PublicRead()` llevado a `client-rate-limit.ts` (límite por
+  IP real del cliente, solo con `TRUST_PROXY`; los pedidos que origina un proxy de confianza no se
+  cuentan): 60 por minuto en `installments` y 30 por minuto en cada una de las demás rutas de pago.
+  El 429 ya estaba declarado en el contrato. El webhook de Mercado Pago sigue sin límite. Riesgo que
+  sigue: sin `TRUST_PROXY` (y un proxy que escriba `X-Forwarded-For`) las cuotas no tienen límite.
+- **Textos libres públicos** arreglados: el `message` y el `name` del contacto, el `text` de la
+  reseña y la etiqueta (`label`) de la libreta pasan por `isStorableText` (decorador compartido
+  `StorableText`, que también usan ya la dirección y el comentario del arrepentimiento): U+0000 o una
+  mitad suelta de un par sustituto dan 422 "Ingresá un texto" (`invalid_format`) en vez de 500. El
+  email de todos los formularios (contacto, arrepentimiento, registro, inicio de sesión,
+  recuperación, checkout y pagador) con una mitad suelta daba 500 porque `isEmail` de validator.js
+  lanza `URIError`: ahora da 422 `invalid_email`. Revisados y sin cambios: nombres y apellidos
+  (`PersonName`, patrón de letras), teléfono, número de calle, código postal, provincia y documento
+  (patrones o listas), contraseñas (no se guardan en texto) y la búsqueda del catálogo (ya devolvía
+  vacío con U+0000).
+
+Rojo antes del arreglo: 37 unitarios (24 de textos, 8 de NV-09 y 5 de NV-16) y 9 E2E (500 en
+contacto, reseña y libreta; 401 donde iba 429 en la /64, la IPv4 mapeada y el tope por email; 120
+verificados donde iban 100 en Redis; 200 y 204 donde iba 429 en cuotas y cancelación). Verificación
+final: `typecheck`, `lint` y `format:check` sin errores; `npm test` 118
+archivos y 1411 tests; `test:e2e` 27 archivos y 1 salteado, 782 tests y 4 salteados;
+`contract:check` 3 archivos, 454 tests y 1 salteado. Sin migraciones ni dependencias nuevas.

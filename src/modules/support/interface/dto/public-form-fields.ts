@@ -4,7 +4,7 @@
 
 import { applyDecorators } from '@nestjs/common'
 import { Transform, type TransformFnParams } from 'class-transformer'
-import { IsDefined, IsString, Matches, MaxLength, ValidateBy, ValidateIf } from 'class-validator'
+import { IsDefined, IsString, Matches, MaxLength, ValidateIf } from 'class-validator'
 
 import {
   ApiSchemaProperty,
@@ -12,7 +12,7 @@ import {
   nullableRef,
   type OpenApiSchema,
 } from '../../../../shared/infrastructure/http/openapi'
-import { isStorableText } from '../../../../shared/domain/storable-text'
+import { StorableText } from '../../../../shared/infrastructure/http/storable-text.validator'
 import { RawValue } from '../../../identity/interface/dto/identity-fields'
 import { ORDER_NUMBER_PATTERN } from '../../../orders/domain/order-number'
 
@@ -118,13 +118,7 @@ export function NullableTextField(max: number, tooLong: string): PropertyDecorat
     IsString({ message: PUBLIC_FORM_MESSAGES.required }),
     MaxLength(max, { message: tooLong }),
     // Sin esto, un comentario con U+0000 fallaba con 500 después de tomar el número del
-    // arrepentimiento, que se perdía (NV-12). Con este nombre el 422 lleva `invalid_format`.
-    ValidateBy(
-      {
-        name: 'invalidFormat',
-        validator: { validate: (value) => typeof value !== 'string' || isStorableText(value) },
-      },
-      { message: PUBLIC_FORM_MESSAGES.invalidText },
-    ),
+    // arrepentimiento, que se perdía (NV-12).
+    StorableText(PUBLIC_FORM_MESSAGES.invalidText),
   )
 }

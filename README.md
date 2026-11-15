@@ -43,9 +43,10 @@ socket, y todo lo que entra por la tienda (su servidor reescribe `/api/v1/*` hac
 los contadores por IP: login, registro, pedidos, formularios. Con una lista de IPs o redes CIDR (o
 `loopback`, `linklocal`, `uniquelocal`), Express toma la IP del cliente de `X-Forwarded-For`
 saltando solo esos proxies, y los límites cuentan por cliente. Además se activan el límite de las
-lecturas públicas (300 por minuto por IP real) y el cupo de 5 reseñas por IP por día; los pedidos
-que origina un proxy de confianza (el servidor de la tienda leyendo para armar sus páginas, sin
-`X-Forwarded-For`) no se cuentan en esos dos.
+lecturas públicas (300 por minuto por IP real), el de las rutas de pago (60 por minuto en las
+cuotas y 30 en cada una de las otras; el webhook nunca se limita) y el cupo de 5 reseñas por IP por
+día; los pedidos que origina un proxy de confianza (el servidor de la tienda, sin
+`X-Forwarded-For`) no se cuentan en esos tres.
 
 - La tienda tiene que mandar `X-Forwarded-For` con la IP real. Hoy no la agrega: el rewrite de
   Next 16 (`next.config.ts`, proxy sin `xfwd`) reenvía la cabecera que le llega y suma
@@ -259,7 +260,11 @@ cookies `__Host-` y un token CSRF por sesión
   - Cada ingreso cuenta por email **y por IP**, antes de verificar la contraseña: 10 intentos del
     mismo email desde la misma IP en 15 minutos y el siguiente responde 429 con `Retry-After` (el
     décimo también, si falla). Durante esa espera tampoco entra la contraseña correcta desde esa IP;
-    desde otra, sí.
+    desde otra, sí. La IP se normaliza: una IPv4 mapeada (`::ffff:203.0.113.7`) es esa IPv4 y una
+    IPv6 cuenta por su red /64.
+  - Además, un tope por email sin importar la IP: con 100 intentos verificados en una hora (los
+    que el bloqueo por IP ya frenó no suman) el email responde el mismo 429 desde cualquier IP hasta
+    que termina la hora. Un ingreso correcto borra los dos contadores.
   - La libreta guarda hasta 20 direcciones por cliente: la siguiente responde 422
     `validation_error` con el error en `addresses` (`address_book_full`).
   - Sin Redis, las rutas con sesión responden 503: ninguna deja pasar sin verificar.
@@ -306,7 +311,8 @@ Desde B4 el módulo `orders` implementa las 6 operaciones del carrito y los pedi
     `total_changed`, con un aviso por producto en `changes`, y la tienda muestra "Algo cambió en
     tu carrito".
   - Es la única ruta de pedidos con el límite global de 120 por minuto por IP. Las demás no tienen
-    límite, porque toda la tienda llega desde la IP de su servidor.
+    ese límite, porque toda la tienda llega desde la IP de su servidor; las de pago llevan el suyo,
+    por cliente y solo con `TRUST_PROXY` (ver "Pagos con Mercado Pago").
 - **Reserva de 30 minutos:** `reservedUntil` es `createdAt` + 30 minutos (una constante del
   contrato, no una variable de entorno). El stock queda en `inventory.reserved` y en una fila de
   `stock_reservations` por producto. El catálogo muestra como disponible `on_hand − reserved` (hasta
@@ -392,6 +398,9 @@ responden el mismo 404, y no usan la sesión ni `X-CSRF-Token`.
   - Con 3-D Secure responde `action_required` y `challenge.url`, y la tienda abre ese desafío en
     un `iframe`.
 - **Cuotas:** `POST …/installments` con `bin` y `paymentTypeId`. Con débito, solo 1 pago.
+- **Límites:** con `TRUST_PROXY`, 60 consultas de cuotas por minuto por cliente y 30 por minuto en
+  cada una de las otras rutas de pago (429 con `Retry-After`); sin ella no se cuentan (ver "Puertos
+  y orígenes").
 - **Cancelar:** `POST /orders/{number}/cancel-payment` cancela el intento en curso (también en
   Mercado Pago) y responde 204 siempre. El pedido queda vencible y conserva su reserva.
 - **Webhook:** `POST /webhooks/mercadopago` valida `x-signature`, registra el aviso una sola vez,

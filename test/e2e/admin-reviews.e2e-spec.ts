@@ -148,6 +148,19 @@ describe('reseñas nuevas y moderación del dashboard (HTTP + Postgres + Redis +
     expect(await prisma().review.count()).toBe(before)
   })
 
+  it('un texto que Postgres no puede guardar (U+0000) → 422 en text, sin guardar (antes, 500)', async () => {
+    const before = await prisma().review.count()
+
+    const response = await visitor('post', `/products/${SLUG}/reviews`, {
+      ...REVIEW,
+      text: 'Hermoso mate,\u0000 llegó impecable.',
+    })
+
+    expect(response.status).toBe(422)
+    expect(firstError(response)).toMatchObject({ field: 'text', message: 'Ingresá un texto' })
+    expect(await prisma().review.count()).toBe(before)
+  })
+
   it('GET /admin/reviews lista en cualquier estado, de la más nueva a la más vieja, y filtra', async () => {
     const all = await http('get', '/admin/reviews')
     const pending = await http('get', '/admin/reviews?status=pending')

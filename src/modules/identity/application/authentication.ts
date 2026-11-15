@@ -21,7 +21,10 @@ export interface Credentials {
   email: string
   /** Contraseña en claro. */
   password: string
-  /** IP del cliente: el bloqueo por intentos cuenta por email y por IP. */
+  /**
+   * Cliente (su IPv4 o la red /64 de su IPv6): el bloqueo por intentos cuenta por email y por
+   * cliente, y además por email solo (NV-09).
+   */
   clientIp: string
 }
 
@@ -58,13 +61,15 @@ const dummyHashes = new WeakMap<PasswordHasher, string>()
  * Comprueba las credenciales de un usuario de un rol sin revelar si el email existe ni si la
  * cuenta está deshabilitada: con un email desconocido igual verifica contra un hash fijo (mismo
  * costo) y todos los fallos responden lo mismo. Cada intento cuenta para el bloqueo por email e IP
- * **antes** de verificar (de forma atómica), así los intentos a la vez no pasan el tope.
+ * y para el tope por email **antes** de verificar (de forma atómica), así los intentos a la vez no
+ * pasan el tope.
  *
  * @param ports - Usuarios, hasher, intentos y reloj.
  * @param credentials - Email, contraseña e IP del cliente.
  * @param role - Rol que tiene que tener el usuario.
  * @returns El usuario y cuándo empezó la comprobación.
- * @throws {LoginLockedError} Si el par email + IP está bloqueado o este fallo lo bloquea.
+ * @throws {LoginLockedError} Si el par email + IP o el email (desde cualquier IP) está bloqueado,
+ *   o si este fallo lo bloquea.
  * @throws {InvalidCredentialsError} Si el email no existe, la contraseña no coincide, el rol es
  *   otro o la cuenta está deshabilitada ({@link AccountDisabledError}, que se responde igual).
  */
