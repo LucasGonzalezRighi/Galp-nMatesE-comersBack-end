@@ -202,6 +202,24 @@ describe('IdempotencyInterceptor', () => {
     expect(handlerCalls).toBe(1)
   })
 
+  it('la repetición queda atada al X-Order-Token: sin él o con otro no devuelve la respuesta guardada (NV-01)', async () => {
+    const first = await run({ 'idempotency-key': KEY, 'x-order-token': 'token-a' }, null)
+
+    const withoutToken = await rejection(run({ 'idempotency-key': KEY }, null))
+    const otherToken = await rejection(
+      run({ 'idempotency-key': KEY, 'x-order-token': 'token-b' }, null),
+    )
+    const sameToken = await run({ 'idempotency-key': KEY, 'x-order-token': 'token-a' }, null)
+
+    expect(withoutToken.getStatus()).toBe(422)
+    expect(withoutToken.getResponse()).toMatchObject({ type: 'idempotency_key_reused' })
+    expect(otherToken.getResponse()).toMatchObject({ type: 'idempotency_key_reused' })
+    expect(sameToken.value).toEqual(first.value)
+    expect(sameToken.res.headers['idempotent-replayed']).toBe('true')
+    expect(handlerCalls).toBe(1)
+    expect(repository.rows.get(`orders:${KEY}`)?.requestHash).not.toContain('token-a')
+  })
+
   it('la misma clave mientras se procesa responde 409 idempotency_in_progress', async () => {
     const pending = new Subject<unknown>()
     const { ctx } = context({ 'idempotency-key': KEY }, { items: [1] })

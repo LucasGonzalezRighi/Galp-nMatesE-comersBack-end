@@ -334,6 +334,29 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
       expect(await prisma().payment.count({ where: { orderId: order.id } })).toBe(1)
     })
 
+    it('NV-01: la Idempotency-Key sin el X-Order-Token (o con otro) no repite la preferencia: 422', async () => {
+      const order = await placeOrder()
+      const other = await placeOrder()
+      const key = randomUUID()
+
+      const first = await pay('preference', order.number, order.token, { key })
+      const withoutToken = await pay('preference', order.number, null, { key })
+      const otherToken = await pay('preference', order.number, other.token, { key })
+      const again = await pay('preference', order.number, order.token, { key })
+
+      expect(first.status).toBe(200)
+      expect(withoutToken.status).toBe(422)
+      expect(withoutToken.body).toMatchObject({ type: 'idempotency_key_reused' })
+      expect(withoutToken.headers['idempotent-replayed']).toBeUndefined()
+      const { initPoint } = first.body as { initPoint: string }
+      expect(JSON.stringify(withoutToken.body)).not.toContain(initPoint)
+      expect(otherToken.status).toBe(422)
+      expect(again.status).toBe(200)
+      expect(again.body).toEqual(first.body)
+      expect(again.headers['idempotent-replayed']).toBe('true')
+      expect(await prisma().payment.count({ where: { orderId: order.id } })).toBe(1)
+    })
+
     it('502 de la pasarela en la preferencia → el reintento con la misma clave crea otra, sin 500', async () => {
       const order = await placeOrder()
       const key = randomUUID()

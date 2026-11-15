@@ -89,18 +89,37 @@ function canonical(value: unknown): unknown {
 }
 
 /**
- * Hash SHA-256 de un pedido: método, ruta y cuerpo (con las claves ordenadas, así el orden de
- * los campos no cambia el hash).
+ * Cabeceras que son la credencial de una ruta idempotente (hoy, `X-Order-Token` de los pagos):
+ * entran en el hash, así la respuesta guardada solo se repite a quien manda la misma. Sin esto, la
+ * `Idempotency-Key` sola alcanzaba para leer la preferencia de un pedido ajeno sin su token: la
+ * repetición responde antes de que el handler mire el token (auditoría NV-01).
+ */
+const CREDENTIAL_HEADERS = ['x-order-token'] as const
+
+/**
+ * Hash SHA-256 de un pedido: método, ruta, cuerpo (con las claves ordenadas, así el orden de los
+ * campos no cambia el hash) y, si vienen, las cabeceras de {@link CREDENTIAL_HEADERS}.
  *
  * @param method - Método HTTP.
  * @param url - Ruta con la query string.
  * @param body - Cuerpo ya parseado.
+ * @param headers - Cabeceras del pedido (en minúsculas, como las da Node).
  * @returns El hash en hexadecimal.
  */
-export function hashRequest(method: string, url: string, body: unknown): string {
-  return createHash('sha256')
-    .update(`${method} ${url}\n${JSON.stringify(canonical(body ?? null))}`)
-    .digest('hex')
+export function hashRequest(
+  method: string,
+  url: string,
+  body: unknown,
+  headers: Record<string, string | string[] | undefined> = {},
+): string {
+  const hash = createHash('sha256').update(
+    `${method} ${url}\n${JSON.stringify(canonical(body ?? null))}`,
+  )
+  for (const name of CREDENTIAL_HEADERS) {
+    const value = headers[name]
+    if (value !== undefined) hash.update(`\n${name}: ${JSON.stringify(value)}`)
+  }
+  return hash.digest('hex')
 }
 
 function readKey(headers: IdempotentRequest['headers']): string {
@@ -133,7 +152,8 @@ function readKey(headers: IdempotentRequest['headers']): string {
  * - clave nueva → ejecuta el handler y guarda status y cuerpo (vence a las 24 h);
  * - misma clave y mismo pedido ya completado → la respuesta guardada, con
  *   `Idempotent-Replayed: true`, sin ejecutar el handler;
- * - misma clave con otro pedido → 422 `idempotency_key_reused`;
+ * - misma clave con otro pedido (otro cuerpo, o sin el `X-Order-Token` del primero o con otro) →
+ *   422 `idempotency_key_reused`;
  * - misma clave mientras se procesa → 409 `idempotency_in_progress`.
  *
  * Si el handler falla, la clave se libera para poder reintentar. La respuesta repetida sale con
@@ -177,7 +197,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const result = await this.repository.begin({
       scope,
       key,
-      requestHash: hashRequest(req.method, req.originalUrl, req.body),
+      requestHash: hashRequest(req.method, req.originalUrl, req.body, req.headers),
       now,
       lockedUntil: new Date(now.getTime() + IDEMPOTENCY_LOCK_MS),
       expiresAt: new Date(now.getTime() + IDEMPOTENCY_KEY_TTL_MS),
