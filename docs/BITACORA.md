@@ -1804,3 +1804,26 @@ en la raíz sin tocar el contrato. Entre paréntesis, el número de `findings.js
   `Vary: Cookie` (cuenta, admin, pedido por token, pagos y `GET /auth/csrf`).
 - Fuera de la tanda: las cuotas (`installments`) siguen sin límite propio (aviso de la tanda B) y el
   `message` del contacto sigue sin pasar por `isStorableText`.
+
+### Verificación independiente de las tandas A, B y C
+
+Cada arreglo se revirtió en una copia (worktree) y su test volvió a rojo por la razón esperada (41
+mutaciones: unitarias y, para lo que vive en Prisma o Redis, E2E con Testcontainers).
+
+- **NV-01 (3)** arreglada en la raíz en esta verificación: tapar la clave en pino era un síntoma; la
+  repetición idempotente devolvía la preferencia sin `X-Order-Token` (E2E en rojo: 200). Ahora el
+  hash incluye el token y sin él (o con otro) responde 422 `idempotency_key_reused`.
+- **NV-02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 17, 19, 22, 23, 24, 25, 27, 28, 29, 30, 31 y
+  32** arregladas y probadas: el test de cada una falla sin su arreglo. **NV-33** arreglada (solo
+  configuración, sin test).
+- **NV-14 (9)** arreglada en parte: el tope por email funciona, pero rotando emails solo acotan el
+  límite por IP de `POST /orders` (120 por minuto) y el stock.
+- **NV-15 (10)** aceptada en lo que queda: cada pedido válido sigue gastando un número y el formato
+  `^GLP-[0-9]{5}$` lo fija el contrato; ampliarlo es una decisión del contrato.
+- **NV-16 (16)** arreglada en parte: el tope de 10 intentos funciona; las cuotas siguen sin límite y
+  todo `PaymentsController` sigue con `@SkipThrottle()`. Pendiente.
+- **NV-18 (23) y NV-21 (28)** arregladas con condición: sin `TRUST_PROXY` (y un proxy que escriba
+  `X-Forwarded-For`) no cuentan; motivo cierto (con la IP del socket se frenaría a toda la tienda).
+- **NV-26 (6)** aceptada: motivo cierto (el 409 está en el contrato). **NV-20 (27)** pendiente (B7).
+- Riesgo nuevo anotado: NV-09 cuenta por email e IP, así que quien rota IPs (con IPv6, una red /64
+  entera) ya no queda frenado por email.
