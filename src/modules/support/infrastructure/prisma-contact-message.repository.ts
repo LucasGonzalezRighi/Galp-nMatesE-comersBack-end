@@ -66,16 +66,17 @@ export class PrismaContactMessageRepository implements ContactMessageRepository 
   /**
    * {@inheritDoc ContactMessageRepository.nextWithdrawalNumber}
    *
-   * @throws {Error} Si la secuencia no devuelve un valor (o ya pasó de 999.999: Postgres falla).
+   * @throws {Error} Si la secuencia no devuelve un valor (o ya pasó de `WITHDRAWAL_CODE_MAX`:
+   *   Postgres falla).
    */
   async nextWithdrawalNumber(): Promise<number> {
     const rows = await this.prisma.$queryRaw<
-      { n: number }[]
-    >`SELECT nextval('withdrawal_code_seq')::int AS n`
+      { n: bigint }[]
+    >`SELECT nextval('withdrawal_code_seq') AS n`
     const value = rows[0]?.n
     if (value === undefined)
       throw new Error('La secuencia de arrepentimientos no devolvió un valor')
-    return value
+    return Number(value)
   }
 
   /**
@@ -87,13 +88,13 @@ export class PrismaContactMessageRepository implements ContactMessageRepository 
    * @throws {Error} Si la secuencia no devuelve un valor.
    */
   async peekWithdrawalNumber(): Promise<number> {
-    const rows = await this.prisma.$queryRaw<{ n: number }[]>`
-      SELECT (CASE WHEN is_called THEN last_value + 1 ELSE last_value END)::int AS n
+    const rows = await this.prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT (CASE WHEN is_called THEN last_value + 1 ELSE last_value END) AS n
       FROM withdrawal_code_seq`
     const value = rows[0]?.n
     if (value === undefined)
       throw new Error('La secuencia de arrepentimientos no devolvió un valor')
-    return value
+    return Number(value)
   }
 
   /** {@inheritDoc ContactMessageRepository.create} */

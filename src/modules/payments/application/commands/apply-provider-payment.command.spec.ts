@@ -338,3 +338,58 @@ describe('ApplyProviderPaymentCommand · estados (Ruling B-39)', () => {
     )
   })
 })
+
+describe('NV-04: dos aplicaciones a la vez del mismo pedido se hacen de a una', () => {
+  it('la segunda mitad de un Checkout Pro dividido no se devuelve como duplicada', async () => {
+    const { h, order, access, payment } = setup()
+    await h.preference.execute(access, KEY_1)
+    // Mitad A aprobada: el pedido sigue pending_payment con pending.
+    await h.apply.execute(payment({ providerPaymentId: '4000000001', amountArs: 30000 }), WEBHOOK)
+    // Mitad B en proceso: queda un intento inactivo pending con su id de pago.
+    const halfB = payment({
+      providerPaymentId: '4000000002',
+      amountArs: ORDER_TOTAL - 30000,
+      status: 'in_process',
+      statusDetail: 'pending_contingency',
+      approvedAt: null,
+    })
+    const pendingB = await h.apply.execute(halfB, WEBHOOK)
+    expect(pendingB?.status).toBe('pending')
+    const approvedB = { ...halfB, status: 'approved', statusDetail: 'accredited' }
+
+    // El webhook de la aprobación y la conciliación del mismo pago, a la vez.
+    await Promise.all([
+      h.apply.execute(approvedB, WEBHOOK),
+      h.apply.execute(approvedB, { attemptId: pendingB?.id ?? null, source: 'reconcile' }),
+    ])
+
+    expect(h.payments.refunds.size).toBe(0)
+    expect(h.gateway.callsTo('refundPayment')).toEqual([])
+    expect(h.orders.get(order.id).status).toBe('paid')
+    expect(h.orders.paidCount).toBe(1)
+  })
+
+  it('un aprobado y un rechazado a la vez sobre la misma preferencia no se pisan', async () => {
+    const { h, order, access, payment } = setup()
+    await h.preference.execute(access, KEY_1)
+    const approved = payment({ providerPaymentId: '5000000001' })
+    const rejected = payment({
+      providerPaymentId: '5000000002',
+      status: 'rejected',
+      statusDetail: 'cc_rejected_other_reason',
+      approvedAt: null,
+    })
+
+    await Promise.all([h.apply.execute(approved, WEBHOOK), h.apply.execute(rejected, WEBHOOK)])
+
+    const attempts = h.payments.of(order.id)
+    expect(attempts.find((attempt) => attempt.providerPaymentId === '5000000001')?.status).toBe(
+      'approved',
+    )
+    expect(attempts.find((attempt) => attempt.providerPaymentId === '5000000002')?.status).toBe(
+      'rejected',
+    )
+    expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
+    expect(h.payments.refunds.size).toBe(0)
+  })
+})

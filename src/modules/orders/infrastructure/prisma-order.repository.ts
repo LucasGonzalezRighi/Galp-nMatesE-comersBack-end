@@ -24,10 +24,12 @@ import { EXPIRABLE_PAYMENT_STATUSES } from '../domain/order-status'
 import {
   isExpirable,
   markExpired,
+  MAX_PENDING_ORDERS_PER_CUSTOMER,
   type Order,
   type OrderDraft,
   placeOrder,
 } from '../domain/order.entity'
+import { TooManyPendingOrdersError } from '../domain/orders-errors'
 import type { ReservationLine } from '../domain/pricing'
 import {
   ORDER_INCLUDE,
@@ -42,6 +44,9 @@ import {
  * pedidos a la vez el pool se llena) y 15 s para terminar.
  */
 export const TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const
+
+/** Prefijo del bloqueo consultivo del cupo de pedidos pendientes de un cliente. */
+const PENDING_LOCK_PREFIX = 'orders:pending:'
 
 /** Máximo de pedidos de un barrido (vencimiento y conciliación de pagos). */
 const MAX_DUE_LIMIT = 1_000
@@ -304,6 +309,39 @@ export function assertBatchLimit(limit: number, label: string): void {
 }
 
 /**
+ * Cupo de pedidos pendientes (auditoría NV-14): bloquea al cliente (su email y, si hay, su id, en
+ * ese orden para que dos altas no se traben entre sí) y cuenta sus pedidos `pending_payment`.
+ * Corre antes de reservar y de `nextval`, así un pedido rechazado no gasta stock ni número.
+ *
+ * @param tx - Transacción abierta.
+ * @param draft - Pedido a guardar (contacto, dueño y hora de creación).
+ * @throws {TooManyPendingOrdersError} 429 si ya tiene `MAX_PENDING_ORDERS_PER_CUSTOMER`.
+ */
+async function assertPendingQuota(tx: Prisma.TransactionClient, draft: OrderDraft): Promise<void> {
+  const email = draft.contact.email.toLowerCase()
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PENDING_LOCK_PREFIX + 'email:' + email}))`
+  if (draft.customerId !== null) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PENDING_LOCK_PREFIX + 'customer:' + draft.customerId}))`
+  }
+  const pending = await tx.order.aggregate({
+    where: {
+      status: 'pending_payment',
+      OR: [
+        { contactEmail: email },
+        ...(draft.customerId === null ? [] : [{ customerId: draft.customerId }]),
+      ],
+    },
+    _count: { _all: true },
+    _min: { reservedUntil: true },
+  })
+  if (pending._count._all < MAX_PENDING_ORDERS_PER_CUSTOMER) return
+  throw new TooManyPendingOrdersError(
+    pending._min.reservedUntil ?? draft.createdAt,
+    draft.createdAt,
+  )
+}
+
+/**
  * Libera las reservas activas de un pedido: devuelve las unidades a `inventory` (por id de
  * producto, como al reservar) y las marca `released`. La usan el vencimiento y la cancelación del
  * dashboard (`PrismaAdminOrderRepository`).
@@ -356,6 +394,7 @@ export class PrismaOrderRepository implements OrderRepository {
     const reservation = byProductId(draft.reservation)
     try {
       const { order, keys } = await this.prisma.$transaction(async (tx) => {
+        await assertPendingQuota(tx, draft)
         await reserveStock(tx, reservation)
         const placed = placeOrder(draft, formatOrderNumber(await nextOrderSequence(tx)))
         await insertOrder(tx, placed, reservation)

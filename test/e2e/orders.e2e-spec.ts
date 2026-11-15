@@ -287,6 +287,77 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       expect(await reservedOf(mate.id)).toBe(reservedBefore + 1)
     })
 
+    /** Suma unidades del mate para que los pedidos de estos casos no le saquen stock a los demás. */
+    async function moreMates(units: number): Promise<void> {
+      await prisma().inventory.update({
+        where: { productId: mate.id },
+        data: { onHand: { increment: units } },
+      })
+    }
+
+    it('NV-15: una dirección que Postgres no puede guardar responde 422 y no gasta un número', async () => {
+      await moreMates(2)
+      const body = await orderBody([mateLine(mate.id)], 'numeros@ejemplo.com')
+      const first = await createdOrder(newJar(), body)
+
+      const broken = []
+      for (const street of ['Calle\u0000Falsa', 'Calle \ud800 Falsa', 'Calle Falsa \udfff']) {
+        broken.push(
+          await placeOrder(newJar(), {
+            ...body,
+            shipping: { method: 'home', address: { ...HOME_ADDRESS, street } },
+          }),
+        )
+      }
+      const second = await createdOrder(newJar(), body)
+
+      expect(broken.map((response) => response.status)).toEqual([422, 422, 422])
+      expect(broken[0]?.body).toMatchObject({
+        type: 'validation_error',
+        errors: [
+          { field: 'shipping.address.street', code: 'invalid_format', message: 'Ingresá un texto' },
+        ],
+      })
+      expect(Number(second.order.number.slice(4))).toBe(Number(first.order.number.slice(4)) + 1)
+    })
+
+    it('NV-14: el cuarto pedido pendiente de pago del mismo cliente → 429 sin reservar stock', async () => {
+      await moreMates(4)
+      const body = await orderBody([mateLine(mate.id)], 'acaparadora@ejemplo.com')
+      for (let index = 0; index < 3; index += 1) await createdOrder(newJar(), body)
+      const reservedBefore = await reservedOf(mate.id)
+
+      const fourth = await placeOrder(newJar(), {
+        ...body,
+        customer: { ...(body.customer as object), email: 'ACAPARADORA@ejemplo.com' },
+      })
+
+      expect(fourth.status).toBe(429)
+      expect(fourth.body).toMatchObject({ type: 'rate_limited', status: 429 })
+      expect(Number(fourth.headers['retry-after'])).toBeGreaterThan(0)
+      expect(Number(fourth.headers['retry-after'])).toBeLessThanOrEqual(30 * 60)
+      expect(await reservedOf(mate.id)).toBe(reservedBefore)
+      // Otro email sigue pudiendo comprar.
+      await createdOrder(newJar(), await orderBody([mateLine(mate.id)], 'otra@ejemplo.com'))
+    })
+
+    it('NV-14: seis pedidos a la vez del mismo email → solo tres quedan pendientes', async () => {
+      await moreMates(3)
+      const body = await orderBody([mateLine(mate.id)], 'rafaga@ejemplo.com')
+
+      const responses = await Promise.all(
+        Array.from({ length: 6 }, () => placeOrder(newJar(), body)),
+      )
+
+      expect(responses.filter((response) => response.status === 201)).toHaveLength(3)
+      expect(responses.filter((response) => response.status === 429)).toHaveLength(3)
+      expect(
+        await prisma().order.count({
+          where: { contactEmail: 'rafaga@ejemplo.com', status: 'pending_payment' },
+        }),
+      ).toBe(3)
+    })
+
     it('doble envío: misma clave y mismo cuerpo a la vez → un solo pedido, mismo número y token', async () => {
       const body = await orderBody([mateLine(mate.id)], 'doble@ejemplo.com')
       const key = randomUUID()
@@ -450,8 +521,17 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       })
       const body = await orderBody([mateLine(coquito.id)], 'carrera@ejemplo.com')
 
+      // Diez personas distintas: una sola tendría el tope de 3 pendientes (NV-14).
       const responses = await Promise.all(
-        Array.from({ length: 10 }, () => placeOrder(newJar(), body)),
+        Array.from({ length: 10 }, (_, index) =>
+          placeOrder(newJar(), {
+            ...body,
+            customer: {
+              ...(body.customer as object),
+              email: `carrera${String(index)}@ejemplo.com`,
+            },
+          }),
+        ),
       )
 
       const statuses = responses.map((response) => response.status).sort()
@@ -470,7 +550,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       ).toBe(5)
       expect(
         await prisma().order.count({
-          where: { contactEmail: 'carrera@ejemplo.com', status: 'pending_payment' },
+          where: { contactEmail: { startsWith: 'carrera' }, status: 'pending_payment' },
         }),
       ).toBe(5)
     })

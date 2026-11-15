@@ -26,7 +26,7 @@ export interface ContactMessageRepository {
    * Toma el próximo número de comprobante de arrepentimiento (`withdrawal_code_seq`). Nunca se
    * repite, aunque el arrepentimiento no se guarde.
    *
-   * @returns Un entero de 1 a 999.999.
+   * @returns Un entero de 1 a `WITHDRAWAL_CODE_MAX` (12 dígitos).
    */
   nextWithdrawalNumber(): Promise<number>
 
@@ -34,7 +34,7 @@ export interface ContactMessageRepository {
    * Número que tomaría el próximo arrepentimiento, sin consumirlo (para responderle a un bot sin
    * gastar un código de `withdrawal_code_seq`).
    *
-   * @returns Un entero desde 1; pasa de 999.999 solo si la secuencia ya se agotó.
+   * @returns Un entero desde 1; pasa de `WITHDRAWAL_CODE_MAX` solo si la secuencia ya se agotó.
    */
   peekWithdrawalNumber(): Promise<number>
 

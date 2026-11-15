@@ -561,6 +561,103 @@ describe('adaptadores de pagos (Postgres + Redis + BullMQ)', () => {
     })
   })
 
+  describe('seguridad, tanda B (auditoría NV-04 y NV-06)', () => {
+    // Los pedidos de estos casos no le sacan stock de yerba a los demás.
+    beforeAll(async () => {
+      await prisma().inventory.update({
+        where: { productId: await productId('yerba-canarias-1-kg') },
+        data: { onHand: { increment: 10 } },
+      })
+    })
+
+    it('NV-04: serializeByOrder no deja correr dos trabajos del mismo pedido a la vez', async () => {
+      const order = await placeOrder()
+      const other = await placeOrder()
+      const log: string[] = []
+      const work = (name: string, ms: number) => async () => {
+        log.push(`${name} entra`)
+        await new Promise((resolve) => setTimeout(resolve, ms))
+        log.push(`${name} sale`)
+        return name
+      }
+
+      const results = await Promise.all([
+        payments().serializeByOrder(order.id, work('a', 300)),
+        payments().serializeByOrder(order.id, work('b', 10)),
+      ])
+      const [entered] = log
+      const parallel = await Promise.all([
+        payments().serializeByOrder(order.id, work('c', 200)),
+        payments().serializeByOrder(other.id, work('d', 10)),
+      ])
+
+      expect(results).toEqual(['a', 'b'])
+      expect(log.slice(0, 4)).toEqual(
+        entered === 'a entra'
+          ? ['a entra', 'a sale', 'b entra', 'b sale']
+          : ['b entra', 'b sale', 'a entra', 'a sale'],
+      )
+      // Otro pedido no espera: "d" termina mientras "c" sigue adentro.
+      expect(parallel).toEqual(['c', 'd'])
+      expect(log.indexOf('d sale')).toBeLessThan(log.indexOf('c sale'))
+    })
+
+    it('NV-04: la mitad B de un pago dividido aplicada dos veces a la vez no se devuelve', async () => {
+      const order = await placeOrder(undefined, 'mp_redirect')
+      const { attempt } = await payments().startAttempt(
+        attemptFor(order, { method: 'mp_redirect' }),
+      )
+      const halfA = approvedPayment(order, { amountArs: 1_000 })
+      await apply().execute(halfA, { attemptId: null, source: 'webhook' })
+      const halfB = approvedPayment(order, {
+        amountArs: order.totalArs - 1_000,
+        status: 'in_process',
+        statusDetail: 'pending_contingency',
+        approvedAt: null,
+      })
+      const pendingB = await apply().execute(halfB, { attemptId: null, source: 'webhook' })
+      expect(pendingB?.status).toBe('pending')
+      const approvedB = { ...halfB, status: 'approved', statusDetail: 'accredited' }
+
+      await Promise.all([
+        apply().execute(approvedB, { attemptId: null, source: 'webhook' }),
+        apply().execute(approvedB, { attemptId: pendingB?.id ?? null, source: 'reconcile' }),
+      ])
+
+      expect(await prisma().refund.count({ where: { payment: { orderId: order.id } } })).toBe(0)
+      const row = await prisma().order.findUniqueOrThrow({ where: { id: order.id } })
+      expect(row.status).toBe('paid')
+      expect((await payments().findById(attempt.id))?.status).toBe('approved')
+    })
+
+    it('NV-06: cancelActive no toca un intento aprobado ni el estado del pedido', async () => {
+      const order = await placeOrder()
+      const { attempt } = await payments().startAttempt(attemptFor(order))
+      await apply().execute(approvedPayment(order), { attemptId: attempt.id, source: 'card' })
+
+      await expect(payments().cancelActive(attempt.id)).resolves.toBeNull()
+
+      expect(await payments().findById(attempt.id)).toMatchObject({
+        status: 'approved',
+        isActive: false,
+      })
+      expect(await paymentStatusOf(order)).toBe('approved')
+    })
+
+    it('NV-06: cancelActive cancela el activo y sincroniza payment_status', async () => {
+      const order = await placeOrder()
+      const { attempt } = await payments().startAttempt(attemptFor(order))
+      await payments().update(attempt.id, { status: 'pending', providerPaymentId: '2900000001' })
+
+      const cancelled = await payments().cancelActive(attempt.id)
+
+      expect(cancelled).toMatchObject({ id: attempt.id, status: 'cancelled', isActive: false })
+      expect(await paymentStatusOf(order)).toBe('cancelled')
+      await expect(payments().cancelActive(attempt.id)).resolves.toBeNull()
+      await expect(payments().cancelActive('no-es-un-uuid')).resolves.toBeNull()
+    })
+  })
+
   describe('colas', () => {
     it('un job de payment-webhooks procesa una notificación registrada', async () => {
       const order = await placeOrder()

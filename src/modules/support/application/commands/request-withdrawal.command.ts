@@ -23,11 +23,11 @@ export interface WithdrawalInput {
 }
 
 /**
- * Registra una solicitud de arrepentimiento con su código de comprobante (`ARR-` y 6 dígitos de
- * `withdrawal_code_seq`) y la deja en la bandeja como mensaje `withdrawal`. Con el campo trampa
- * lleno responde el código que seguiría, sin consumirlo ni guardar nada (como el mock: el próximo
- * real puede llevar el mismo número), así los bots no agotan la secuencia. El comprobante por mail
- * llega en B7: por ahora queda la intención en el log, sin datos personales.
+ * Registra una solicitud de arrepentimiento con su código de comprobante (`ARR-` y 6 dígitos o
+ * más de `withdrawal_code_seq`) y la deja en la bandeja como mensaje `withdrawal`. Con el campo
+ * trampa lleno responde el código que seguiría, sin consumirlo ni guardar nada (como el mock: el
+ * próximo real puede llevar el mismo número), así los bots no agotan la secuencia. El comprobante
+ * por mail llega en B7: por ahora queda la intención en el log, sin datos personales.
  */
 export class RequestWithdrawalCommand {
   /**
@@ -48,7 +48,8 @@ export class RequestWithdrawalCommand {
    *
    * @param input - Solicitud ya validada.
    * @returns El comprobante con el código.
-   * @throws {RangeError} En español, si la secuencia ya pasó de 999.999 (nunca con la trampa).
+   * @throws {RangeError} En español, si la secuencia ya pasó de `WITHDRAWAL_CODE_MAX` (nunca con la
+   *   trampa).
    * @throws {TypeError} En español, si falta el nombre o el email.
    */
   async execute(input: WithdrawalInput): Promise<WithdrawalReceipt> {

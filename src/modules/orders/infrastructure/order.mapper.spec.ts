@@ -49,6 +49,7 @@ function row(overrides: Partial<OrderRow> = {}): OrderRow {
     placedAt: CREATED_AT,
     paidAt: null,
     cancelledAt: null,
+    paymentReconciledAt: null,
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
     items: [

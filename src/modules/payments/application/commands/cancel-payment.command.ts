@@ -8,7 +8,8 @@ import { releaseAtProvider } from '../release-attempt'
  * `POST /orders/{number}/cancel-payment`: el intento activo queda `cancelled` (y
  * `orders.payment_status = cancelled`, así el pedido vuelve a ser vencible); el pedido conserva la
  * reserva y `reservedUntil`. Sin intento activo no hace nada (204 igual). Cancela en Mercado Pago
- * con mejor esfuerzo (Ruling B-44).
+ * con mejor esfuerzo (Ruling B-44). La cancelación es condicional (auditoría NV-06): si el intento
+ * se aprobó (o se cerró) entre la lectura y la escritura, no se toca ni se cancela en la pasarela.
  */
 export class CancelPaymentCommand {
   /**
@@ -33,11 +34,7 @@ export class CancelPaymentCommand {
     const order = await this.access.payable(access)
     const active = await this.payments.findActiveByOrder(order.id)
     if (active === null) return
-    const cancelled = await this.payments.update(active.id, {
-      status: 'cancelled',
-      isActive: false,
-      challengeUrl: null,
-    })
-    await releaseAtProvider(this.gateway, cancelled, this.logger)
+    const cancelled = await this.payments.cancelActive(active.id)
+    if (cancelled !== null) await releaseAtProvider(this.gateway, cancelled, this.logger)
   }
 }

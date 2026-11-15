@@ -138,3 +138,29 @@ export class CartTotalTooBigError extends CartValidationError {
     this.name = 'CartTotalTooBigError'
   }
 }
+
+/** Espera de `Retry-After` cuando el pedido pendiente más viejo ya pasó su reserva (pago en curso). */
+const PENDING_ORDERS_FALLBACK_RETRY_SECONDS = 60
+
+/**
+ * 429 `rate_limited` de `POST /orders` (auditoría NV-14): el cliente ya tiene
+ * `MAX_PENDING_ORDERS_PER_CUSTOMER` pedidos esperando el pago. `Retry-After` dice cuánto falta
+ * para que venza la reserva del más viejo.
+ */
+export class TooManyPendingOrdersError extends DomainError {
+  /**
+   * @param oldestReservedUntil - Fin de la reserva del pedido pendiente más viejo.
+   * @param now - Hora actual.
+   */
+  constructor(oldestReservedUntil: Date, now: Date) {
+    const seconds = Math.ceil((oldestReservedUntil.getTime() - now.getTime()) / 1000)
+    super(
+      'rate_limited',
+      429,
+      'Ya tenés varios pedidos esperando el pago. Pagá uno o esperá a que venza para hacer otro.',
+      'Demasiados pedidos pendientes',
+      { retryAfterSeconds: seconds >= 1 ? seconds : PENDING_ORDERS_FALLBACK_RETRY_SECONDS },
+    )
+    this.name = 'TooManyPendingOrdersError'
+  }
+}

@@ -137,8 +137,9 @@ async function eventsOf(t: Harness, action: () => Promise<unknown>) {
 describe('ListAdminOrdersQuery', () => {
   it('trae los pedidos del más nuevo al más viejo, de a 20, con el total', async () => {
     const t = setup()
+    // Un email por pedido: más de 3 pendientes del mismo cliente dan 429 (NV-14).
     for (let index = 0; index < 22; index += 1) {
-      await t.place()
+      await t.place('Lucía', 'Pérez', `lucia${String(index)}@ejemplo.com`)
       t.clock.advance(1_000)
     }
 

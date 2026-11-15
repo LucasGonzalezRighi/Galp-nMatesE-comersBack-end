@@ -31,6 +31,22 @@ export class OrderNotPayableError extends DomainError {
   }
 }
 
+/**
+ * 409 `order_not_payable` (auditoría NV-16): el pedido ya tuvo `MAX_PAYMENT_ATTEMPTS_PER_ORDER`
+ * intentos de pago y no admite otro (la tienda descarta el pedido y la persona arma uno nuevo).
+ */
+export class PaymentAttemptsExhaustedError extends DomainError {
+  constructor() {
+    super(
+      'order_not_payable',
+      409,
+      'El pedido llegó al máximo de intentos de pago. Armalo de nuevo para pagar.',
+      'El pedido no admite un pago nuevo',
+    )
+    this.name = 'PaymentAttemptsExhaustedError'
+  }
+}
+
 /** 401 `invalid_signature`: la firma `x-signature` del webhook no coincide (o no hay secreto). */
 export class InvalidSignatureError extends DomainError {
   constructor() {

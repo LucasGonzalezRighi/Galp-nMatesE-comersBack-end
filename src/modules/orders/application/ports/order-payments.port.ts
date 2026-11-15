@@ -104,13 +104,24 @@ export interface OrderPaymentsPort {
   markRefunded(orderId: string, at: Date, events: OrderEvents): Promise<Order | null>
   /**
    * Pedidos `pending_payment` con `payment_status` `pending` o `action_required` y
-   * `reserved_until <= cutoff`, ordenados por `reserved_until` (los concilia el barrido).
+   * `reserved_until <= cutoff` (los concilia el barrido), rotando (auditoría NV-28): primero los
+   * que nunca se conciliaron y después los que hace más que no se concilian
+   * (`payment_reconciled_at`, ver {@link markReconciled}); a la par, el de `reserved_until` más
+   * viejo. Así un lote lleno de pedidos estacionados no deja sin conciliar a los demás.
    *
    * @param cutoff - Límite de `reserved_until` (incluido).
    * @param limit - Máximo de pedidos a devolver.
-   * @returns Los pedidos, del `reserved_until` más viejo al más nuevo.
+   * @returns Los pedidos, en ese orden.
    */
   listAwaitingPayment(cutoff: Date, limit: number): Promise<OrderForPayment[]>
+  /**
+   * Anota que la conciliación pasó por el pedido (le haya ido bien o mal): la próxima pasada
+   * empieza por los demás.
+   *
+   * @param orderId - Id del pedido.
+   * @param at - Hora de la pasada.
+   */
+  markReconciled(orderId: string, at: Date): Promise<void>
 }
 
 /** Token de inyección del {@link OrderPaymentsPort} (lo exporta `OrdersModule`). */

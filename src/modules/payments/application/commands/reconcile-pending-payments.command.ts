@@ -53,6 +53,10 @@ function isInFlight(attempt: PaymentAttempt): attempt is InFlightAttempt {
  * completó a tiempo), el pedido queda con `payment_status = cancelled` y vence en la misma pasada.
  * Si la devolución falla, la fila queda `failed` y B6 la muestra como "Devolvelo desde Mercado
  * Pago".
+ *
+ * Cada pedido que pasa por la conciliación (bien o mal) queda anotado y la pasada siguiente empieza
+ * por los demás (auditoría NV-28): un lote lleno de pedidos estacionados ya no deja sin conciliar a
+ * los más nuevos.
  */
 export class ReconcilePendingPaymentsCommand {
   /**
@@ -102,6 +106,11 @@ export class ReconcilePendingPaymentsCommand {
           `No se pudo conciliar el pago del pedido ${order.number}: ${errorMessage(error)}`,
         )
       }
+      await this.orders.markReconciled(order.id, now).catch((error: unknown) => {
+        this.logger.warn(
+          `No se pudo anotar la conciliación del pedido ${order.number}: ${errorMessage(error)}`,
+        )
+      })
     }
     return result
   }

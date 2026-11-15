@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createPaymentsHarness,
@@ -45,10 +45,20 @@ function setup() {
   return { h, order, access, payByCard }
 }
 
-function webhook(dataId: string, overrides: Partial<IncomingWebhook> = {}): IncomingWebhook {
+/** `ts` de `x-signature` (segundos) para la hora dada. */
+function tsAt(at: Date): string {
+  return String(Math.floor(at.getTime() / 1000))
+}
+
+function webhook(
+  dataId: string,
+  overrides: Partial<IncomingWebhook> = {},
+  signedAt?: Date,
+): IncomingWebhook {
   const requestId = overrides.requestId === undefined ? 'req-1' : overrides.requestId
+  const ts = signedAt === undefined ? undefined : tsAt(signedAt)
   return {
-    signatureHeader: signWebhook({ dataId, requestId }),
+    signatureHeader: signWebhook({ dataId, requestId, ...(ts === undefined ? {} : { ts }) }),
     requestId,
     dataIdQuery: dataId,
     topicQuery: null,
@@ -64,7 +74,8 @@ describe('ReceiveWebhookCommand', () => {
     const [row] = [...h.webhookEvents.rows.values()]
     expect(row).toMatchObject({
       provider: 'mercadopago',
-      eventId: '12345',
+      // La clave de deduplicación sale de lo firmado (NV-05), no del body.id.
+      eventId: `id:1234567890;request-id:req-1;ts:${tsAt(h.clock.now())};`,
       type: 'payment',
       action: 'payment.updated',
       resourceId: '1234567890',
@@ -146,12 +157,101 @@ describe('ReceiveWebhookCommand', () => {
     expect(h.queue.jobs).toEqual([row?.id])
   })
 
-  it('sin id en el cuerpo deduplica por x-request-id', async () => {
+  it('sin id en el cuerpo deduplica igual, por lo firmado', async () => {
     const { h } = setup()
     const input = webhook('1', { body: { type: 'payment', data: { id: '1' } } })
     await h.receive.execute(input)
     await expect(h.receive.execute(input)).resolves.toBe('duplicate')
-    expect([...h.webhookEvents.rows.values()][0]?.eventId).toBe('req-1')
+    expect([...h.webhookEvents.rows.values()][0]?.eventId).toBe(
+      `id:1;request-id:req-1;ts:${tsAt(h.clock.now())};`,
+    )
+  })
+
+  describe('NV-05: frescura de la firma y deduplicación por lo firmado', () => {
+    it('una firma de hace más de 5 minutos → InvalidSignatureError, sin filas ni jobs', async () => {
+      const { h } = setup()
+      const signedAt = h.clock.now()
+      h.clock.advance(5 * MINUTE + 1_000)
+      await expect(h.receive.execute(webhook('1', {}, signedAt))).rejects.toBeInstanceOf(
+        InvalidSignatureError,
+      )
+      expect(h.webhookEvents.rows.size).toBe(0)
+      expect(h.queue.jobs).toEqual([])
+    })
+
+    it('la misma tupla repetida 30 días después con otro body.id ya no se registra', async () => {
+      const { h } = setup()
+      const signed = webhook('424242', {}, h.clock.now())
+      await expect(h.receive.execute(signed)).resolves.toBe('registered')
+      h.clock.advance(30 * 24 * 60 * MINUTE)
+      const replay = { ...signed, body: { id: '1002', type: 'payment', data: { id: '424242' } } }
+      await expect(h.receive.execute(replay)).rejects.toBeInstanceOf(InvalidSignatureError)
+      expect(h.webhookEvents.rows.size).toBe(1)
+      expect(h.queue.jobs).toHaveLength(1)
+    })
+
+    it('dentro de los 5 minutos, la misma tupla con otro body.id es un duplicado', async () => {
+      const { h } = setup()
+      const signed = webhook('424242', {}, h.clock.now())
+      await h.receive.execute(signed)
+      h.clock.advance(4 * MINUTE)
+      const replay = {
+        ...signed,
+        body: { id: '1002', type: 'payment', data: { id: '424242' }, extra: 'x'.repeat(1000) },
+      }
+      await expect(h.receive.execute(replay)).resolves.toBe('duplicate')
+      expect(h.webhookEvents.rows.size).toBe(1)
+      expect(h.queue.jobs).toHaveLength(1)
+    })
+
+    it('firmada sin data.id: repetirla con otro body.data.id no elige otro pago', async () => {
+      const { h } = setup()
+      const unsigned = webhook('999', {
+        dataIdQuery: null,
+        signatureHeader: signWebhook({ dataId: null, requestId: 'req-1' }),
+      })
+      await expect(h.receive.execute(unsigned)).resolves.toBe('registered')
+      const replay = { ...unsigned, body: { id: '2002', type: 'payment', data: { id: '998' } } }
+      await expect(h.receive.execute(replay)).resolves.toBe('duplicate')
+      expect([...h.webhookEvents.rows.values()].map((row) => row.resourceId)).toEqual(['999'])
+    })
+
+    it('acepta un reloj de Mercado Pago corrido hasta 5 minutos (para atrás o para adelante)', async () => {
+      const { h } = setup()
+      const now = h.clock.now().getTime()
+      await expect(
+        h.receive.execute(webhook('1', { requestId: 'req-a' }, new Date(now - 5 * MINUTE))),
+      ).resolves.toBe('registered')
+      await expect(
+        h.receive.execute(webhook('1', { requestId: 'req-b' }, new Date(now + 5 * MINUTE))),
+      ).resolves.toBe('registered')
+      await expect(
+        h.receive.execute(webhook('1', { requestId: 'req-c' }, new Date(now + 6 * MINUTE))),
+      ).rejects.toBeInstanceOf(InvalidSignatureError)
+    })
+
+    it('un ts en milisegundos también se entiende', async () => {
+      const { h } = setup()
+      const ms = String(h.clock.now().getTime())
+      const input = webhook('1', {
+        signatureHeader: signWebhook({ dataId: '1', requestId: 'req-1', ts: ms }),
+      })
+      await expect(h.receive.execute(input)).resolves.toBe('registered')
+      h.clock.advance(6 * MINUTE)
+      const late = webhook('1', {
+        requestId: 'req-2',
+        signatureHeader: signWebhook({ dataId: '1', requestId: 'req-2', ts: ms }),
+      })
+      await expect(h.receive.execute(late)).rejects.toBeInstanceOf(InvalidSignatureError)
+    })
+
+    it('un ts que no es un número → InvalidSignatureError', async () => {
+      const { h } = setup()
+      const input = webhook('1', {
+        signatureHeader: signWebhook({ dataId: '1', requestId: 'req-1', ts: 'mañana' }),
+      })
+      await expect(h.receive.execute(input)).rejects.toBeInstanceOf(InvalidSignatureError)
+    })
   })
 
   it('data.id con mayúsculas se firma en minúsculas', async () => {
@@ -301,6 +401,35 @@ describe('ReprocessWebhookEventsCommand', () => {
 })
 
 describe('ReconcilePendingPaymentsCommand (Ruling B-42)', () => {
+  it('NV-28: con más pedidos en espera que el lote, la pasada siguiente toma los que no se miraron', async () => {
+    const h = createPaymentsHarness()
+    const start = h.clock.now().getTime()
+    const waiting = [0, 1, 2].map((index) =>
+      h.orders.add({
+        paymentStatus: 'pending',
+        reservedUntil: new Date(start + index * MINUTE),
+      }),
+    )
+    h.clock.advance(60 * MINUTE)
+    const seen: string[] = []
+    const listByOrder = h.payments.listByOrder.bind(h.payments)
+    vi.spyOn(h.payments, 'listByOrder').mockImplementation((orderId) => {
+      seen.push(orderId)
+      return listByOrder(orderId)
+    })
+
+    await h.reconcile.execute(2)
+    h.clock.advance(MINUTE)
+    await h.reconcile.execute(2)
+    h.clock.advance(MINUTE)
+    await h.reconcile.execute(2)
+
+    // Primero los que nunca se conciliaron; después, el que hace más que no se mira (y, a la par,
+    // el de reserva más vieja): cada pedido tiene su turno.
+    const [first, second, third] = waiting.map((order) => order.id)
+    expect(seen).toEqual([first, second, third, first, second, first])
+  })
+
   it('un pending que Mercado Pago ya aprobó queda pagado', async () => {
     const { h, order, payByCard } = setup()
     const { stored } = await payByCard('CONT')

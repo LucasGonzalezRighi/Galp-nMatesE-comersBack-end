@@ -42,7 +42,13 @@ export interface OutboxJobData {
   payload: unknown
 }
 
-function toJobData(event: PendingOutboxEvent): OutboxJobData {
+/**
+ * Arma los datos del job de un evento (los mismos campos que guarda `outbox_events`).
+ *
+ * @param event - El evento guardado.
+ * @returns Los datos del job.
+ */
+export function toJobData(event: Omit<PendingOutboxEvent, 'dispatchFailures'>): OutboxJobData {
   return {
     id: event.id,
     type: event.type,
@@ -54,10 +60,23 @@ function toJobData(event: PendingOutboxEvent): OutboxJobData {
 }
 
 /**
- * Relay del outbox: cada {@link OUTBOX_RELAY_INTERVAL_MS} toma hasta 50 eventos sin publicar,
- * los encola en `outbox` con `jobId` = id del evento (si se publica dos veces, BullMQ no duplica
- * el job) y marca `published_at`. Si Redis falla, suma un intento y reintenta en la próxima
- * vuelta.
+ * `jobId` de un evento en su vuelta de despacho: el id del evento la primera vez y
+ * `<id>-r<vuelta>` cuando se reabrió (BullMQ guarda el job fallido con el id anterior y no
+ * aceptaría otro igual).
+ *
+ * @param event - Id y despachos fallidos del evento.
+ * @returns El `jobId`.
+ */
+export function outboxJobId(event: Pick<PendingOutboxEvent, 'id' | 'dispatchFailures'>): string {
+  return event.dispatchFailures === 0 ? event.id : `${event.id}-r${String(event.dispatchFailures)}`
+}
+
+/**
+ * Relay del outbox: cada {@link OUTBOX_RELAY_INTERVAL_MS} toma hasta 50 eventos sin publicar (y ya
+ * disponibles), los encola en `outbox` con el `jobId` de {@link outboxJobId} (si se publica dos
+ * veces en la misma vuelta, BullMQ no duplica el job) y marca `published_at`. Si Redis falla, suma
+ * un intento y reintenta en la próxima vuelta. Un evento cuyo despacho agotó los reintentos vuelve
+ * acá con otra vuelta (lo reabre `OutboxDispatcherProcessor`, auditoría NV-29).
  *
  * Con `NODE_ENV=test` el temporizador no arranca: los E2E llaman a {@link runOnce} a mano.
  */
@@ -116,7 +135,7 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
   private async publishPending(): Promise<number> {
     let events: PendingOutboxEvent[]
     try {
-      events = await this.outbox.findUnpublished(OUTBOX_BATCH_SIZE)
+      events = await this.outbox.findUnpublished(this.clock.now(), OUTBOX_BATCH_SIZE)
     } catch (error) {
       this.warn(`No se pudieron leer los eventos del outbox: ${errorMessage(error)}`)
       return 0
@@ -126,7 +145,7 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
       try {
         await this.queue.add(event.type, toJobData(event), {
           ...OUTBOX_JOB_OPTIONS,
-          jobId: event.id,
+          jobId: outboxJobId(event),
         })
         await this.outbox.markPublished(event.id, this.clock.now())
         published += 1

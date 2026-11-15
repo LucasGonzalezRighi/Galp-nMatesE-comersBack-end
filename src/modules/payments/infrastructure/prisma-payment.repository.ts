@@ -14,8 +14,23 @@ import type {
   PaymentRepository,
   Refund,
 } from '../application/ports/payment.repository.port'
-import type { PaymentAttempt, PaymentProvider } from '../domain/payment-attempt'
+import {
+  ACTIVE_PAYMENT_STATUSES,
+  MAX_PAYMENT_ATTEMPTS_PER_ORDER,
+  type PaymentAttempt,
+  type PaymentProvider,
+} from '../domain/payment-attempt'
+import { PaymentAttemptsExhaustedError } from '../domain/payments-errors'
 import { toPaymentAttempt, toPaymentUpdate, toRefund } from './payment.mapper'
+
+/** Prefijo de la clave del bloqueo consultivo de pagos de un pedido (`hashtext` de prefijo + id). */
+const ORDER_PAYMENT_LOCK_PREFIX = 'payments:order:'
+
+/**
+ * Transacción que sostiene el bloqueo de pagos de un pedido: hasta 5 s para conseguir conexión y
+ * 60 s para terminar (adentro puede haber llamadas a Mercado Pago, de hasta 10 s cada una).
+ */
+const ORDER_LOCK_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 60_000 } as const
 
 /** Orden de los intentos de un pedido: del más viejo al más nuevo (con el id como desempate). */
 const OLDEST_FIRST = [
@@ -72,6 +87,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
     input: NewPaymentAttempt,
   ): Promise<{ attempt: PaymentAttempt; previous: PaymentAttempt | null }> {
     return this.prisma.$transaction(async (tx) => {
+      // El pedido bloqueado: dos intentos a la vez no pasan los dos el tope.
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${input.orderId}::uuid FOR UPDATE`
+      const attempts = await tx.payment.count({ where: { orderId: input.orderId } })
+      if (attempts >= MAX_PAYMENT_ATTEMPTS_PER_ORDER) throw new PaymentAttemptsExhaustedError()
       const [previous] = await tx.payment.updateManyAndReturn({
         where: { orderId: input.orderId, isActive: true },
         data: { status: 'cancelled', isActive: false, challengeUrl: null },
@@ -176,6 +195,39 @@ export class PrismaPaymentRepository implements PaymentRepository {
       }
       return toPaymentAttempt(updated)
     }, TRANSACTION_OPTIONS)
+  }
+
+  /** {@inheritDoc PaymentRepository.cancelActive} */
+  async cancelActive(id: string): Promise<PaymentAttempt | null> {
+    if (!UUID_PATTERN.test(id)) return null
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM payments WHERE id = ${id}::uuid FOR UPDATE`
+      const { count } = await tx.payment.updateMany({
+        where: { id, isActive: true, status: { in: [...ACTIVE_PAYMENT_STATUSES] } },
+        data: { status: 'cancelled', isActive: false, challengeUrl: null },
+      })
+      if (count === 0) return null
+      const cancelled = await tx.payment.findUniqueOrThrow({ where: { id } })
+      // Estaba activo, así que manda en orders.payment_status (como en `update`).
+      await tx.order.update({
+        where: { id: cancelled.orderId },
+        data: { paymentStatus: cancelled.status },
+      })
+      return toPaymentAttempt(cancelled)
+    }, TRANSACTION_OPTIONS)
+  }
+
+  /**
+   * {@inheritDoc PaymentRepository.serializeByOrder}
+   *
+   * La transacción solo sostiene el bloqueo (`work` usa sus propias conexiones del pool): el
+   * bloqueo consultivo no choca con las escrituras de `work`, así que no se traba consigo mismo.
+   */
+  async serializeByOrder<T>(orderId: string, work: () => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${ORDER_PAYMENT_LOCK_PREFIX + orderId}))`
+      return work()
+    }, ORDER_LOCK_TRANSACTION_OPTIONS)
   }
 
   /** {@inheritDoc PaymentRepository.createRefund} */

@@ -95,8 +95,12 @@ export interface PaymentRepository {
    * implementación Prisma escribe esa columna de `orders` con el mismo `tx` (excepción explícita
    * al ADR 0001, Ruling B-45); no pasa por `OrderPaymentsPort.setPaymentStatus`.
    *
+   * Con el pedido bloqueado, si ya tiene `MAX_PAYMENT_ATTEMPTS_PER_ORDER` intentos no crea nada
+   * (auditoría NV-16).
+   *
    * @param input - Intento nuevo.
    * @returns El intento creado y el anterior ya cancelado (o `null` si no había).
+   * @throws {PaymentAttemptsExhaustedError} 409 si el pedido llegó al tope de intentos.
    */
   startAttempt(
     input: NewPaymentAttempt,
@@ -168,6 +172,27 @@ export interface PaymentRepository {
     patch: PaymentAttemptPatch,
     events?: readonly NewDomainEvent[],
   ): Promise<PaymentAttempt>
+  /**
+   * Cancela el intento (`cancelled`, inactivo, sin desafío) solo si sigue activo: con el intento
+   * bloqueado, si otro proceso ya lo aprobó, lo rechazó o lo cerró, no lo toca (auditoría NV-06: un
+   * estado final nunca retrocede). Sincroniza `orders.payment_status` como {@link update}.
+   *
+   * @param id - Id del intento.
+   * @returns El intento cancelado, o `null` si ya no estaba activo (o no existe).
+   */
+  cancelActive(id: string): Promise<PaymentAttempt | null>
+  /**
+   * Corre `work` con el pedido bloqueado para los pagos: otra llamada con el mismo pedido espera a
+   * que termine (auditoría NV-04: dos aplicaciones de la misma aprobación no deciden con lecturas
+   * viejas). La implementación Prisma toma `pg_advisory_xact_lock` en una transacción abierta
+   * mientras dura `work`, así que vale entre instancias. `work` no puede volver a pedir el bloqueo
+   * del mismo pedido (esperaría para siempre).
+   *
+   * @param orderId - Id del pedido.
+   * @param work - Lo que se hace con el bloqueo.
+   * @returns Lo que devuelve `work`.
+   */
+  serializeByOrder<T>(orderId: string, work: () => Promise<T>): Promise<T>
   /**
    * @param input - Devolución nueva (status `pending`).
    * @returns La devolución guardada.

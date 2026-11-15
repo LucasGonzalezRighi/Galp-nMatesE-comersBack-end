@@ -316,7 +316,12 @@ docker compose exec -T postgres psql -U galpon -d galpon -c "UPDATE orders SET r
 
 **Números de pedido:** salen de la secuencia `order_number_seq` de Postgres (de 10001 a 99999, sin
 ciclo), como `GLP-` y cinco dígitos. Un 409 no gasta número (se pide después de reservar), pero un
-fallo posterior sí, porque una secuencia no vuelve atrás. `npm run db:reset` la reinicia. Los
+fallo posterior sí, porque una secuencia no vuelve atrás. Por eso lo que se puede rechazar antes se
+rechaza antes (auditoría NV-15): el campo trampa responde un pedido inventado, una dirección con
+caracteres que Postgres no guarda da 422 y el cuarto pedido pendiente del mismo cliente da 429, sin
+tocar la secuencia. El contrato fija los cinco dígitos (`^GLP-[0-9]{5}$`), así que el límite son
+89.999 pedidos: a 50 por día alcanzan para unos 4 años; antes del 80 % (`SELECT last_value FROM
+order_number_seq` > 82000) hay que ampliar el formato en el contrato. `npm run db:reset` la reinicia. Los
 `GLP-09001…09012` quedan para la demo del admin (B6). El seed no siembra pedidos y nunca baja
 `on_hand` por debajo de lo reservado: deja la fila como está y lo avisa.
 

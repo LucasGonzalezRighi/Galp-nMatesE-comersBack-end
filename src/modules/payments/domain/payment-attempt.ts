@@ -14,6 +14,13 @@ export const ACTIVE_PAYMENT_STATUSES = [
   'action_required',
 ] as const satisfies readonly PaymentStatus[]
 
+/**
+ * Intentos de pago que puede tener un pedido (filas de `payments`, con los que registra el
+ * webhook): el siguiente responde 409 `order_not_payable` sin llamar a Mercado Pago (auditoría
+ * NV-16; las rutas de pago no tienen límite de tasa y cada intento gasta cuota de la pasarela).
+ */
+export const MAX_PAYMENT_ATTEMPTS_PER_ORDER = 10
+
 /** Pasarela de un intento (columna `payments.provider`). */
 export type PaymentProvider = 'mercadopago'
 

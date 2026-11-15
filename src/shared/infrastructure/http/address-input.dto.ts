@@ -8,9 +8,11 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateBy,
 } from 'class-validator'
 
 import { type Province, PROVINCES } from '../../../modules/identity/domain/province'
+import { isStorableText } from '../../domain/storable-text'
 import { ApiSchemaProperty, namedRef } from './openapi'
 
 // La capa `infrastructure` compartida no puede importar la `interface` de identidad (fronteras de
@@ -50,6 +52,23 @@ function Trimmed(upper = false): PropertyDecorator {
   })
 }
 
+/**
+ * Rechaza (422, "Ingresá un texto") un texto que Postgres no guarda tal cual (ver
+ * {@link isStorableText}): sin esto el pedido fallaba con 500 después de tomar su número (NV-15).
+ */
+function StorableText(): PropertyDecorator {
+  return ValidateBy(
+    {
+      // Con este nombre el 422 lleva `code: invalid_format`, como un `@Matches`.
+      name: 'invalidFormat',
+      validator: {
+        validate: (value: unknown) => typeof value !== 'string' || isStorableText(value),
+      },
+    },
+    { message: ADDRESS_MESSAGES.invalidText },
+  )
+}
+
 // class-validator corre los decoradores de abajo hacia arriba: el tipo va último (abajo) para que
 // el primer error de cada campo sea el mismo que el del schema de zod del front.
 
@@ -63,6 +82,7 @@ export class AddressInputDto {
   /** Calle, recortada (de 2 a 80 caracteres). */
   @ApiProperty({ type: 'string', minLength: 2, maxLength: 80 })
   @Trimmed()
+  @StorableText()
   @MaxLength(80, { message: maxMessage(80) })
   @MinLength(2, { message: ADDRESS_MESSAGES.required })
   @IsString({ message: ADDRESS_MESSAGES.required })
@@ -80,6 +100,7 @@ export class AddressInputDto {
   @ApiProperty({ type: 'string', nullable: true, maxLength: 10 })
   @Trimmed()
   @IsOptional()
+  @StorableText()
   @MaxLength(10, { message: maxMessage(10) })
   @IsString({ message: ADDRESS_MESSAGES.invalidText })
   apartment?: string | null
@@ -94,6 +115,7 @@ export class AddressInputDto {
   /** Ciudad o localidad, recortada (de 2 a 60 caracteres). */
   @ApiProperty({ type: 'string', minLength: 2, maxLength: 60 })
   @Trimmed()
+  @StorableText()
   @MaxLength(60, { message: maxMessage(60) })
   @MinLength(2, { message: ADDRESS_MESSAGES.required })
   @IsString({ message: ADDRESS_MESSAGES.required })

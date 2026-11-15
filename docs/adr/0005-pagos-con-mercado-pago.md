@@ -99,7 +99,11 @@ Todo eso había que probarlo **sin credenciales** de Mercado Pago, porque todav�
      único camino de Checkout Pro.
    - El webhook valida la firma con un HMAC propio en tiempo constante, con `data.id` en
      minúsculas y los segmentos ausentes omitidos. Sin secreto configurado responde 401 siempre.
-   - Después registra el evento una vez (deduplica por el `id` del cuerpo o por `x-request-id`),
+     Desde la auditoría de seguridad (NV-05, 2026-11-14) también rechaza con 401 un `ts` a más de
+     5 minutos del reloj (segundos o milisegundos).
+   - Después registra el evento una vez (deduplica por el manifiesto firmado
+     `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`; hasta NV-05 era el `id` del cuerpo, que no
+     está firmado, o `x-request-id`),
      lo encola en `payment-webhooks` (`jobId` = id del evento, 5 intentos) y responde 200. Si
      Redis no acepta el job, lo procesa en línea antes de responder.
    - Un evento repetido que todavía no se procesó se vuelve a encolar. El barrido retoma los

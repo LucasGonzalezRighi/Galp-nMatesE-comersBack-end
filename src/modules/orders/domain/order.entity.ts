@@ -21,6 +21,13 @@ export type { ShippingAddress } from './shipping'
 /** Minutos que se reserva el stock de un pedido sin pagar (constante del contrato). */
 export const ORDER_RESERVATION_MINUTES = 30
 
+/**
+ * Pedidos `pending_payment` que puede tener a la vez un mismo cliente (el de la sesión, o el email
+ * del checkout): el cuarto responde 429 sin reservar stock ni gastar un número (auditoría NV-14,
+ * para que un checkout anónimo no retenga todo el inventario).
+ */
+export const MAX_PENDING_ORDERS_PER_CUSTOMER = 3
+
 /** Datos de contacto copiados al pedido, tal como se escribieron en el checkout. */
 export interface OrderContact {
   /** Email, en minúsculas. */

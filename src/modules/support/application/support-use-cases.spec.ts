@@ -94,14 +94,16 @@ const WITHDRAWAL = {
 }
 
 describe('formatWithdrawalCode', () => {
-  it('arma ARR- con 6 dígitos', () => {
+  it('arma ARR- con 6 dígitos como mínimo y sigue con más después de 999.999 (NV-12)', () => {
     expect(formatWithdrawalCode(1)).toBe('ARR-000001')
     expect(formatWithdrawalCode(999_999)).toBe('ARR-999999')
+    expect(formatWithdrawalCode(1_000_000)).toBe('ARR-1000000')
+    expect(formatWithdrawalCode(999_999_999_999)).toBe('ARR-999999999999')
   })
 
   it('rechaza un número fuera de rango o con decimales', () => {
     expect(() => formatWithdrawalCode(0)).toThrow(RangeError)
-    expect(() => formatWithdrawalCode(1_000_000)).toThrow(RangeError)
+    expect(() => formatWithdrawalCode(1_000_000_000_000)).toThrow(RangeError)
     expect(() => formatWithdrawalCode(1.5)).toThrow(RangeError)
   })
 })
@@ -200,12 +202,21 @@ describe('RequestWithdrawalCommand', () => {
 
   it('con la secuencia agotada, la trampa igual responde un código válido (no un 500)', async () => {
     const messages = new InMemoryMessages()
-    messages.sequence = 999_999
+    messages.sequence = 999_999_999_999
 
     await expect(
       new RequestWithdrawalCommand(messages).execute({ ...WITHDRAWAL, website: 'spam' }),
-    ).resolves.toEqual({ code: 'ARR-999999' })
-    expect(messages.sequence).toBe(999_999)
+    ).resolves.toEqual({ code: 'ARR-999999999999' })
+    expect(messages.sequence).toBe(999_999_999_999)
+  })
+
+  it('NV-12: pasado 999.999 los arrepentimientos siguen (antes, RangeError y 500)', async () => {
+    const messages = new InMemoryMessages()
+    messages.sequence = 999_999
+
+    await expect(new RequestWithdrawalCommand(messages).execute(WITHDRAWAL)).resolves.toEqual({
+      code: 'ARR-1000000',
+    })
   })
 })
 

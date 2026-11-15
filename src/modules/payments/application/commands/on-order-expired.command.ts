@@ -23,7 +23,8 @@ function holdsCollectedBalance(attempt: PaymentAttempt): boolean {
  * cliente reemplazó por otro intento) deja el pedido vencible, y sin esto vencería con la plata
  * cobrada. La devolución es idempotente por `(intento, motivo)`, así que un evento repetido no
  * devuelve dos veces; si la pasarela falla, la fila queda `failed` y se avisa ("Devolvelo desde
- * Mercado Pago").
+ * Mercado Pago"). La cancelación del activo es condicional (auditoría NV-06): un intento que se
+ * aprobó en el medio no se pisa, y su devolución `late_approval` sale del mismo recorrido.
  */
 export class OnOrderExpiredCommand {
   /**
@@ -44,14 +45,8 @@ export class OnOrderExpiredCommand {
    */
   async execute(orderId: string): Promise<void> {
     const active = await this.payments.findActiveByOrder(orderId)
-    if (active !== null) {
-      const cancelled = await this.payments.update(active.id, {
-        status: 'cancelled',
-        isActive: false,
-        challengeUrl: null,
-      })
-      await releaseAtProvider(this.gateway, cancelled, this.logger)
-    }
+    const cancelled = active === null ? null : await this.payments.cancelActive(active.id)
+    if (cancelled !== null) await releaseAtProvider(this.gateway, cancelled, this.logger)
     for (const attempt of await this.payments.listByOrder(orderId)) {
       if (holdsCollectedBalance(attempt)) {
         await this.refunds.refundApproved(attempt, 'late_approval')

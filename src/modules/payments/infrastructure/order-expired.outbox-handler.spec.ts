@@ -1,6 +1,9 @@
 import type { Job, Queue } from 'bullmq'
 import { describe, expect, it, vi } from 'vitest'
 
+import { FixedClock } from '../../../../test/support/identity'
+import { InMemoryOutboxEvents } from '../../../../test/support/outbox'
+
 import { OutboxDispatcherProcessor } from '../../../shared/infrastructure/outbox/outbox-dispatcher.processor'
 import { OutboxHandlerRegistry } from '../../../shared/infrastructure/outbox/outbox-handler.registry'
 import type { OutboxJobData } from '../../../shared/infrastructure/outbox/outbox.relay'
@@ -19,12 +22,18 @@ function outboxProcessor(execute: () => Promise<void> = () => Promise.resolve())
   const processor = new OutboxDispatcherProcessor(
     registry,
     queue as unknown as Queue<OutboxJobData>,
+    outbox,
+    new FixedClock(),
   )
   return { handler, onExpired, processor, registry }
 }
 
+/** Eventos que el despachador relee antes de actuar (NV-27): cada `job` guarda el suyo. */
+const outbox = new InMemoryOutboxEvents()
+
 function job(name: string, data: Partial<OutboxJobData>): Job<OutboxJobData> {
-  return { id: 'j1', name, data: { id: 'j1', type: name, ...data } } as Job<OutboxJobData>
+  const saved = outbox.save({ id: 'j1', type: name, payload: data.payload })
+  return { id: 'j1', name, data: saved } as Job<OutboxJobData>
 }
 
 describe('OrderExpiredOutboxHandler', () => {

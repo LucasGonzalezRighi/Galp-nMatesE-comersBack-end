@@ -675,3 +675,107 @@ describe('GetInstallmentsQuery', () => {
     ).rejects.toThrow('El BIN tiene que tener de 6 a 8 dígitos')
   })
 })
+
+describe('NV-06: cancelar no pisa una aprobación que llegó en el medio', () => {
+  it('cancel-payment: si el intento se aprobó entre la lectura y la cancelación, queda aprobado', async () => {
+    const { h, order, access } = setup()
+    await h.card.execute(access, cardInput('CONT'), KEY_1)
+    const attempt = only(h.payments.of(order.id))
+    const stored = h.gateway.payments.get(attempt.providerPaymentId ?? '')
+    if (stored === undefined) throw new Error('No se creó el pago')
+    const read = h.payments.findActiveByOrder.bind(h.payments)
+    vi.spyOn(h.payments, 'findActiveByOrder').mockImplementationOnce(async (orderId) => {
+      const stale = await read(orderId)
+      await h.apply.execute(
+        { ...stored, status: 'approved', statusDetail: 'accredited' },
+        { attemptId: null, source: 'webhook' },
+      )
+      return stale
+    })
+
+    await h.cancel.execute(access)
+
+    expect(only(h.payments.of(order.id))).toMatchObject({ status: 'approved', isActive: false })
+    expect(h.orders.get(order.id)).toMatchObject({ status: 'paid', paymentStatus: 'approved' })
+    expect(h.gateway.callsTo('cancelPayment')).toEqual([])
+  })
+
+  it('order.expired: si el intento se aprobó en el medio, no se cancela ni se devuelve dos veces', async () => {
+    const { h, order, access } = setup()
+    await h.preference.execute(access, KEY_1)
+    h.clock.advance(30 * MINUTE)
+    await h.orders.expireOne(order.id)
+    const approved: ProviderPayment = {
+      providerPaymentId: '7000000001',
+      status: 'approved',
+      statusDetail: 'accredited',
+      amountArs: order.totalArs,
+      refundedArs: 0,
+      installments: 1,
+      paymentTypeId: 'account_money',
+      paymentMethodId: 'account_money',
+      cardLastFour: null,
+      issuerId: null,
+      externalReference: order.number,
+      challengeUrl: null,
+      approvedAt: h.clock.now(),
+    }
+    h.gateway.setPayment(approved)
+    const read = h.payments.findActiveByOrder.bind(h.payments)
+    vi.spyOn(h.payments, 'findActiveByOrder').mockImplementationOnce(async (orderId) => {
+      const stale = await read(orderId)
+      await h.apply.execute(approved, { attemptId: null, source: 'webhook' })
+      return stale
+    })
+
+    await h.onExpired.execute(order.id)
+
+    expect(only(h.payments.of(order.id))).toMatchObject({
+      status: 'approved',
+      providerPaymentId: '7000000001',
+    })
+    expect([...h.payments.refunds.values()].map((refund) => refund.reason)).toEqual([
+      'late_approval',
+    ])
+    expect(h.gateway.callsTo('cancelPayment')).toEqual([])
+    expect(h.orders.get(order.id).status).toBe('expired')
+  })
+})
+
+describe('NV-16: tope de intentos de pago por pedido', () => {
+  /** Una `Idempotency-Key` distinta por intento. */
+  function key(index: number): string {
+    return `3f2b8c1e-5d4a-4e7b-9a60-${String(index).padStart(12, '0')}`
+  }
+
+  it('el intento 11 (preferencia o tarjeta) → 409 order_not_payable sin llamar a Mercado Pago', async () => {
+    const { h, order, access } = setup()
+    for (let index = 0; index < 5; index += 1) {
+      await h.preference.execute(access, key(index))
+      await h.card.execute(access, cardInput('OTHE'), key(index + 100))
+    }
+    const calls = h.gateway.calls.length
+
+    const preference = await h.preference.execute(access, key(50)).catch((error: unknown) => error)
+    const card = await h.card
+      .execute(access, cardInput('APRO'), key(150))
+      .catch((error: unknown) => error)
+
+    expect(h.payments.of(order.id)).toHaveLength(10)
+    for (const error of [preference, card]) {
+      expect(error).toMatchObject({ status: 409, code: 'order_not_payable' })
+    }
+    expect(h.gateway.calls.slice(calls).map((call) => call.method)).toEqual(['validateCardCharge'])
+    expect(h.orders.get(order.id).status).toBe('pending_payment')
+  })
+
+  it('repetir un intento con su misma clave no cuenta como otro', async () => {
+    const { h, order, access } = setup()
+    for (let index = 0; index < 10; index += 1) await h.preference.execute(access, key(index))
+
+    await expect(h.preference.execute(access, key(9))).resolves.toMatchObject({
+      initPoint: expect.any(String) as unknown,
+    })
+    expect(h.payments.of(order.id)).toHaveLength(10)
+  })
+})

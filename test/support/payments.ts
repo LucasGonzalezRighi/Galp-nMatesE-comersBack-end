@@ -47,19 +47,22 @@ import { ReprocessWebhookEventsCommand } from '../../src/modules/payments/applic
 import { SimulateProviderResultCommand } from '../../src/modules/payments/application/commands/simulate-provider-result.command'
 import { PaymentOrderAccess } from '../../src/modules/payments/application/order-access'
 import { GetInstallmentsQuery } from '../../src/modules/payments/application/queries/get-installments.query'
-import { FixedClock } from './identity'
+import { FIXED_NOW, FixedClock } from './identity'
 import { FixedSecrets } from './session'
 import {
   simulatedInstallments,
   type InstallmentOption,
 } from '../../src/modules/payments/domain/installments'
-import type {
-  PaymentAttempt,
-  PaymentProvider,
+import {
+  isActiveStatus,
+  MAX_PAYMENT_ATTEMPTS_PER_ORDER,
+  type PaymentAttempt,
+  type PaymentProvider,
 } from '../../src/modules/payments/domain/payment-attempt'
 import {
   InstallmentsNotAvailableError,
   InvalidCardTokenError,
+  PaymentAttemptsExhaustedError,
 } from '../../src/modules/payments/domain/payments-errors'
 import type { ProviderPayment } from '../../src/modules/payments/domain/provider-payment'
 import {
@@ -110,7 +113,9 @@ export function hmacSha256Hex(secret: string, manifest: string): string {
 /**
  * Cabecera `x-signature` válida para una notificación.
  *
- * @param input - `data.id`, `x-request-id`, `ts` y el secreto (por defecto {@link WEBHOOK_SECRET}).
+ * @param input - `data.id`, `x-request-id`, `ts` (por defecto la hora de {@link FIXED_NOW} en
+ *   segundos, la del reloj de los tests unitarios: el back rechaza firmas de hace más de 5 minutos)
+ *   y el secreto (por defecto {@link WEBHOOK_SECRET}).
  * @returns `ts=<ts>,v1=<hex>`.
  */
 export function signWebhook(input: {
@@ -119,7 +124,7 @@ export function signWebhook(input: {
   ts?: string
   secret?: string
 }): string {
-  const ts = input.ts ?? '1704908010'
+  const ts = input.ts ?? String(Math.floor(FIXED_NOW.getTime() / 1000))
   const segments: string[] = []
   if (input.dataId !== null) segments.push(`id:${input.dataId.toLowerCase()}`)
   if (input.requestId !== null) segments.push(`request-id:${input.requestId}`)
@@ -170,6 +175,8 @@ export class InMemoryOrderPaymentsStub implements OrderPaymentsPort {
   paidCount = 0
   /** Cuántas veces se vencieron pedidos. */
   expiredCount = 0
+  /** Última conciliación de cada pedido (`payment_reconciled_at`), en ms. */
+  readonly reconciledAt = new Map<string, number>()
   private readonly orders = new Map<string, StubOrder>()
   private sequence = 0
 
@@ -296,9 +303,20 @@ export class InMemoryOrderPaymentsStub implements OrderPaymentsPort {
           (order.paymentStatus === 'pending' || order.paymentStatus === 'action_required') &&
           order.reservedUntil.getTime() <= cutoff.getTime(),
       )
-      .sort((a, b) => a.order.reservedUntil.getTime() - b.order.reservedUntil.getTime())
+      .sort(
+        (a, b) =>
+          (this.reconciledAt.get(a.order.id) ?? -Infinity) -
+            (this.reconciledAt.get(b.order.id) ?? -Infinity) ||
+          a.order.reservedUntil.getTime() - b.order.reservedUntil.getTime(),
+      )
       .slice(0, limit)
     return Promise.resolve(awaiting.map((entry) => this.toForPayment(entry)))
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.markReconciled} */
+  markReconciled(orderId: string, at: Date): Promise<void> {
+    this.reconciledAt.set(orderId, at.getTime())
+    return Promise.resolve()
   }
 
   /**
@@ -370,15 +388,38 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   readonly refunds = new Map<string, Refund>()
   /** Eventos que llegaron por `update`. */
   readonly events: NewDomainEvent[] = []
+  /** Cola de cada pedido para {@link serializeByOrder}: la promesa de lo último que entró. */
+  private readonly locks = new Map<string, Promise<unknown>>()
 
   /** @param orders - Pedidos a sincronizar (`orders.payment_status`), o `null`. */
   constructor(private readonly orders: Pick<OrderPaymentsPort, 'setPaymentStatus'> | null = null) {}
+
+  /** {@inheritDoc PaymentRepository.serializeByOrder} */
+  serializeByOrder<T>(orderId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(orderId) ?? Promise.resolve()
+    const run = previous.then(work, work)
+    this.locks.set(
+      orderId,
+      run.catch(() => undefined),
+    )
+    return run
+  }
+
+  /** {@inheritDoc PaymentRepository.cancelActive} */
+  async cancelActive(id: string): Promise<PaymentAttempt | null> {
+    const current = this.attempts.get(id)
+    if (current === undefined || !current.isActive || !isActiveStatus(current.status)) return null
+    return this.update(id, { status: 'cancelled', isActive: false, challengeUrl: null })
+  }
 
   /** {@inheritDoc PaymentRepository.startAttempt} */
   async startAttempt(
     input: NewPaymentAttempt,
   ): Promise<{ attempt: PaymentAttempt; previous: PaymentAttempt | null }> {
     this.assertUniqueKey(input.idempotencyKey)
+    if (this.of(input.orderId).length >= MAX_PAYMENT_ATTEMPTS_PER_ORDER) {
+      throw new PaymentAttemptsExhaustedError()
+    }
     const active = this.activeOf(input.orderId)
     let previous: PaymentAttempt | null = null
     if (active !== null) {

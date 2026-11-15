@@ -1,7 +1,11 @@
 import type { Clock } from '../../../../shared/domain/clock'
 import type { JsonObject, JsonValue } from '../../../../shared/domain/domain-event'
 import { InvalidSignatureError } from '../../domain/payments-errors'
-import { constantTimeEqual, signatureManifest } from '../../domain/webhook-signature'
+import {
+  constantTimeEqual,
+  isFreshSignature,
+  signatureManifest,
+} from '../../domain/webhook-signature'
 import type { PaymentsSettings } from '../ports/payments-settings.port'
 import type { WebhookEventRepository } from '../ports/webhook-event.repository.port'
 import type { WebhookQueuePort } from '../ports/webhook-queue.port'
@@ -31,7 +35,6 @@ export interface IncomingWebhook {
 export type WebhookOutcome = 'registered' | 'duplicate' | 'ignored'
 
 interface ParsedBody {
-  eventId: string | null
   type: string
   action: string | null
   dataId: string
@@ -66,7 +69,6 @@ function parseBody(body: unknown): ParsedBody | null {
   const dataId = isJsonObject(data) ? idOf(data.id) : null
   if (typeof type !== 'string' || type.trim() === '' || dataId === null) return null
   return {
-    eventId: idOf(body.id),
     type: type.trim(),
     action: typeof action === 'string' ? action : null,
     dataId,
@@ -76,8 +78,12 @@ function parseBody(body: unknown): ParsedBody | null {
 
 /**
  * `POST /webhooks/mercadopago` (Rulings B-37 y B-38): el formato IPN se ignora; si no, valida
- * `x-signature` (HMAC-SHA256 sobre el manifiesto, en tiempo constante; sin secreto, 401 siempre),
- * registra la notificación una sola vez y la encola; si la cola no la acepta, la procesa en línea.
+ * `x-signature` (HMAC-SHA256 sobre el manifiesto, en tiempo constante; sin secreto, 401 siempre) y
+ * que su `ts` esté a 5 minutos o menos del reloj (NV-05: una tupla vista no se repite para
+ * siempre), registra la notificación una sola vez y la encola; si la cola no la acepta, la procesa
+ * en línea. La clave de deduplicación (`event_id`) es el manifiesto firmado
+ * (`id:<data.id>;request-id:<x-request-id>;ts:<ts>;`): el `id` del cuerpo no está firmado, así que
+ * quien repite la tupla no puede elegir una clave nueva (ni, sin `data.id` en la query, otro pago).
  * Un duplicado de una notificación que quedó sin procesar (la cola y el procesado en línea fallaron
  * y Mercado Pago reintenta) se vuelve a encolar o a procesar, así no se pierde.
  */
@@ -102,7 +108,8 @@ export class ReceiveWebhookCommand {
   /**
    * @param input - Cabeceras, query y cuerpo.
    * @returns `registered`, `duplicate` o `ignored` (todos responden 200).
-   * @throws {InvalidSignatureError} 401 si la firma falta, no coincide o no hay secreto.
+   * @throws {InvalidSignatureError} 401 si la firma falta, no coincide, no hay secreto o su `ts` está
+   *   a más de 5 minutos del reloj.
    * @throws {Error} Si la notificación (nueva o duplicada sin procesar) no se pudo ni encolar ni
    *   procesar en línea: responde 500 y Mercado Pago reintenta.
    */
@@ -118,13 +125,12 @@ export class ReceiveWebhookCommand {
     if (!constantTimeEqual(this.hmac(secret, signed.manifest), signed.v1)) {
       throw new InvalidSignatureError()
     }
+    if (!isFreshSignature(signed.ts, this.clock.now())) throw new InvalidSignatureError()
     const body = parseBody(input.body)
     if (body === null) return 'ignored'
-    const eventId = body.eventId ?? filled(input.requestId)
-    if (eventId === null) return 'ignored'
     const recorded = await this.events.record({
       provider: 'mercadopago',
-      eventId,
+      eventId: signed.manifest,
       type: body.type,
       action: body.action,
       resourceId: filled(input.dataIdQuery) ?? body.dataId,

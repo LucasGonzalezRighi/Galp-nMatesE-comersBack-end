@@ -77,6 +77,8 @@ const MINUTE = 60_000
 describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
   let containers: TestContainers | undefined
   let app: INestApplication<Server> | undefined
+  /** Borradores armados por `draftOf` (para darle un email propio a cada uno). */
+  let drafts = 0
   const previousEnv = { DATABASE_URL: process.env.DATABASE_URL, REDIS_URL: process.env.REDIS_URL }
 
   beforeAll(async () => {
@@ -133,12 +135,19 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
     options: { createdAt?: Date; customerId?: string | null } = {},
   ): OrderDraft {
     const createdAt = options.createdAt ?? new Date()
+    // Un email por pedido: más de 3 pendientes del mismo cliente dan 429 (NV-14).
+    drafts += 1
     const gross = lines.reduce((sum, [item, quantity]) => sum + item.priceArs * quantity, 0)
     return {
       id: newId(),
       number: null,
       customerId: options.customerId ?? null,
-      contact: { email: 'manual@example.com', firstName: 'Ana', lastName: 'Gómez', phone: null },
+      contact: {
+        email: `manual${String(drafts)}@example.com`,
+        firstName: 'Ana',
+        lastName: 'Gómez',
+        phone: null,
+      },
       shipping: { method: 'pickup', address: null, costArs: 0, eta: 'Coordinás el retiro' },
       lines: lines.map(([item, quantity]) => ({
         type: 'product',
@@ -921,6 +930,31 @@ describe('adaptadores de pedidos (Postgres + Redis + BullMQ)', () => {
       expect((await orders().findByNumber(challenged.number))?.paymentStatus).toBe(
         'action_required',
       )
+    })
+
+    it('NV-28: después de markReconciled, listAwaitingPayment empieza por los demás', async () => {
+      const bombilla = await product('bombillon-100-alpaca')
+      const ago = (minutes: number) => new Date(Date.now() - minutes * MINUTE)
+      const oldest = await place(draftOf([[bombilla, 1]], { createdAt: ago(600) }))
+      await payments().setPaymentStatus(oldest.id, 'pending')
+      const newer = await place(draftOf([[bombilla, 1]], { createdAt: ago(590) }))
+      await payments().setPaymentStatus(newer.id, 'pending')
+      const cutoff = ago(10)
+      const ours = async () =>
+        (await payments().listAwaitingPayment(cutoff, 1_000))
+          .map((order) => order.id)
+          .filter((id) => id === oldest.id || id === newer.id)
+
+      const before = await ours()
+      await payments().markReconciled(oldest.id, new Date())
+      const after = await ours()
+      await payments().markReconciled(newer.id, new Date(Date.now() + 1_000))
+      const rotated = await ours()
+
+      expect(before).toEqual([oldest.id, newer.id])
+      expect(after).toEqual([newer.id, oldest.id])
+      expect(rotated).toEqual([oldest.id, newer.id])
+      await expect(payments().markReconciled('no-es-un-uuid', new Date())).resolves.toBeUndefined()
     })
 
     it('findForPayment y findForPaymentById traen las líneas, el contacto y el hash del token', async () => {

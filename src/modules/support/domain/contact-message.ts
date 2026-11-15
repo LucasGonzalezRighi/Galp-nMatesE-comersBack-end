@@ -13,11 +13,18 @@ export type ContactReason = (typeof CONTACT_REASONS)[number]
 /** Prefijo del código de comprobante de un arrepentimiento. */
 export const WITHDRAWAL_CODE_PREFIX = 'ARR-'
 
-/** Cantidad de dígitos del número del código de comprobante (como el mock del front). */
+/**
+ * Dígitos mínimos del número del código de comprobante (como el mock del front): hasta 999.999 los
+ * códigos son `ARR-NNNNNN` y después siguen con más dígitos (el contrato no fija el formato).
+ */
 export const WITHDRAWAL_CODE_DIGITS = 6
 
-/** Mayor número de comprobante (`withdrawal_code_seq` no pasa de acá). */
-export const WITHDRAWAL_CODE_MAX = 999_999
+/**
+ * Mayor número de comprobante (`withdrawal_code_seq` no pasa de acá): 12 dígitos. Antes era
+ * 999.999 y alguien anónimo podía agotarla y dejar el formulario en 500 para siempre (auditoría
+ * NV-12); con un billón de códigos, a 120 por minuto haría falta más de un siglo por IP.
+ */
+export const WITHDRAWAL_CODE_MAX = 999_999_999_999
 
 /** Mensaje de la bandeja del dashboard, del formulario de contacto o de un arrepentimiento. */
 export interface ContactMessage {
@@ -47,13 +54,15 @@ export interface ContactMessage {
 export type NewContactMessage = Omit<ContactMessage, 'id' | 'createdAt' | 'readAt'>
 
 /**
- * Arma el código de comprobante de un arrepentimiento: `ARR-` y el número con 6 dígitos.
+ * Arma el código de comprobante de un arrepentimiento: `ARR-` y el número con 6 dígitos como
+ * mínimo.
  *
- * @param n - Número de la secuencia, entero de 1 a 999.999.
+ * @param n - Número de la secuencia, entero de 1 a {@link WITHDRAWAL_CODE_MAX}.
  * @returns El código, por ejemplo `ARR-000001`.
- * @throws {RangeError} En español, si el número no es un entero de 1 a 999.999.
+ * @throws {RangeError} En español, si el número no es un entero de 1 a {@link WITHDRAWAL_CODE_MAX}.
  * @example
  * formatWithdrawalCode(31) // 'ARR-000031'
+ * formatWithdrawalCode(1_000_000) // 'ARR-1000000'
  */
 export function formatWithdrawalCode(n: number): string {
   if (!Number.isInteger(n) || n < 1 || n > WITHDRAWAL_CODE_MAX) {

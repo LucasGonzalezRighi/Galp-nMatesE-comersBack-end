@@ -1723,3 +1723,49 @@ en la raíz sin tocar el contrato. Entre paréntesis, el número de `findings.js
 - **NV-31 (21)** arreglada: variable `HOST`, por defecto `127.0.0.1` fuera de producción y `0.0.0.0`
   en producción.
 - **NV-33 (2)** arreglada: `docker-compose.yml` publica Postgres y Redis solo en `127.0.0.1`.
+
+### Tanda B · pagos y pedidos
+
+- **NV-05 (14)** arreglada: el webhook rechaza con 401 un `ts` a más de 5 minutos del reloj (para
+  atrás o para adelante; segundos o milisegundos) y deduplica por el manifiesto firmado
+  (`id:…;request-id:…;ts:…;`), no por el `id` del cuerpo. Riesgo anotado: si Mercado Pago reintenta
+  con el `ts` original, los reintentos de más de 5 minutos dan 401 (queda la conciliación).
+- **NV-29 (11)** arreglada: si el despacho de un evento del outbox agota los reintentos de BullMQ
+  (o el job queda trabado), vuelve a quedar pendiente con `dispatch_failures` y `available_at` (1, 2,
+  4… hasta 60 minutos, 8 vueltas, unas 3 horas); después, error en el log. El relay lo publica con
+  `jobId` `<id>-r<vuelta>`. Migración nueva.
+- **NV-27 (13)** arreglada: el despachador relee el evento de `outbox_events` por su id y descarta
+  (con error en el log) el job que no existe, es de otro tipo o trae otro payload; los handlers
+  reciben siempre el evento guardado.
+- **NV-06 (15)** arreglada: `cancel-payment` y el consumidor de `order.expired` cancelan con
+  `PaymentRepository.cancelActive` (con el intento bloqueado, solo si sigue activo): una aprobación
+  que llegó en el medio ya no retrocede a `cancelled` ni se cancela en Mercado Pago.
+- **NV-04 (12)** arreglada: `ApplyProviderPaymentCommand` (y `refundApproved`) corren con el pedido
+  bloqueado (`serializeByOrder`, `pg_advisory_xact_lock` en una transacción abierta); la mitad B de
+  un pago dividido ya no se devuelve como duplicada y dos pagos sobre la misma preferencia no se
+  pisan. Riesgo anotado: la transacción del bloqueo ocupa una conexión del pool (10) mientras el
+  trabajo usa otra; con 10 aplicaciones a la vez esperarían hasta el plazo de 60 s.
+- **NV-01 (3)** arreglada: pino tapa `Idempotency-Key` (pino-http escribía la cabecera con la URL).
+- **NV-15 (10)** arreglada en lo que se puede: el campo trampa ya no gastaba número; ahora una
+  dirección con U+0000 o mitades sueltas de un par sustituto (Postgres no los guarda y el pedido daba
+  500 después de `nextval`) responde 422 (los saltos de línea y demás caracteres de control se
+  guardan bien y se siguen aceptando), y el tope de NV-14 corre antes de la
+  secuencia. El contrato fija `^GLP-[0-9]{5}$`: el límite (89.999 pedidos) y su margen quedan en el
+  README.
+- **NV-12 (33)** arreglada: el comentario del arrepentimiento con esos caracteres responde 422 (antes
+  500 con el código gastado) y el máximo de `withdrawal_code_seq` pasa a 12 dígitos (el contrato no
+  fija el formato): después de `ARR-999999` sigue `ARR-1000000`. Migración nueva (secuencia y CHECK).
+- **NV-14 (9)** arreglada: como mucho 3 pedidos `pending_payment` a la vez por cliente (el email del
+  checkout y, con sesión, el cliente); el cuarto responde 429 `rate_limited` (declarado en
+  `POST /orders`) con `Retry-After` hasta que vence la reserva del más viejo, sin reservar stock ni
+  gastar número. Se controla en la transacción, con bloqueo consultivo. No se cuenta por sesión
+  anónima: una sesión nueva cuesta un `GET /auth/csrf`, así que no acota más que el email. Riesgo
+  anotado: quien cambia de email en cada pedido no queda acotado por esto (siguen el límite por IP y
+  el stock).
+- **NV-28 (17)** arreglada: columna `orders.payment_reconciled_at`; la conciliación toma primero los
+  que nunca pasaron y después los que hace más que no pasan, y anota cada pedido (bien o mal).
+- **NV-16 (16)** arreglada: tope de 10 intentos de pago por pedido (contados con el pedido bloqueado
+  en `startAttempt`); el siguiente responde 409 `order_not_payable` (declarado en las rutas de pago;
+  la tienda descarta el pedido y la persona arma otro) sin llamar a Mercado Pago. Las cuotas
+  (`installments`) no crean intentos y siguen sin límite propio (piden el `X-Order-Token` del
+  pedido): riesgo aceptado en esta tanda, queda anotado para la de límites.

@@ -8,8 +8,10 @@ import { ENV, type Env } from '../../../config/env'
 /**
  * Rutas que pino reemplaza por `[Redacted]`: cookies de sesión y tokens nunca llegan a los logs.
  * `Referer` se tapa entero porque, desde `/cuenta/restablecer?token=…`, la tienda reenvía al back
- * la URL con el token de recuperación; `X-CSRF-Token` es el secreto ligado a la sesión y
- * `X-Order-Token` abre un pedido sin sesión.
+ * la URL con el token de recuperación; `X-CSRF-Token` es el secreto ligado a la sesión,
+ * `X-Order-Token` abre un pedido sin sesión e `Idempotency-Key` también: la repetición idempotente
+ * devuelve la respuesta guardada antes de mirar el token, así que con la clave y la URL del log se
+ * leía la preferencia de pago de otro (auditoría NV-01).
  */
 const REDACTED_PATHS = [
   'req.headers.cookie',
@@ -17,6 +19,7 @@ const REDACTED_PATHS = [
   'req.headers.referer',
   'req.headers["x-csrf-token"]',
   'req.headers["x-order-token"]',
+  'req.headers["idempotency-key"]',
   'res.headers["set-cookie"]',
 ]
 
@@ -32,7 +35,8 @@ function isInstalled(packageName: string): boolean {
 
 /**
  * Arma las opciones de `pino-http` para el entorno: nivel `LOG_LEVEL` (en `test`, `silent`),
- * cookies, `Authorization`, `Referer` y `X-CSRF-Token` enmascarados, y salida legible con
+ * cookies, `Authorization`, `Referer`, `X-CSRF-Token`, `X-Order-Token` e `Idempotency-Key`
+ * enmascarados, y salida legible con
  * `pino-pretty` solo en desarrollo y si está instalado (si no, JSON, como en producción).
  *
  * @param env - La configuración validada.

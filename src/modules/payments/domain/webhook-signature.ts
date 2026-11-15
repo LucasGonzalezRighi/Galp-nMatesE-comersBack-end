@@ -8,6 +8,16 @@ export interface SignatureInput {
   dataId: string | null
 }
 
+/**
+ * Diferencia máxima entre el `ts` de `x-signature` y el reloj del back (para atrás o para
+ * adelante, por relojes corridos): una firma más vieja se rechaza, así una tupla de cabeceras que
+ * alguien vio no se puede repetir para siempre (auditoría NV-05).
+ */
+export const WEBHOOK_SIGNATURE_TOLERANCE_MS = 5 * 60_000
+
+/** Desde este valor, el `ts` se toma en milisegundos (en segundos sería el año 5138). */
+const TS_MILLISECONDS_FROM = 100_000_000_000
+
 /** Separa `ts` y `v1` de la cabecera `x-signature` (cada parte por el primer `=`, con trim). */
 function parseSignatureHeader(header: string): { ts: string; v1: string } {
   let ts = ''
@@ -31,7 +41,9 @@ function parseSignatureHeader(header: string): { ts: string; v1: string } {
  * @param input - Cabeceras y `data.id` de la notificación.
  * @returns El manifiesto y el `v1` recibido, o `null` si falta `ts` o `v1`.
  */
-export function signatureManifest(input: SignatureInput): { manifest: string; v1: string } | null {
+export function signatureManifest(
+  input: SignatureInput,
+): { manifest: string; v1: string; ts: string } | null {
   if (input.signatureHeader === null) return null
   const { ts, v1 } = parseSignatureHeader(input.signatureHeader)
   if (ts === '' || v1 === '') return null
@@ -41,7 +53,22 @@ export function signatureManifest(input: SignatureInput): { manifest: string; v1
   const requestId = (input.requestId ?? '').trim()
   if (requestId !== '') segments.push(`request-id:${requestId}`)
   segments.push(`ts:${ts}`)
-  return { manifest: `${segments.join(';')};`, v1 }
+  return { manifest: `${segments.join(';')};`, v1, ts }
+}
+
+/**
+ * Indica si el `ts` firmado está a {@link WEBHOOK_SIGNATURE_TOLERANCE_MS} o menos de `now`. Mercado
+ * Pago lo manda en segundos; si llega en milisegundos (13 dígitos) también se entiende.
+ *
+ * @param ts - El `ts` de `x-signature` (solo dígitos).
+ * @param now - Hora del back.
+ * @returns `false` si no es un entero o está fuera de la tolerancia.
+ */
+export function isFreshSignature(ts: string, now: Date): boolean {
+  if (!/^[0-9]{1,16}$/.test(ts)) return false
+  const value = Number(ts)
+  const signedAtMs = value >= TS_MILLISECONDS_FROM ? value : value * 1000
+  return Math.abs(now.getTime() - signedAtMs) <= WEBHOOK_SIGNATURE_TOLERANCE_MS
 }
 
 /**

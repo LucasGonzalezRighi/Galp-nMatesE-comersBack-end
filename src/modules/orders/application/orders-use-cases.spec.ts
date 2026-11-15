@@ -302,8 +302,16 @@ describe('CreateOrderCommand', () => {
   it('sin sobreventa: con 5 disponibles, 10 pedidos simultáneos dejan 5 pedidos y 5 avisos', async () => {
     const t = setup()
     t.stock.set(imperialPremium.id, 5)
+    // Diez personas distintas (una sola tendría el tope de 3 pendientes, NV-14).
     const results = await Promise.allSettled(
-      Array.from({ length: 10 }, () => t.createOrder.execute(orderInput(), GUEST)),
+      Array.from({ length: 10 }, (_, index) =>
+        t.createOrder.execute(
+          orderInput({
+            customer: { ...orderInput().customer, email: `p${String(index)}@ejemplo.com` },
+          }),
+          GUEST,
+        ),
+      ),
     )
     const rejected = results.filter((result) => result.status === 'rejected')
 
@@ -319,6 +327,44 @@ describe('CreateOrderCommand', () => {
         changes: [{ message: 'Mate Imperial Premium se agotó.' }],
       })
     }
+  })
+
+  it('NV-14: el cuarto pedido pendiente del mismo cliente → 429 sin reservar ni numerar', async () => {
+    const t = setup()
+    t.stock.set(imperialPremium.id, 20)
+    for (let index = 0; index < 3; index += 1) {
+      await t.createOrder.execute(orderInput(), GUEST)
+      t.clock.advance(MINUTE)
+    }
+    const reserved = t.stock.reserved(imperialPremium.id)
+
+    const fourth = await rejection(t.createOrder.execute(orderInput(), GUEST))
+    t.orders.update('GLP-10001', { status: 'paid', paymentStatus: 'approved' })
+    const after = await t.createOrder.execute(orderInput(), GUEST)
+
+    expect(fourth).toMatchObject({
+      status: 429,
+      code: 'rate_limited',
+      retryAfterSeconds: 27 * 60,
+    })
+    expect(t.stock.reserved(imperialPremium.id)).toBe(reserved + 1)
+    expect(after.order.number).toBe('GLP-10004')
+  })
+
+  it('NV-14: el tope también cuenta los pedidos de la sesión hechos con otros emails', async () => {
+    const t = setup()
+    t.stock.set(imperialPremium.id, 20)
+    const withEmail = (email: string) =>
+      orderInput({ customer: { ...orderInput().customer, email } })
+    for (const email of ['a@ejemplo.com', 'b@ejemplo.com', 'c@ejemplo.com']) {
+      await t.createOrder.execute(withEmail(email), { customerId: 'cus-9' })
+    }
+
+    const fourth = await rejection(
+      t.createOrder.execute(withEmail('d@ejemplo.com'), { customerId: 'cus-9' }),
+    )
+
+    expect(fourth).toMatchObject({ status: 429, code: 'rate_limited' })
   })
 
   it('el mismo producto suelto y dentro de un kit comparte el stock', async () => {
@@ -674,7 +720,9 @@ describe('ListMyOrdersQuery y GetMyOrderQuery', () => {
     const t = setup()
     t.stock.set(imperialPremium.id, 20)
     for (let index = 0; index < 12; index += 1) {
-      await t.createOrder.execute(orderInput(), { customerId: 'cus-1' })
+      const { order } = await t.createOrder.execute(orderInput(), { customerId: 'cus-1' })
+      // Los anteriores, pagados: más de 3 pendientes a la vez del mismo cliente dan 429 (NV-14).
+      if (index < 11) t.orders.update(order.number, { status: 'paid', paymentStatus: 'approved' })
       if (index < 10) t.clock.advance(MINUTE)
     }
     await t.createOrder.execute(orderInput(), { customerId: 'cus-2' })

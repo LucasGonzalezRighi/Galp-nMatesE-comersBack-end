@@ -33,9 +33,14 @@ export interface OrderRepository {
    * `reservedUntil`), guarda ítems, piezas, la primera fila del historial (`actor: customer`) y
    * los eventos de `events`. Si algún producto no alcanza, no guarda nada.
    *
+   * Antes de reservar (y de tomar el número), con el cliente bloqueado, cuenta sus pedidos
+   * `pending_payment` (los del email del contacto y, si hay, los de `draft.customerId`): con
+   * `MAX_PENDING_ORDERS_PER_CUSTOMER` o más no guarda nada (auditoría NV-14).
+   *
    * @param draft - Pedido a guardar.
    * @param events - Eventos del outbox, armados con el pedido ya numerado.
    * @returns `Ok` con el pedido guardado, o `Err` con todos los productos que no alcanzaron.
+   * @throws {TooManyPendingOrdersError} 429 si el cliente ya tiene el máximo de pendientes.
    */
   create(draft: OrderDraft, events: OrderEvents): Promise<Result<Order, StockShortage[]>>
 

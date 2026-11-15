@@ -4,7 +4,7 @@
 
 import { applyDecorators } from '@nestjs/common'
 import { Transform, type TransformFnParams } from 'class-transformer'
-import { IsDefined, IsString, Matches, MaxLength, ValidateIf } from 'class-validator'
+import { IsDefined, IsString, Matches, MaxLength, ValidateBy, ValidateIf } from 'class-validator'
 
 import {
   ApiSchemaProperty,
@@ -12,6 +12,7 @@ import {
   nullableRef,
   type OpenApiSchema,
 } from '../../../../shared/infrastructure/http/openapi'
+import { isStorableText } from '../../../../shared/domain/storable-text'
 import { RawValue } from '../../../identity/interface/dto/identity-fields'
 import { ORDER_NUMBER_PATTERN } from '../../../orders/domain/order-number'
 
@@ -29,6 +30,8 @@ export const PUBLIC_FORM_MESSAGES = {
   invalidOrderNumber: 'El número tiene el formato GLP-12345',
   /** Campo trampa que no es texto o es demasiado largo (con texto igual se descarta en silencio). */
   honeypot: 'Este campo tiene que quedar vacío.',
+  /** Texto con caracteres que Postgres no guarda (U+0000 o mitades sueltas de un par sustituto). */
+  invalidText: 'Ingresá un texto',
 } as const
 
 /** Largo máximo que se acepta en el campo trampa (como `POST /orders`). */
@@ -114,5 +117,14 @@ export function NullableTextField(max: number, tooLong: string): PropertyDecorat
     Transform(trimmedOrNull),
     IsString({ message: PUBLIC_FORM_MESSAGES.required }),
     MaxLength(max, { message: tooLong }),
+    // Sin esto, un comentario con U+0000 fallaba con 500 después de tomar el número del
+    // arrepentimiento, que se perdía (NV-12). Con este nombre el 422 lleva `invalid_format`.
+    ValidateBy(
+      {
+        name: 'invalidFormat',
+        validator: { validate: (value) => typeof value !== 'string' || isStorableText(value) },
+      },
+      { message: PUBLIC_FORM_MESSAGES.invalidText },
+    ),
   )
 }

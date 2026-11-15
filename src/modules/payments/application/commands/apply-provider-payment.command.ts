@@ -71,6 +71,11 @@ const LATE_ORDER: readonly OrderStatus[] = ['expired', 'cancelled', 'refunded']
  * es condicional y la devolución es idempotente por `findRefundByPayment`. La regla del duplicado
  * (devolver al segundo aprobado de un pedido ya pagado) solo corre en la primera transición, porque
  * con dos aprobados una repetición no sabe cuál fue el que pagó y devolvería al equivocado.
+ *
+ * Todo pasa con el pedido bloqueado (`PaymentRepository.serializeByOrder`, auditoría NV-04): dos
+ * aplicaciones del mismo pedido (el webhook y la conciliación de la misma aprobación, o dos pagos
+ * sobre la misma preferencia) van de a una, así la segunda decide con lo que dejó la primera y no
+ * devuelve como duplicada la segunda mitad de un pago dividido.
  */
 export class ApplyProviderPaymentCommand {
   /**
@@ -106,13 +111,48 @@ export class ApplyProviderPaymentCommand {
         `Estado desconocido de Mercado Pago "${payment.status}" en el pago ${payment.providerPaymentId} (${context.source}): se toma como pending`,
       )
     }
-    const attempt = await this.locate(payment, context)
+    const orderId = await this.orderIdOf(payment, context)
+    const attempt =
+      orderId === null
+        ? null
+        : await this.payments.serializeByOrder(orderId, () => this.applyLocked(payment, context))
     if (attempt === null) {
       this.logger.warn(
         `El pago ${payment.providerPaymentId} de Mercado Pago no es de ningún pedido (external_reference ${String(payment.externalReference)}): se ignora`,
       )
-      return null
     }
+    return attempt
+  }
+
+  /**
+   * Pedido del pago, para tomar su bloqueo antes de decidir nada (auditoría NV-04): por el id del
+   * pago, por el intento conocido o por `external_reference`.
+   */
+  private async orderIdOf(payment: ProviderPayment, context: ApplyContext): Promise<string | null> {
+    const byPayment = await this.payments.findByProviderPaymentId(
+      'mercadopago',
+      payment.providerPaymentId,
+    )
+    if (byPayment !== null) return byPayment.orderId
+    if (context.attemptId !== null) {
+      const byId = await this.payments.findById(context.attemptId)
+      if (byId !== null) return byId.orderId
+    }
+    if (payment.externalReference === null) return null
+    return (await this.orders.findForPayment(payment.externalReference))?.id ?? null
+  }
+
+  /**
+   * La máquina de estados con el pedido bloqueado: todo lo que decide (el intento, su estado, el
+   * pedido y los demás intentos) se lee acá adentro, así una segunda aplicación ve lo que dejó la
+   * primera.
+   */
+  private async applyLocked(
+    payment: ProviderPayment,
+    context: ApplyContext,
+  ): Promise<PaymentAttempt | null> {
+    const attempt = await this.locate(payment, context)
+    if (attempt === null) return null
     const next = normalizePaymentStatus(payment)
     if (isFinalStatus(attempt.status) && !AFTER_FINAL.includes(next)) {
       if (attempt.status === 'approved' && next === 'approved') {
@@ -302,15 +342,16 @@ export class ApplyProviderPaymentCommand {
    * @throws {TypeError} En español, si el intento no tiene un pago en la pasarela.
    */
   async refundApproved(attempt: PaymentAttempt, reason: RefundReason): Promise<void> {
-    if (attempt.providerPaymentId === null) {
+    const { providerPaymentId } = attempt
+    if (providerPaymentId === null) {
       throw new TypeError(`El intento ${attempt.id} no tiene un pago en la pasarela para devolver`)
     }
     const balanceArs = attempt.amountArs - attempt.refundedArs
     if (balanceArs <= 0) return
-    await this.refund(
-      attempt,
-      { providerPaymentId: attempt.providerPaymentId, amountArs: balanceArs },
-      reason,
+    // Con el pedido bloqueado, como `execute`: dos devoluciones a la vez no pasan las dos el
+    // control de `findRefundByPayment`.
+    await this.payments.serializeByOrder(attempt.orderId, () =>
+      this.refund(attempt, { providerPaymentId, amountArs: balanceArs }, reason),
     )
   }
 

@@ -224,11 +224,29 @@ export class PrismaOrderPaymentsAdapter implements OrderPaymentsPort {
         paymentStatus: { in: [...AWAITING_PAYMENT_STATUSES] },
         reservedUntil: { lte: cutoff },
       },
-      orderBy: [{ reservedUntil: 'asc' }, { id: 'asc' }],
+      orderBy: [
+        { paymentReconciledAt: { sort: 'asc', nulls: 'first' } },
+        { reservedUntil: 'asc' },
+        { id: 'asc' },
+      ],
       take: limit,
       select: ORDER_FOR_PAYMENT_SELECT,
     })
     return rows.map(toOrderForPayment)
+  }
+
+  /**
+   * {@inheritDoc OrderPaymentsPort.markReconciled}
+   *
+   * @throws {TypeError} En español, si `at` no es una fecha válida.
+   */
+  async markReconciled(orderId: string, at: Date): Promise<void> {
+    assertDate(at, 'La hora de la conciliación')
+    if (!UUID_PATTERN.test(orderId)) return
+    await this.prisma.order.updateMany({
+      where: { id: orderId },
+      data: { paymentReconciledAt: at },
+    })
   }
 
   /**

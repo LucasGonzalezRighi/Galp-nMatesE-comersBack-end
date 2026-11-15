@@ -29,18 +29,19 @@ describe('buildPinoHttpOptions', () => {
     expect(buildPinoHttpOptions({ ...BASE, NODE_ENV: 'test' }).level).toBe('silent')
   })
 
-  it('enmascara cookies, Authorization, Referer, el token CSRF y el token del pedido', () => {
+  it('enmascara cookies, Authorization, Referer, el token CSRF, el token del pedido y la Idempotency-Key', () => {
     expect(buildPinoHttpOptions(BASE).redact).toEqual([
       'req.headers.cookie',
       'req.headers.authorization',
       'req.headers.referer',
       'req.headers["x-csrf-token"]',
       'req.headers["x-order-token"]',
+      'req.headers["idempotency-key"]',
       'res.headers["set-cookie"]',
     ])
   })
 
-  it('no deja en el log el token de recuperación del Referer, el token CSRF ni el del pedido', () => {
+  it('no deja en el log el token de recuperación del Referer, el token CSRF, el del pedido ni la Idempotency-Key', () => {
     const lines: string[] = []
     const logger = pino(
       { level: 'info', redact: buildPinoHttpOptions(BASE).redact ?? [] },
@@ -54,6 +55,8 @@ describe('buildPinoHttpOptions', () => {
             referer: 'http://localhost:3000/cuenta/restablecer?token=rt_secreto',
             'x-csrf-token': 'csrf-secreto',
             'x-order-token': 'ot_secreto',
+            // NV-01: con la clave y la URL, quien lee los logs repetía la preferencia sin token.
+            'idempotency-key': 'clave-idempotente-secreta',
             cookie: '__Host-galpon_session=sesion-secreta',
           },
         },
@@ -66,6 +69,7 @@ describe('buildPinoHttpOptions', () => {
     expect(output).not.toContain('rt_secreto')
     expect(output).not.toContain('csrf-secreto')
     expect(output).not.toContain('ot_secreto')
+    expect(output).not.toContain('clave-idempotente-secreta')
     expect(output).not.toContain('sesion-secreta')
   })
 })

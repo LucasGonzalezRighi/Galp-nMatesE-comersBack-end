@@ -239,12 +239,15 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
     }
   }
 
+  /**
+   * Firma una notificación con la hora actual: el back rechaza firmas de hace más de 5 minutos.
+   */
+  function signNow(dataId: string | null): string {
+    return signWebhook({ dataId, requestId: REQUEST_ID, ts: String(Math.floor(Date.now() / 1000)) })
+  }
+
   /** Manda una notificación firmada con `MP_WEBHOOK_SECRET` (o la firma dada). */
-  function notify(
-    dataId: string,
-    eventId: string,
-    signature = signWebhook({ dataId, requestId: REQUEST_ID }),
-  ) {
+  function notify(dataId: string, eventId: string, signature = signNow(dataId)) {
     return send('post', `/webhooks/mercadopago?data.id=${dataId}&type=payment`, {
       headers: { 'x-signature': signature, 'x-request-id': REQUEST_ID },
       body: {
@@ -258,10 +261,15 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
     })
   }
 
-  /** Espera a que el worker procese la notificación y devuelve su fila. */
+  /**
+   * Espera a que el worker procese la notificación y devuelve su fila (se busca por el `id` del
+   * cuerpo: `event_id` es el manifiesto firmado).
+   */
   async function processedEvent(eventId: string) {
     return vi.waitFor(async () => {
-      const row = await prisma().webhookEvent.findFirstOrThrow({ where: { eventId } })
+      const row = await prisma().webhookEvent.findFirstOrThrow({
+        where: { payload: { path: ['id'], equals: eventId } },
+      })
       expect(row.processedAt).not.toBeNull()
       return row
     }, QUEUE_WAIT)
@@ -792,10 +800,11 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
       const providerPaymentId = (await readOrder(order)).payment.mpPaymentId ?? ''
       gateway().remember(providerPayment(order, { providerPaymentId }))
       const eventId = randomUUID()
+      const signature = signNow(providerPaymentId)
 
-      const response = await notify(providerPaymentId, eventId)
+      const response = await notify(providerPaymentId, eventId, signature)
       const row = await processedEvent(eventId)
-      const duplicate = await notify(providerPaymentId, eventId)
+      const duplicate = await notify(providerPaymentId, eventId, signature)
 
       expect(response.status).toBe(200)
       expect(response.text).toBe('')
@@ -807,7 +816,9 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
         lastError: null,
       })
       expect(duplicate.status).toBe(200)
-      const rows = await prisma().webhookEvent.findMany({ where: { eventId } })
+      const rows = await prisma().webhookEvent.findMany({
+        where: { payload: { path: ['id'], equals: eventId } },
+      })
       expect(rows).toHaveLength(1)
       expect(rows[0]?.processedAt).toEqual(row.processedAt)
       expect(rows[0]?.attempts).toBe(row.attempts)
@@ -819,7 +830,7 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
     it('data.id con mayúsculas se firma en minúsculas y x-signature con espacios se parsea igual', async () => {
       const upper = randomUUID()
       const spaced = randomUUID()
-      const [ts = '', v1 = ''] = signWebhook({ dataId: '424242', requestId: REQUEST_ID })
+      const [ts = '', v1 = ''] = signNow('424242')
         .split(',')
         .map((part) => part.split('=')[1] ?? '')
 
@@ -841,11 +852,21 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
       ],
       ['sin ts', (signature: string) => signature.replace(/^ts=\d+,/, '')],
       ['sin x-signature', () => null],
+      // NV-05: una firma correcta de hace más de 5 minutos ya no vale.
+      [
+        'firma correcta de hace más de 5 minutos',
+        () =>
+          signWebhook({
+            dataId: '777',
+            requestId: REQUEST_ID,
+            ts: String(Math.floor(Date.now() / 1000) - 301),
+          }),
+      ],
     ])(
       '%s → 401 con el cuerpo del contrato, sin registrar (ni encolar) nada',
       async (_name, tamper) => {
         const eventId = randomUUID()
-        const signature = tamper(signWebhook({ dataId: '777', requestId: REQUEST_ID }))
+        const signature = tamper(signNow('777'))
         const before = await prisma().webhookEvent.count()
 
         const response = await send('post', '/webhooks/mercadopago?data.id=777&type=payment', {
@@ -877,6 +898,30 @@ describe('pagos por HTTP (Postgres + Redis + BullMQ, pasarela simulada)', () => 
 
       expect(response.status).toBe(200)
       expect(await prisma().webhookEvent.count()).toBe(before)
+    })
+  })
+
+  describe('NV-16: tope de intentos de pago por pedido', () => {
+    it('el intento 11 → 409 order_not_payable del contrato, sin un intento nuevo', async () => {
+      const order = await placeOrder()
+      for (let index = 0; index < 10; index += 1) {
+        expect((await pay('preference', order.number, order.token)).status).toBe(200)
+      }
+
+      const eleventh = await pay('preference', order.number, order.token)
+      const card = await pay('card', order.number, order.token, { body: cardBody('APRO') })
+
+      expect(eleventh.status).toBe(409)
+      expect(eleventh.body).toEqual({
+        type: 'order_not_payable',
+        title: 'El pedido no admite un pago nuevo',
+        status: 409,
+        detail: 'El pedido llegó al máximo de intentos de pago. Armalo de nuevo para pagar.',
+        instance: `/api/v1/orders/${order.number}/payments/mercadopago/preference`,
+      })
+      expect(card.status).toBe(409)
+      expect(await prisma().payment.count({ where: { orderId: order.id } })).toBe(10)
+      expect((await readOrder(order)).status).toBe('pending_payment')
     })
   })
 })

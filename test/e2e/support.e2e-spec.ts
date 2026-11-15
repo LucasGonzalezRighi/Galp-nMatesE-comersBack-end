@@ -259,4 +259,42 @@ describe('contacto, arrepentimiento y bandeja del dashboard (HTTP + Postgres + R
       message: 'El valor de read tiene que ser true o false.',
     })
   })
+
+  it('NV-12: un comentario que Postgres no puede guardar → 422 sin gastar un código', async () => {
+    const [before] = await prisma().$queryRaw<{ last_value: bigint }[]>`
+      SELECT last_value FROM withdrawal_code_seq`
+
+    const broken = await store('post', '/withdrawals', {
+      ...WITHDRAWAL,
+      comment: 'Me arrepentí\u0000 de la compra.',
+    })
+
+    const [after] = await prisma().$queryRaw<{ last_value: bigint }[]>`
+      SELECT last_value FROM withdrawal_code_seq`
+    expect(broken.status).toBe(422)
+    expect(firstError(broken)).toMatchObject({ field: 'comment', message: 'Ingresá un texto' })
+    expect(after).toEqual(before)
+  })
+
+  it('NV-12: un comentario de varias líneas (el textarea de la tienda) se guarda igual', async () => {
+    const comment = 'Me arrepentí de la compra.\nLlegó bien.\r\n\tGracias'
+
+    const response = await store('post', '/withdrawals', { ...WITHDRAWAL, comment })
+
+    expect(response.status).toBe(201)
+    const code = (response.body as { code: string }).code
+    expect((await rows()).find((row) => row.code === code)?.message).toBe(comment)
+  })
+
+  it('NV-12: pasado ARR-999999 los códigos siguen con más dígitos (antes, 500 para siempre)', async () => {
+    await prisma().$executeRaw`SELECT setval('withdrawal_code_seq', 999999)`
+
+    const next = await store('post', '/withdrawals', WITHDRAWAL)
+    const trapped = await store('post', '/withdrawals', { ...WITHDRAWAL, website: 'spam' })
+
+    expect(next.status).toBe(201)
+    expect(next.body).toEqual({ code: 'ARR-1000000' })
+    expect(trapped.body).toEqual({ code: 'ARR-1000001' })
+    expect((await rows()).some((row) => row.code === 'ARR-1000000')).toBe(true)
+  })
 })

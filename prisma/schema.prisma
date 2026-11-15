@@ -505,40 +505,43 @@ model StockReservation {
 /// o los ajustes. CHECK `orders_totals_check` en la migración: `subtotal = bruto − ahorro de kits`
 /// y `total = subtotal + envío`.
 model Order {
-  id                 String         @id @default(uuid(7)) @db.Uuid
+  id                  String         @id @default(uuid(7)) @db.Uuid
   /// `GLP-` + 5 dígitos, de la secuencia `order_number_seq` (arranca en 10001).
-  number             String         @unique
+  number              String         @unique
   /// Dueño del pedido: el cliente de la sesión o el invitado del email; `null` si el email es de
   /// una cuenta y no había sesión (solo se lee con el token).
-  customerId         String?        @map("customer_id") @db.Uuid
-  status             OrderStatus    @default(pending_payment)
-  paymentStatus      PaymentStatus  @default(none) @map("payment_status")
-  paymentMethod      PaymentMethod  @map("payment_method")
-  contactEmail       String         @map("contact_email") @db.Citext
-  contactFirstName   String         @map("contact_first_name")
-  contactLastName    String         @map("contact_last_name")
-  contactPhone       String?        @map("contact_phone")
-  shippingMethod     ShippingMethod @map("shipping_method")
+  customerId          String?        @map("customer_id") @db.Uuid
+  status              OrderStatus    @default(pending_payment)
+  paymentStatus       PaymentStatus  @default(none) @map("payment_status")
+  paymentMethod       PaymentMethod  @map("payment_method")
+  contactEmail        String         @map("contact_email") @db.Citext
+  contactFirstName    String         @map("contact_first_name")
+  contactLastName     String         @map("contact_last_name")
+  contactPhone        String?        @map("contact_phone")
+  shippingMethod      ShippingMethod @map("shipping_method")
   /// Copia de la dirección de entrega (completa en `home`, código postal, ciudad y provincia en
   /// `branch`); `null` en `pickup`.
-  shippingAddress    Json?          @map("shipping_address")
-  shippingCostArs    Int            @map("shipping_cost_ars")
+  shippingAddress     Json?          @map("shipping_address")
+  shippingCostArs     Int            @map("shipping_cost_ars")
   /// Plazo de entrega vigente al comprar.
-  shippingEta        String         @map("shipping_eta")
-  itemsGrossArs      Int            @map("items_gross_ars")
-  kitSavingsArs      Int            @map("kit_savings_ars")
-  subtotalArs        Int            @map("subtotal_ars")
-  totalArs           Int            @map("total_ars")
-  kitDiscountPercent Int            @map("kit_discount_percent")
+  shippingEta         String         @map("shipping_eta")
+  itemsGrossArs       Int            @map("items_gross_ars")
+  kitSavingsArs       Int            @map("kit_savings_ars")
+  subtotalArs         Int            @map("subtotal_ars")
+  totalArs            Int            @map("total_ars")
+  kitDiscountPercent  Int            @map("kit_discount_percent")
   /// SHA-256 del `orderToken` que se entrega al crear el pedido (el token nunca se guarda).
-  accessTokenHash    String         @unique @map("access_token_hash")
+  accessTokenHash     String         @unique @map("access_token_hash")
   /// Hasta cuándo se guarda el stock sin pago: creación + 30 minutos; no cambia nunca.
-  reservedUntil      DateTime       @map("reserved_until") @db.Timestamptz(3)
-  placedAt           DateTime       @default(now()) @map("placed_at") @db.Timestamptz(3)
-  paidAt             DateTime?      @map("paid_at") @db.Timestamptz(3)
-  cancelledAt        DateTime?      @map("cancelled_at") @db.Timestamptz(3)
-  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  reservedUntil       DateTime       @map("reserved_until") @db.Timestamptz(3)
+  placedAt            DateTime       @default(now()) @map("placed_at") @db.Timestamptz(3)
+  paidAt              DateTime?      @map("paid_at") @db.Timestamptz(3)
+  cancelledAt         DateTime?      @map("cancelled_at") @db.Timestamptz(3)
+  /// Última vez que la conciliación de pagos pasó por el pedido: la siguiente pasada empieza por
+  /// los que nunca pasaron o hace más que no pasan (auditoría NV-28).
+  paymentReconciledAt DateTime?      @map("payment_reconciled_at") @db.Timestamptz(3)
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   customer     Customer?            @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items        OrderItem[]
@@ -711,8 +714,8 @@ model Refund {
 }
 
 /// Notificación recibida de la pasarela, registrada una sola vez por `(provider, eventId)`
-/// (`eventId`: el `id` del cuerpo o, si no viene, el `x-request-id`) y procesada en la cola
-/// `payment-webhooks`.
+/// (`eventId`: el manifiesto firmado `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`, así quien
+/// repite una firma no elige otra clave) y procesada en la cola `payment-webhooks`.
 model WebhookEvent {
   id             String          @id @default(uuid(7)) @db.Uuid
   provider       PaymentProvider
@@ -827,14 +830,19 @@ model ShippingOption {
 /// Evento de dominio pendiente de publicar en la cola `outbox` (índice parcial de los no
 /// publicados en la migración).
 model OutboxEvent {
-  id            String    @id @default(uuid(7)) @db.Uuid
-  aggregateType String    @map("aggregate_type")
-  aggregateId   String    @map("aggregate_id")
-  type          String
-  payload       Json
-  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
-  publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
-  attempts      Int       @default(0)
+  id               String    @id @default(uuid(7)) @db.Uuid
+  aggregateType    String    @map("aggregate_type")
+  aggregateId      String    @map("aggregate_id")
+  type             String
+  payload          Json
+  occurredAt       DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  publishedAt      DateTime? @map("published_at") @db.Timestamptz(3)
+  /// Intentos fallidos de publicar (encolar) el evento.
+  attempts         Int       @default(0)
+  /// Despachos que agotaron los reintentos de BullMQ: cada uno lo vuelve a dejar pendiente, hasta 8.
+  dispatchFailures Int       @default(0) @map("dispatch_failures")
+  /// Desde cuándo el relay puede volver a publicar un evento reabierto (`null`: ya).
+  availableAt      DateTime? @map("available_at") @db.Timestamptz(3)
 
   @@map("outbox_events")
 }

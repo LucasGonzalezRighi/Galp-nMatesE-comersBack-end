@@ -39,11 +39,13 @@ import {
   markExpired,
   markPaid,
   markRefunded,
+  MAX_PENDING_ORDERS_PER_CUSTOMER,
   type Order,
   type OrderContact,
   type OrderDraft,
   placeOrder,
 } from '../../src/modules/orders/domain/order.entity'
+import { TooManyPendingOrdersError } from '../../src/modules/orders/domain/orders-errors'
 import type {
   PricedCombo,
   PricedProduct,
@@ -440,6 +442,17 @@ export class InMemoryOrderRepository implements OrderRepository {
   /** {@inheritDoc OrderRepository.create} */
   create(draft: OrderDraft, events: OrderEvents): Promise<Result<Order, StockShortage[]>> {
     this.drafts.push(structuredClone(draft))
+    const email = draft.contact.email.toLowerCase()
+    const pending = this.orders.filter(
+      (order) =>
+        order.status === 'pending_payment' &&
+        (order.contact.email.toLowerCase() === email ||
+          (draft.customerId !== null && order.customerId === draft.customerId)),
+    )
+    if (pending.length >= MAX_PENDING_ORDERS_PER_CUSTOMER) {
+      const oldest = Math.min(...pending.map((order) => order.reservedUntil.getTime()))
+      return Promise.reject(new TooManyPendingOrdersError(new Date(oldest), draft.createdAt))
+    }
     const shortages = this.stock.reserve(draft.reservation)
     if (shortages.length > 0) return Promise.resolve(err(shortages))
     const order = placeOrder(draft, formatOrderNumber(this.sequence))
@@ -536,6 +549,8 @@ export class InMemoryOrderPayments implements OrderPaymentsPort {
   refundedCount = 0
   /** Cambios de `payment_status` pedidos con `setPaymentStatus`, en orden. */
   readonly paymentStatusChanges: { orderId: string; status: PaymentStatus }[] = []
+  /** Última conciliación de cada pedido (`payment_reconciled_at`), en ms. */
+  readonly reconciledAt = new Map<string, number>()
 
   /**
    * @param repository - Repositorio de pedidos en memoria (el mismo almacén).
@@ -603,10 +618,21 @@ export class InMemoryOrderPayments implements OrderPaymentsPort {
             (AWAITING_PAYMENT_STATUSES as readonly PaymentStatus[]).includes(order.paymentStatus) &&
             order.reservedUntil.getTime() <= cutoff.getTime(),
         )
-        .sort((a, b) => a.reservedUntil.getTime() - b.reservedUntil.getTime())
+        .sort(
+          (a, b) =>
+            (this.reconciledAt.get(a.id) ?? -Infinity) -
+              (this.reconciledAt.get(b.id) ?? -Infinity) ||
+            a.reservedUntil.getTime() - b.reservedUntil.getTime(),
+        )
         .slice(0, limit)
         .map((order) => toOrderForPayment(structuredClone(order))),
     )
+  }
+
+  /** {@inheritDoc OrderPaymentsPort.markReconciled} */
+  markReconciled(orderId: string, at: Date): Promise<void> {
+    this.reconciledAt.set(orderId, at.getTime())
+    return Promise.resolve()
   }
 }
 
