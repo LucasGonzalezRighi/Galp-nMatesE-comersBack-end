@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import { randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
@@ -7,7 +8,7 @@ import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AppModule } from '../../src/app.module'
-import { setupApp } from '../../src/app.setup'
+import { APP_OPTIONS, setupApp } from '../../src/app.setup'
 import { PrismaService } from '../../src/shared/infrastructure/prisma/prisma.service'
 import { startContainers, type TestContainers } from '../support/containers'
 import { testOnlyControllers } from '../support/idempotency.controller'
@@ -28,9 +29,10 @@ describe('idempotencia y problem+json (E2E)', () => {
       imports: [AppModule],
       controllers: testOnlyControllers(),
     }).compile()
-    app = moduleRef.createNestApplication<INestApplication<Server>>()
-    setupApp(app)
-    await app.init()
+    const created = moduleRef.createNestApplication<NestExpressApplication>(APP_OPTIONS)
+    setupApp(created)
+    await created.init()
+    app = created
   })
 
   afterAll(async () => {

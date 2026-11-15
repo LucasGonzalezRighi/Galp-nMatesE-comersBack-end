@@ -1,8 +1,8 @@
 import { Controller, Get } from '@nestjs/common'
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { SkipThrottle } from '@nestjs/throttler'
 
 import { ApiProblemResponses } from '../../../shared/infrastructure/http/openapi'
+import { PublicRead } from '../../../shared/infrastructure/throttler/public-read'
 import { GetPublicSettingsQuery } from '../application/queries/get-public-settings.query'
 import type { PublicSettings } from '../application/read-models'
 import { PublicSettingsDto } from './dto/settings.response.dto'
@@ -10,11 +10,12 @@ import { PublicSettingsDto } from './dto/settings.response.dto'
 /**
  * Ajustes públicos de la tienda (`GET /settings/public`).
  *
- * Sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y `next build`) y
- * el spec §3.2 solo limita login, formularios públicos y creación de pedidos.
+ * Lectura pública (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP real del
+ * cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda (SSR/ISR y `next build`)
+ * no se limita.
  */
 @ApiTags('settings')
-@SkipThrottle()
+@PublicRead()
 @Controller('settings')
 export class SettingsController {
   /** @param getPublicSettings - Query de los ajustes públicos. */

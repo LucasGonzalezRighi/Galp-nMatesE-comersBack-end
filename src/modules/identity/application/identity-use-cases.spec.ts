@@ -12,8 +12,9 @@ import {
   InMemoryUserRepository,
   RecordingMailer,
 } from '../../../../test/support/identity'
-import type { AddressInput } from '../domain/address.entity'
+import { type AddressInput, MAX_ADDRESSES_PER_CUSTOMER } from '../domain/address.entity'
 import {
+  AddressBookFullError,
   AddressNotFoundError,
   EmailAlreadyRegisteredError,
   InvalidCredentialsError,
@@ -511,6 +512,25 @@ describe('libreta de direcciones', () => {
     ])
     expect(book[0]).toEqual({ ...work, postalCode: 'B1900', number: 'S/N' })
     expect(home.id).not.toBe(work.id)
+  })
+
+  it('como mucho 20 direcciones por cliente: la 21 da 422 address_book_full (NV-30)', async () => {
+    const create = new CreateMyAddressCommand(deps.addresses)
+    for (let i = 0; i < MAX_ADDRESSES_PER_CUSTOMER; i += 1) {
+      await create.execute('cus-1', addressInput({ label: `Casa ${String(i + 1)}` }))
+    }
+
+    const extra = create.execute('cus-1', addressInput({ label: 'Una más' }))
+
+    await expect(extra).rejects.toBeInstanceOf(AddressBookFullError)
+    await expect(extra).rejects.toMatchObject({
+      status: 422,
+      code: 'validation_error',
+      errors: [{ field: 'addresses', code: 'address_book_full' }],
+    })
+    expect(await deps.addresses.listByCustomer('cus-1')).toHaveLength(MAX_ADDRESSES_PER_CUSTOMER)
+    // El tope es por cliente: otro sigue pudiendo guardar.
+    await expect(create.execute('cus-2', addressInput())).resolves.toMatchObject({ label: 'Casa' })
   })
 
   it('no deja tocar ni borrar la dirección de otro cliente', async () => {

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { CLOCK, type Clock } from '../../shared/domain/clock'
+import { RedisService } from '../../shared/infrastructure/redis/redis.service'
 import { CatalogModule } from '../catalog/catalog.module'
 import { ModerateReviewCommand } from './application/commands/moderate-review.command'
 import { SubmitReviewCommand } from './application/commands/submit-review.command'
@@ -12,6 +13,7 @@ import {
   REVIEW_MODERATION_REPOSITORY,
   type ReviewModerationRepository,
 } from './application/ports/review-moderation.repository.port'
+import { REVIEW_QUOTA_PORT, type ReviewQuotaPort } from './application/ports/review-quota.port'
 import {
   REVIEW_REPOSITORY,
   type ReviewRepository,
@@ -19,24 +21,28 @@ import {
 import { ListAdminReviewsQuery } from './application/queries/list-admin-reviews.query'
 import { ListFeaturedReviewsQuery } from './application/queries/list-featured-reviews.query'
 import { ListProductReviewsQuery } from './application/queries/list-product-reviews.query'
+import { CachedReviewRepository } from './infrastructure/cached-review.repository'
 import { CatalogProductLookupAdapter } from './infrastructure/catalog-product-lookup.adapter'
 import { PrismaReviewModerationRepository } from './infrastructure/prisma-review-moderation.repository'
 import { PrismaReviewRepository } from './infrastructure/prisma-review.repository'
+import { RedisReviewQuota } from './infrastructure/redis-review-quota.adapter'
 import { AdminReviewsController } from './interface/admin-reviews.controller'
 import { ReviewsController } from './interface/reviews.controller'
 
 /**
  * Reseñas: las aprobadas de un producto con sus estadísticas y las destacadas del inicio
- * (`GET /products/{slug}/reviews` y `GET /reviews/featured`, sin caché, spec §3.2), el envío de
- * una reseña nueva que queda pendiente (`POST /products/{slug}/reviews`) y la moderación del
- * dashboard (`GET /admin/reviews` y `PATCH /admin/reviews/{id}`), que le avisa a la tienda y sube
- * la versión de la caché del catálogo (Ruling B-77).
+ * (`GET /products/{slug}/reviews` y `GET /reviews/featured`, con la caché del catálogo, NV-22),
+ * el envío de una reseña nueva que queda pendiente (`POST /products/{slug}/reviews`, con un tope
+ * diario por IP, NV-21) y la moderación del dashboard (`GET /admin/reviews` y
+ * `PATCH /admin/reviews/{id}`), que le avisa a la tienda y sube la versión de la caché del
+ * catálogo (Ruling B-77).
  */
 @Module({
   imports: [CatalogModule],
   controllers: [ReviewsController, AdminReviewsController],
   providers: [
-    { provide: REVIEW_REPOSITORY, useClass: PrismaReviewRepository },
+    PrismaReviewRepository,
+    { provide: REVIEW_REPOSITORY, useClass: CachedReviewRepository },
     { provide: PRODUCT_LOOKUP_PORT, useClass: CatalogProductLookupAdapter },
     { provide: REVIEW_MODERATION_REPOSITORY, useClass: PrismaReviewModerationRepository },
     {
@@ -51,10 +57,18 @@ import { ReviewsController } from './interface/reviews.controller'
       inject: [REVIEW_REPOSITORY],
     },
     {
+      provide: REVIEW_QUOTA_PORT,
+      useFactory: (redis: RedisService) => new RedisReviewQuota(redis.client),
+      inject: [RedisService],
+    },
+    {
       provide: SubmitReviewCommand,
-      useFactory: (products: ProductLookupPort, reviews: ReviewModerationRepository) =>
-        new SubmitReviewCommand(products, reviews),
-      inject: [PRODUCT_LOOKUP_PORT, REVIEW_MODERATION_REPOSITORY],
+      useFactory: (
+        products: ProductLookupPort,
+        reviews: ReviewModerationRepository,
+        quota: ReviewQuotaPort,
+      ) => new SubmitReviewCommand(products, reviews, quota),
+      inject: [PRODUCT_LOOKUP_PORT, REVIEW_MODERATION_REPOSITORY, REVIEW_QUOTA_PORT],
     },
     {
       provide: ListAdminReviewsQuery,

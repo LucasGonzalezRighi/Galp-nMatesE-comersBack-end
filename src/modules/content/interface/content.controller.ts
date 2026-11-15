@@ -1,8 +1,8 @@
 import { Controller, Get, NotFoundException, Param } from '@nestjs/common'
 import { ApiExtraModels, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
-import { SkipThrottle } from '@nestjs/throttler'
 
 import { ApiProblemResponses, ImageDto } from '../../../shared/infrastructure/http/openapi'
+import { PublicRead } from '../../../shared/infrastructure/throttler/public-read'
 import { GetContentQuery } from '../application/queries/get-content.query'
 import type {
   AboutContent,
@@ -40,12 +40,13 @@ export function isLegalDocument(value: string): value is LegalDocument {
 /**
  * Textos editables de la tienda (`/content/*`).
  *
- * Sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y `next build`) y
- * el spec §3.2 solo limita login, formularios públicos y creación de pedidos.
+ * Lectura pública (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP real del
+ * cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda (SSR/ISR y `next build`)
+ * no se limita.
  */
 @ApiTags('content')
 @ApiExtraModels(ImageDto, StorySceneDto)
-@SkipThrottle()
+@PublicRead()
 @Controller('content')
 export class ContentController {
   /** @param getContent - Query de los contenidos por clave. */

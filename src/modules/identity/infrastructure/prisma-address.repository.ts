@@ -4,7 +4,12 @@ import type { Prisma } from '../../../generated/prisma/client'
 import { isUniqueViolation } from '../../../shared/infrastructure/prisma/prisma-errors'
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
 import type { AddressRepository, NewAddress } from '../application/ports/address.repository.port'
-import type { Address, AddressInput } from '../domain/address.entity'
+import {
+  type Address,
+  type AddressInput,
+  MAX_ADDRESSES_PER_CUSTOMER,
+} from '../domain/address.entity'
+import { AddressBookFullError } from '../domain/identity-errors'
 import { toAddress, toAddressData } from './identity.mapper'
 
 /** Orden de la libreta: la predeterminada primero y después por alta (los ids son UUID v7). */
@@ -44,6 +49,7 @@ export class PrismaAddressRepository implements AddressRepository {
   async create(input: NewAddress): Promise<Address> {
     const row = await retryOnceOnUniqueViolation(() =>
       this.prisma.$transaction(async (tx) => {
+        await assertRoomInBook(tx, input.customerId)
         if (input.isDefault) await clearDefault(tx, input.customerId)
         return tx.address.create({
           data: { id: input.id, customerId: input.customerId, ...toAddressData(input) },
@@ -77,6 +83,22 @@ export class PrismaAddressRepository implements AddressRepository {
 }
 
 /** Le quita la marca de predeterminada a las direcciones del cliente (menos `exceptId`). */
+/**
+ * Tope de la libreta (NV-30): bloquea la libreta del cliente (bloqueo consultivo de la
+ * transacción, así dos altas a la vez se cuentan de a una) y cuenta sus direcciones.
+ *
+ * @param tx - Transacción abierta.
+ * @param customerId - Cliente dueño.
+ * @throws {AddressBookFullError} 422 si ya tiene `MAX_ADDRESSES_PER_CUSTOMER`.
+ */
+async function assertRoomInBook(tx: Prisma.TransactionClient, customerId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'address-book:' + customerId}))`
+  const count = await tx.address.count({ where: { customerId } })
+  if (count >= MAX_ADDRESSES_PER_CUSTOMER) {
+    throw new AddressBookFullError(MAX_ADDRESSES_PER_CUSTOMER)
+  }
+}
+
 async function clearDefault(
   tx: Prisma.TransactionClient,
   customerId: string,

@@ -31,10 +31,12 @@ export interface AddressRepository {
   findOne(customerId: string, id: string): Promise<Address | null>
 
   /**
-   * Agrega una dirección.
+   * Agrega una dirección, si el cliente tiene menos de `MAX_ADDRESSES_PER_CUSTOMER` (NV-30; el
+   * conteo y el alta van juntos, así dos altas a la vez no pasan el tope).
    *
    * @param input - Dirección con su id y su dueño.
    * @returns La dirección creada.
+   * @throws {AddressBookFullError} 422 si la libreta ya está llena.
    */
   create(input: NewAddress): Promise<Address>
 

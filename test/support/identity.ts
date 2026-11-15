@@ -25,9 +25,16 @@ import type {
   NewUser,
   UserRepository,
 } from '../../src/modules/identity/application/ports/user.repository.port'
-import type { Address, AddressInput } from '../../src/modules/identity/domain/address.entity'
+import {
+  type Address,
+  type AddressInput,
+  MAX_ADDRESSES_PER_CUSTOMER,
+} from '../../src/modules/identity/domain/address.entity'
 import type { Customer } from '../../src/modules/identity/domain/customer.entity'
-import { EmailAlreadyRegisteredError } from '../../src/modules/identity/domain/identity-errors'
+import {
+  AddressBookFullError,
+  EmailAlreadyRegisteredError,
+} from '../../src/modules/identity/domain/identity-errors'
 import type { User } from '../../src/modules/identity/domain/user.entity'
 import type { Clock } from '../../src/shared/domain/clock'
 
@@ -216,6 +223,10 @@ export class InMemoryAddressRepository implements AddressRepository {
 
   /** {@inheritDoc AddressRepository.create} */
   create(input: NewAddress): Promise<Address> {
+    const own = this.addresses.filter((address) => address.customerId === input.customerId)
+    if (own.length >= MAX_ADDRESSES_PER_CUSTOMER) {
+      return Promise.reject(new AddressBookFullError(MAX_ADDRESSES_PER_CUSTOMER))
+    }
     if (input.isDefault) this.clearDefault(input.customerId)
     this.addresses.push({ ...input })
     return Promise.resolve({ ...input })

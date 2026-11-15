@@ -1,10 +1,11 @@
 import { Controller, Get, type INestApplication, Req } from '@nestjs/common'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import type { Server } from 'node:http'
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { buildCorsOptions, setupApp } from './app.setup'
+import { APP_OPTIONS, buildCorsOptions, setupApp, setupBodyParsers } from './app.setup'
 import { ConfigModule } from './config/config.module'
 import { LoggerModule } from './shared/infrastructure/logger/logger.module'
 
@@ -41,6 +42,32 @@ describe('buildCorsOptions', () => {
   })
 })
 
+describe('setupBodyParsers (NV-17)', () => {
+  function parsersFor(env: Parameters<typeof setupBodyParsers>[1]): unknown[][] {
+    const useBodyParser = vi.fn()
+    setupBodyParsers({ useBodyParser }, env)
+    return useBodyParser.mock.calls
+  }
+
+  it('en producción solo JSON: hasta 100 kB y sin cuerpos comprimidos', () => {
+    expect(parsersFor({ MP_MODE: 'live', NODE_ENV: 'production' })).toEqual([
+      ['json', { limit: '100kb', inflate: false }],
+    ])
+    expect(parsersFor({ MP_MODE: 'live', NODE_ENV: 'development' })).toHaveLength(1)
+  })
+
+  it('con el simulador de pagos, además formularios planos, chicos y sin comprimir', () => {
+    expect(parsersFor({ MP_MODE: 'simulated', NODE_ENV: 'test' })).toEqual([
+      ['json', { limit: '100kb', inflate: false }],
+      ['urlencoded', { extended: false, inflate: false, limit: '8kb', parameterLimit: 10 }],
+    ])
+  })
+
+  it('la app se crea sin los body parsers por defecto de Nest', () => {
+    expect(APP_OPTIONS).toEqual({ bodyParser: false })
+  })
+})
+
 describe('setupApp (CORS, sin base ni Redis)', () => {
   let app: INestApplication<Server> | undefined
 
@@ -53,9 +80,10 @@ describe('setupApp (CORS, sin base ni Redis)', () => {
       imports: [ConfigModule, LoggerModule],
       controllers: [PingController],
     }).compile()
-    app = moduleRef.createNestApplication<INestApplication<Server>>()
-    setupApp(app)
-    await app.init()
+    const created = moduleRef.createNestApplication<NestExpressApplication>(APP_OPTIONS)
+    setupApp(created)
+    await created.init()
+    app = created
   })
 
   afterAll(async () => {

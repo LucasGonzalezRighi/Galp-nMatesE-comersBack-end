@@ -17,6 +17,7 @@ import {
   createValidationPipe,
   EachItem,
   type ItemRule,
+  MAX_FIELD_ERRORS,
   RootRule,
   type RootRuleOptions,
 } from './validation.pipe'
@@ -193,5 +194,26 @@ describe('createValidationPipe con RootRule (errores de raíz, Ruling B-80)', ()
     expect(() => RootRule({ ...AT_LEAST_ONE, name: '' })).toThrow(TypeError)
     expect(() => RootRule({ ...AT_LEAST_ONE, code: ' ' })).toThrow(TypeError)
     expect(() => RootRule({ ...AT_LEAST_ONE, message: '' })).toThrow(TypeError)
+  })
+})
+
+describe('createValidationPipe con muchos errores (NV-23)', () => {
+  class ManyDto {
+    @IsString({ each: true, message: 'Textos' })
+    @IsArray({ message: 'Tiene que ser una lista' })
+    names!: string[]
+
+    @ValidateNested({ each: true })
+    @Type(() => ListDto)
+    lists!: ListDto[]
+  }
+
+  it(`devuelve como mucho ${String(MAX_FIELD_ERRORS)} errores, en el orden en que llegaron`, async () => {
+    const lists = Array.from({ length: 200 }, () => ({ ids: 'nada', count: 'nada' }))
+    const errors = await errorsOf(ManyDto, { names: [1], lists })
+
+    expect(errors).toHaveLength(MAX_FIELD_ERRORS)
+    expect(errors[0]).toEqual({ field: 'names', code: 'invalid_type', message: 'Textos' })
+    expect(errors[1]?.field).toBe('lists.0.ids')
   })
 })

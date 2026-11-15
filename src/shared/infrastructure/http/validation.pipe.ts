@@ -232,6 +232,13 @@ export function toFieldErrors(errors: readonly ValidationError[], parent = ''): 
 }
 
 /**
+ * Máximo de errores por campo de un 422 (NV-23): con un cuerpo lleno de errores (por ejemplo miles
+ * de líneas inválidas) la respuesta no crece sin tope. Van los primeros, en el orden en que
+ * llegaron.
+ */
+export const MAX_FIELD_ERRORS = 50
+
+/**
  * Excepción de validación: el `ProblemFilter` la responde como 422 `validation_error` con
  * `errors[]`.
  *
@@ -247,7 +254,8 @@ export function validationProblem(errors: FieldError[]): UnprocessableEntityExce
  * tipos (los query params llegan como texto) y responde 422 con un error por campo. Los mensajes
  * salen de los decoradores de cada DTO, en español (`@IsInt({ message: '…' })`). Los errores
  * llevan el valor que falló (`validationError.value`, el default de `class-validator`, explícito
- * acá) porque {@link EachItem} lo necesita para marcar los índices.
+ * acá) porque {@link EachItem} lo necesita para marcar los índices. Responde como mucho
+ * {@link MAX_FIELD_ERRORS} errores.
  *
  * @returns El `ValidationPipe` configurado.
  */
@@ -258,6 +266,7 @@ export function createValidationPipe(): ValidationPipe {
     transform: true,
     transformOptions: { enableImplicitConversion: true },
     validationError: { target: false, value: true },
-    exceptionFactory: (errors) => validationProblem(toFieldErrors(errors)),
+    exceptionFactory: (errors) =>
+      validationProblem(toFieldErrors(errors).slice(0, MAX_FIELD_ERRORS)),
   })
 }

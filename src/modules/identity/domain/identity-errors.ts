@@ -43,6 +43,27 @@ export class AddressNotFoundError extends DomainError {
   }
 }
 
+/**
+ * 422 `validation_error` (NV-30): la libreta ya tiene `MAX_ADDRESSES_PER_CUSTOMER` direcciones. El
+ * error va en `addresses`, un campo que no es del formulario: la tienda lo muestra como mensaje
+ * general.
+ */
+export class AddressBookFullError extends DomainError {
+  /** @param max - Máximo de direcciones por cliente. */
+  constructor(max: number) {
+    super('validation_error', 422, 'Revisá los campos marcados.', undefined, {
+      errors: [
+        {
+          field: 'addresses',
+          code: 'address_book_full',
+          message: `Ya tenés ${String(max)} direcciones guardadas: borrá una para agregar otra.`,
+        },
+      ],
+    })
+    this.name = 'AddressBookFullError'
+  }
+}
+
 /** 429 `rate_limited`: el email quedó bloqueado por intentos fallidos (con `Retry-After`). */
 export class LoginLockedError extends DomainError {
   /**

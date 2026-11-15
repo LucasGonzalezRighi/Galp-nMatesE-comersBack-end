@@ -20,6 +20,12 @@ export interface AddressInput {
   isDefault: boolean
 }
 
+/**
+ * Máximo de direcciones en la libreta de un cliente (NV-30): `GET /me/addresses` devuelve la
+ * libreta entera, sin paginar, así que no puede crecer sin tope.
+ */
+export const MAX_ADDRESSES_PER_CUSTOMER = 20
+
 /** Dirección guardada en la libreta de un cliente. */
 export interface Address extends AddressInput {
   /** Id de la dirección (UUID v7). */

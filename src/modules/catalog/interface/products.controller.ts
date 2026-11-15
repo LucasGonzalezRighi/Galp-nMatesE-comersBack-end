@@ -6,13 +6,13 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger'
-import { SkipThrottle } from '@nestjs/throttler'
 
 import {
   ApiProblemResponses,
   ImageDto,
   schemaRef,
 } from '../../../shared/infrastructure/http/openapi'
+import { PublicRead } from '../../../shared/infrastructure/throttler/public-read'
 import { GetProductQuery } from '../application/queries/get-product.query'
 import {
   GetRelatedProductsQuery,
@@ -27,12 +27,13 @@ import { PRODUCT_NOT_FOUND, ProductSlugParamDto } from './dto/product-slug.param
 /**
  * Catálogo publicado: listado, ficha y relacionados (`/products`).
  *
- * Sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y `next build`) y
- * el spec §3.2 solo limita login, formularios públicos y creación de pedidos.
+ * Lectura pública (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP real del
+ * cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda (SSR/ISR y `next build`)
+ * no se limita.
  */
 @ApiTags('catalog')
 @ApiExtraModels(ProductSummaryDto, ProductTabsDto, ImageDto)
-@SkipThrottle()
+@PublicRead()
 @Controller('products')
 export class ProductsController {
   /**

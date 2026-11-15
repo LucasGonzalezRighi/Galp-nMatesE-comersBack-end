@@ -95,6 +95,20 @@ describe('ProblemFilter', () => {
     })
   })
 
+  it('los errores de los body parsers (413, 415) salen con el detail en español (NV-17)', () => {
+    for (const [status, message, detail] of [
+      [413, 'request entity too large', 'El cuerpo del pedido es demasiado grande.'],
+      [415, 'content encoding unsupported', 'El formato del cuerpo del pedido no es soportado.'],
+    ] as const) {
+      // Así llegan desde Express: Nest envuelve el error de `http-errors` en una HttpException.
+      const cause = Object.assign(new Error(message), { statusCode: status, expose: true })
+      const { res } = catchWith(new HttpException(message, status, { cause }), 'POST')
+
+      expect(res.statusCode).toBe(status)
+      expect(res.body).toMatchObject({ status, detail })
+    }
+  })
+
   it('convierte el error del pipe de validación en un 422 con errors[] por campo', async () => {
     const pipe = createValidationPipe()
     const error: unknown = await pipe

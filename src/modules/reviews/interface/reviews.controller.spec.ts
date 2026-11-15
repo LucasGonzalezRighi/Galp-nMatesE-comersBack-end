@@ -103,10 +103,12 @@ describe('ReviewsController (HTTP con queries en memoria)', () => {
 
       expect(response.status).toBe(202)
       expect(response.body).toEqual({ status: 'pending' })
+      // Sin `trust proxy` no se conoce la IP real del cliente: el cupo diario no la cuenta.
       expect(submitReview.execute.mock.calls).toEqual([
         [
           KNOWN_SLUG,
           { rating: 4.5, authorName: null, text: 'Un mate hermoso, llegó rápido.', website: null },
+          null,
         ],
       ])
     })

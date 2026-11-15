@@ -95,6 +95,38 @@ describe('parseEnv', () => {
     })
   })
 
+  describe('TRUST_PROXY (NV-25)', () => {
+    it('apagada por defecto (sin la variable o vacía)', () => {
+      expect(parseEnv(REQUIRED).TRUST_PROXY).toEqual([])
+      expect(parseEnv({ ...REQUIRED, TRUST_PROXY: ' , ' }).TRUST_PROXY).toEqual([])
+    })
+
+    it('acepta IPs, redes CIDR y los nombres de Express, separados por comas', () => {
+      const env = parseEnv({
+        ...REQUIRED,
+        TRUST_PROXY: ' 10.0.0.5, 10.1.0.0/16 ,fd00::/8,::1, loopback,uniquelocal',
+      })
+      expect(env.TRUST_PROXY).toEqual([
+        '10.0.0.5',
+        '10.1.0.0/16',
+        'fd00::/8',
+        '::1',
+        'loopback',
+        'uniquelocal',
+      ])
+    })
+
+    it('rechaza true, un número de saltos o un nombre de host, sin mostrar el valor', () => {
+      for (const value of ['true', '7', 'tienda.local', '192.0.2.1,mi proxy']) {
+        const message = errorOf({ ...REQUIRED, TRUST_PROXY: value })
+        expect(message).toContain(
+          '- TRUST_PROXY: tiene un valor inválido; se espera IPs o redes CIDR',
+        )
+        expect(message).not.toContain(value)
+      }
+    })
+  })
+
   it('con un PORT que no es número lanza un error que nombra PORT', () => {
     expect(errorOf({ ...REQUIRED, PORT: 'abc' })).toContain('PORT')
   })
@@ -104,6 +136,7 @@ describe('parseEnv', () => {
       NODE_ENV: 'development',
       HOST: '127.0.0.1',
       PORT: 3001,
+      TRUST_PROXY: [],
       DATABASE_URL: REQUIRED.DATABASE_URL,
       REDIS_URL: REQUIRED.REDIS_URL,
       ADMIN_ORIGIN: 'http://localhost:5173',

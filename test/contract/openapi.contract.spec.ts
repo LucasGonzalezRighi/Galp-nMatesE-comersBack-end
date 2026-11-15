@@ -1,12 +1,13 @@
 import type { INestApplication } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import type { Server } from 'node:http'
 import { resolve } from 'node:path'
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { AppModule } from '../../src/app.module'
-import { setupApp } from '../../src/app.setup'
+import { APP_OPTIONS, setupApp } from '../../src/app.setup'
 import { buildOpenApiDocument, setupSwagger } from '../../src/swagger'
 import {
   type ContractDocument,
@@ -254,11 +255,13 @@ describe('contrato OpenAPI', () => {
     vi.stubEnv('NODE_ENV', 'test')
     vi.stubEnv('DATABASE_URL', 'postgresql://contract:contract@127.0.0.1:1/contract')
     vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:1')
-    app = await NestFactory.create<INestApplication<Server>>(AppModule, {
+    const created = await NestFactory.create<NestExpressApplication>(AppModule, {
+      ...APP_OPTIONS,
       logger: false,
       abortOnError: false,
     })
-    setupApp(app)
+    setupApp(created)
+    app = created
     const contractDocument = loadContract(CONTRACT_PATH)
     const generatedDocument = buildOpenApiDocument(app)
     contract = normalizeOpenApi(contractDocument)

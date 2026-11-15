@@ -1769,3 +1769,38 @@ en la raíz sin tocar el contrato. Entre paréntesis, el número de `findings.js
   la tienda descarta el pedido y la persona arma otro) sin llamar a Mercado Pago. Las cuotas
   (`installments`) no crean intentos y siguen sin límite propio (piden el `X-Order-Token` del
   pedido): riesgo aceptado en esta tanda, queda anotado para la de límites.
+
+### Tanda C · límites y recursos
+
+- **NV-25 (32)** arreglada: variable `TRUST_PROXY` (IPs, redes CIDR o `loopback`, `linklocal`,
+  `uniquelocal`; apagada por defecto). Con ella Express toma la IP del cliente de `X-Forwarded-For`
+  saltando solo esos proxies, y los límites por IP (y el bloqueo de login de NV-09) cuentan por
+  cliente. La tienda todavía no manda la IP real: el rewrite de Next 16 reenvía la cabecera que le
+  llega (sin agregar la del navegador) y su servidor no la pone. Hace falta un proxy delante de la
+  tienda que la escriba (README, "Puertos y orígenes").
+- **NV-17 (22)** arreglada: la app se crea sin los body parsers de Nest (`APP_OPTIONS`). JSON de hasta
+  100 kB y sin descomprimir (`Content-Encoding` da 415); formularios solo con el simulador de pagos
+  (nunca en producción), planos, de 8 kB y 10 campos. Los 413 y 415 salen con el texto en español.
+- **NV-13 (1)** arreglada: el listado de productos se cachea solo sin `q` ni `ids`, con `pageSize` 24
+  o 100, y nunca una página vacía: las claves dependen del catálogo y no de lo que mande el cliente.
+- **NV-18 (23)** arreglada con condición: `@PublicRead()` en las 14 lecturas públicas, 300 por
+  minuto por IP real. No cuenta sin `TRUST_PROXY` ni los pedidos que origina un proxy de confianza
+  (el servidor de la tienda armando sus páginas). Riesgo aceptado: sin `TRUST_PROXY` siguen sin
+  límite (con la IP del socket frenaría a toda la tienda). El pool y `statement_timeout` quedan para
+  B8.
+- **NV-22 (29)** arreglada: las reseñas aprobadas de un producto y las destacadas pasan por la caché
+  (60 s, con la versión del catálogo que sube la moderación); una clave por producto publicado y una
+  para las destacadas. Sin cambiar el contrato.
+- **NV-23 (30)** arreglada: un 422 trae como mucho 50 errores, y con más de 50 líneas en el carrito
+  se convierten y validan solo las primeras 51 (el límite de líneas del contrato).
+- **NV-30 (24)** arreglada: como mucho 20 direcciones por cliente. La 21 responde 422
+  `validation_error` con el error en `addresses` (`address_book_full`), que el contrato permite y la
+  tienda muestra como mensaje general. Conteo y alta van con un bloqueo consultivo por cliente.
+- **NV-21 (28)** arreglada en parte: como mucho 5 reseñas por IP real por día (24 h desde la primera;
+  la sexta da 429 `rate_limited` con `Retry-After`, sin guardar). Por email no se puede: el
+  contrato no pide email en la reseña. Sin `TRUST_PROXY` no se cuenta. La purga de las pendientes
+  viejas queda para la ronda de datos personales.
+- **NV-11 (19)** arreglada: todo lo que no es lectura pública sale con `Cache-Control: no-store` y
+  `Vary: Cookie` (cuenta, admin, pedido por token, pagos y `GET /auth/csrf`).
+- Fuera de la tanda: las cuotas (`installments`) siguen sin límite propio (aviso de la tanda B) y el
+  `message` del contacto sigue sin pasar por `isStorableText`.

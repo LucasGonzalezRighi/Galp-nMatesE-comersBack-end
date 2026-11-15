@@ -1,4 +1,5 @@
 import type { CachePort } from '../../../shared/application/ports/cache.port'
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../../../shared/infrastructure/http/page.dto'
 import type { ProductGroup } from '../domain/category.entity'
 import type { ProductFilter } from '../application/ports/product.repository.port'
 
@@ -95,6 +96,54 @@ export function productListCacheKey(filter: ProductFilter, version: number): str
     filter.pageSize,
   ]
   return `${versionPrefix(version)}:products:list:${JSON.stringify(parts)}`
+}
+
+/**
+ * Clave de las reseñas aprobadas de un producto (NV-22). Va con la versión del catálogo: la
+ * moderación de reseñas la sube.
+ *
+ * @param productId - Id del producto.
+ * @param version - Versión de {@link catalogCacheVersion}.
+ * @returns `catalog:v{version}:reviews:product:{productId}`.
+ * @throws {RangeError} En español, si la versión no es un entero de 0 en adelante.
+ */
+export function productReviewsCacheKey(productId: string, version: number): string {
+  return `${versionPrefix(version)}:reviews:product:${productId}`
+}
+
+/**
+ * Clave de las reseñas destacadas del inicio (NV-22).
+ *
+ * @param version - Versión de {@link catalogCacheVersion}.
+ * @returns `catalog:v{version}:reviews:featured`.
+ * @throws {RangeError} En español, si la versión no es un entero de 0 en adelante.
+ */
+export function featuredReviewsCacheKey(version: number): string {
+  return `${versionPrefix(version)}:reviews:featured`
+}
+
+/**
+ * Tamaños de página de los listados que se cachean (NV-13): el por defecto del contrato y el
+ * máximo, con el que la tienda lee el catálogo entero.
+ */
+export const CACHED_PRODUCT_PAGE_SIZES: readonly number[] = [DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE]
+
+/**
+ * Indica si un listado se cachea (NV-13): sin `ids` (la tienda concilia el stock del carrito con
+ * ellos), sin búsqueda (`q` es texto libre) y con un tamaño de {@link CACHED_PRODUCT_PAGE_SIZES}.
+ * Junto con no guardar las páginas vacías, la cantidad de claves depende del catálogo (líneas,
+ * grupos, orden y páginas con productos) y no de lo que mande el cliente; el resto va a Postgres,
+ * con el límite de las lecturas públicas.
+ *
+ * @param filter - Filtro ya normalizado.
+ * @returns `true` si el listado se puede guardar en la caché.
+ */
+export function isCacheableProductList(filter: ProductFilter): boolean {
+  return (
+    filter.ids === undefined &&
+    filter.q === undefined &&
+    CACHED_PRODUCT_PAGE_SIZES.includes(filter.pageSize)
+  )
 }
 
 /**

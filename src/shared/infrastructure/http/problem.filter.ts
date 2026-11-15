@@ -233,6 +233,16 @@ function isChangeNotices(value: unknown): value is ChangeNotice[] {
   )
 }
 
+/**
+ * Indica si la causa de una `HttpException` es un error de `http-errors` de Express (por ejemplo
+ * los de los body parsers: 413 o 415), que Nest envuelve con su mensaje en inglés.
+ */
+function isExpressHttpError(cause: unknown): boolean {
+  return (
+    isRecord(cause) && typeof cause.statusCode === 'number' && typeof cause.expose === 'boolean'
+  )
+}
+
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
@@ -369,7 +379,10 @@ export class ProblemFilter implements ExceptionFilter {
       body = { detail: optionalString(response.message) }
     }
 
-    let detail = body.detail ?? defaults.detail
+    // Los errores de Express traen el texto en inglés: va el de este código (NV-17).
+    let detail = isExpressHttpError(exception.cause)
+      ? defaults.detail
+      : (body.detail ?? defaults.detail)
     if (status === 404 && detail === `Cannot ${req.method} ${req.originalUrl}`) {
       detail = `No existe la ruta ${req.method} ${instance}.`
     }

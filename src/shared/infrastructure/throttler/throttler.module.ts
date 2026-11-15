@@ -6,8 +6,12 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { RedisModule } from '../redis/redis.module'
 import { RedisService } from '../redis/redis.service'
 import { FailOpenThrottlerStorage } from './fail-open-throttler.storage'
+import { skipPublicReadWithoutClientIp } from './public-read'
 
-/** Límite por defecto de las rutas públicas: 120 pedidos por minuto por IP. */
+/**
+ * Límite por defecto de las rutas públicas: 120 pedidos por minuto por IP (`req.ip`: la del
+ * cliente con `TRUST_PROXY`; sin él, la del socket, que detrás de la tienda es la de su servidor).
+ */
 export const PUBLIC_RATE_LIMIT = { ttl: 60_000, limit: 120 } as const
 
 /** Mensaje del 429 (el filtro `problem+json` de la Task 5 lo pone en `detail`). */
@@ -18,8 +22,9 @@ export const RATE_LIMIT_MESSAGE = 'Demasiados pedidos seguidos: esperá un minut
  * ({@link PUBLIC_RATE_LIMIT}, por IP), contadores en Redis compartidos entre instancias y, si
  * Redis se cae, en memoria ({@link FailOpenThrottlerStorage}). Las rutas sensibles (login,
  * formularios, pedidos) ajustan su límite con `@Throttle` y las que no deben limitarse usan
- * `@SkipThrottle`: las lecturas públicas del catálogo (spec §3.2 solo pide limitar login,
- * formularios y pedidos) lo usan porque la tienda las pide desde un solo servidor.
+ * `@SkipThrottle`. Las lecturas públicas (`@PublicRead()`, NV-18) llevan su propio límite, que
+ * solo cuenta cuando se conoce la IP real del cliente (`skipIf`): sin `TRUST_PROXY`, o cuando lee
+ * el servidor de la tienda, no se limitan.
  */
 @Module({
   imports: [
@@ -28,6 +33,7 @@ export const RATE_LIMIT_MESSAGE = 'Demasiados pedidos seguidos: esperá un minut
       inject: [RedisService],
       useFactory: (redis: RedisService) => ({
         throttlers: [PUBLIC_RATE_LIMIT],
+        skipIf: skipPublicReadWithoutClientIp,
         storage: new FailOpenThrottlerStorage(new ThrottlerStorageRedisService(redis.client)),
         errorMessage: RATE_LIMIT_MESSAGE,
       }),

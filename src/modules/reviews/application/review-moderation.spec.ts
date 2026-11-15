@@ -11,10 +11,11 @@ import {
   type ReviewStatus,
   reviewStorefrontTags,
 } from '../domain/review-moderation'
-import { ReviewNotFoundError } from '../domain/reviews-errors'
+import { ReviewNotFoundError, TooManyReviewsError } from '../domain/reviews-errors'
 import { ModerateReviewCommand } from './commands/moderate-review.command'
 import { type ReviewInput, SubmitReviewCommand } from './commands/submit-review.command'
 import type { ProductLookupPort } from './ports/product-lookup.port'
+import type { ReviewQuotaPort } from './ports/review-quota.port'
 import type {
   ModeratedReviewSlice,
   ReviewModerationRepository,
@@ -104,13 +105,34 @@ const REVIEW: ReviewInput = {
   website: null,
 }
 
+/** Cupo en memoria: cuenta por IP y deja pasar hasta `limit` reseñas. */
+class CountingQuota implements ReviewQuotaPort {
+  readonly taken: string[] = []
+
+  constructor(private readonly limit = Number.POSITIVE_INFINITY) {}
+
+  take(clientIp: string): Promise<number | null> {
+    this.taken.push(clientIp)
+    const count = this.taken.filter((ip) => ip === clientIp).length
+    return Promise.resolve(count <= this.limit ? null : 3600)
+  }
+}
+
+/** El caso de uso con un cupo sin límite (o el que se pase). */
+function submitWith(
+  reviews: InMemoryReviews,
+  quota: ReviewQuotaPort = new CountingQuota(),
+): SubmitReviewCommand {
+  return new SubmitReviewCommand(products, reviews, quota)
+}
+
 describe('SubmitReviewCommand', () => {
   it('deja la reseña pending, sin compra verificada ni destacar', async () => {
     const reviews = new InMemoryReviews()
 
-    await expect(
-      new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, REVIEW),
-    ).resolves.toEqual({ status: 'pending' })
+    await expect(submitWith(reviews).execute(PRODUCT.slug, REVIEW, null)).resolves.toEqual({
+      status: 'pending',
+    })
 
     expect(reviews.rows).toEqual([
       expect.objectContaining({
@@ -127,48 +149,77 @@ describe('SubmitReviewCommand', () => {
   it.each([null, '', '   '])('sin nombre (%j) la firma "Anónimo"', async (authorName) => {
     const reviews = new InMemoryReviews()
 
-    await new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, {
-      ...REVIEW,
-      authorName,
-    })
+    await submitWith(reviews).execute(PRODUCT.slug, { ...REVIEW, authorName }, null)
 
     expect(reviews.rows[0]?.authorName).toBe('Anónimo')
   })
 
   it('con el campo trampa lleno responde pending y no guarda nada', async () => {
     const reviews = new InMemoryReviews()
+    const quota = new CountingQuota()
 
     await expect(
-      new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, { ...REVIEW, website: ' ' }),
+      submitWith(reviews, quota).execute(PRODUCT.slug, { ...REVIEW, website: ' ' }, '203.0.113.9'),
     ).resolves.toEqual({ status: 'pending' })
     expect(reviews.rows).toEqual([])
+    expect(quota.taken).toEqual([])
   })
 
   it('un producto que no existe da null (404) aunque el campo trampa venga lleno', async () => {
-    const reviews = new InMemoryReviews()
-    const command = new SubmitReviewCommand(products, reviews)
+    const command = submitWith(new InMemoryReviews())
 
-    await expect(command.execute('no-existe', REVIEW)).resolves.toBeNull()
-    await expect(command.execute('no-existe', { ...REVIEW, website: 'spam' })).resolves.toBeNull()
+    await expect(command.execute('no-existe', REVIEW, null)).resolves.toBeNull()
+    await expect(
+      command.execute('no-existe', { ...REVIEW, website: 'spam' }, null),
+    ).resolves.toBeNull()
   })
 
-  it('una puntuación inválida no se guarda', async () => {
+  it('una puntuación inválida no se guarda ni gasta cupo', async () => {
     const reviews = new InMemoryReviews()
+    const quota = new CountingQuota()
 
     await expect(
-      new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, { ...REVIEW, rating: 4.3 }),
+      submitWith(reviews, quota).execute(PRODUCT.slug, { ...REVIEW, rating: 4.3 }, '203.0.113.9'),
     ).rejects.toThrow(RangeError)
+    expect(quota.taken).toEqual([])
+  })
+
+  it('pasado el cupo de la IP responde 429 rate_limited con Retry-After y no guarda (NV-21)', async () => {
+    const reviews = new InMemoryReviews()
+    const command = submitWith(reviews, new CountingQuota(2))
+
+    await command.execute(PRODUCT.slug, REVIEW, '203.0.113.9')
+    await command.execute(PRODUCT.slug, REVIEW, '203.0.113.9')
+    const third = command.execute(PRODUCT.slug, REVIEW, '203.0.113.9')
+
+    await expect(third).rejects.toBeInstanceOf(TooManyReviewsError)
+    await expect(third).rejects.toMatchObject({
+      status: 429,
+      code: 'rate_limited',
+      retryAfterSeconds: 3600,
+    })
+    expect(reviews.rows).toHaveLength(2)
+    await expect(command.execute(PRODUCT.slug, REVIEW, '203.0.113.10')).resolves.toEqual({
+      status: 'pending',
+    })
+  })
+
+  it('sin IP real conocida no se cuenta en el cupo', async () => {
+    const reviews = new InMemoryReviews()
+    const quota = new CountingQuota(0)
+
+    await expect(submitWith(reviews, quota).execute(PRODUCT.slug, REVIEW, null)).resolves.toEqual({
+      status: 'pending',
+    })
+    expect(quota.taken).toEqual([])
   })
 })
 
 describe('moderación', () => {
   async function withPending(): Promise<InMemoryReviews> {
     const reviews = new InMemoryReviews()
-    await new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, REVIEW)
-    await new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, {
-      ...REVIEW,
-      authorName: null,
-    })
+    await submitWith(reviews).execute(PRODUCT.slug, REVIEW, null)
+    await submitWith(reviews).execute(PRODUCT.slug, { ...REVIEW, authorName: null }, null)
     return reviews
   }
 
@@ -213,7 +264,7 @@ describe('moderación', () => {
 
   it('decide moderatedAt con el estado de la transacción, no con el leído antes (carrera entre admins)', async () => {
     const reviews = new RacedReviews()
-    await new SubmitReviewCommand(products, reviews).execute(PRODUCT.slug, REVIEW)
+    await submitWith(reviews).execute(PRODUCT.slug, REVIEW, null)
     Object.assign(reviews.rows[0] ?? {}, { status: 'approved', moderatedAt: EARLIER })
 
     const review = await new ModerateReviewCommand(reviews, clock).execute('rev-1', {

@@ -1,9 +1,10 @@
 import type { INestApplication } from '@nestjs/common'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import type { Server } from 'node:http'
 
 import { AppModule } from '../../src/app.module'
-import { setupApp } from '../../src/app.setup'
+import { APP_OPTIONS, setupApp } from '../../src/app.setup'
 import {
   MAILER_PORT,
   type MailerPort,
@@ -46,7 +47,7 @@ export async function createApp(overrides: AppOverrides = {}): Promise<INestAppl
     builder.overrideProvider(PAYMENT_GATEWAY_PORT).useValue(overrides.gateway)
   }
   const moduleRef = await builder.compile()
-  const app = moduleRef.createNestApplication<INestApplication<Server>>()
+  const app = moduleRef.createNestApplication<NestExpressApplication>(APP_OPTIONS)
   setupApp(app)
   await app.init()
   return app

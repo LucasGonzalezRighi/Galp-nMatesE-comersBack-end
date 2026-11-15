@@ -38,6 +38,33 @@ para cambiarlo. Si algo de tu máquina llama a `localhost` y lo resuelve solo co
 `http://127.0.0.1:3001` o arrancá con `HOST=::1`. El Postgres y el Redis de `docker compose` también
 quedan atados a `127.0.0.1`: desde otra máquina de la red no se llega a ellos.
 
+**Proxies de confianza (`TRUST_PROXY`, apagada por defecto):** sin ella, `req.ip` es la IP del
+socket, y todo lo que entra por la tienda (su servidor reescribe `/api/v1/*` hacia el back) comparte
+los contadores por IP: login, registro, pedidos, formularios. Con una lista de IPs o redes CIDR (o
+`loopback`, `linklocal`, `uniquelocal`), Express toma la IP del cliente de `X-Forwarded-For`
+saltando solo esos proxies, y los límites cuentan por cliente. Además se activan el límite de las
+lecturas públicas (300 por minuto por IP real) y el cupo de 5 reseñas por IP por día; los pedidos
+que origina un proxy de confianza (el servidor de la tienda leyendo para armar sus páginas, sin
+`X-Forwarded-For`) no se cuentan en esos dos.
+
+- La tienda tiene que mandar `X-Forwarded-For` con la IP real. Hoy no la agrega: el rewrite de
+  Next 16 (`next.config.ts`, proxy sin `xfwd`) reenvía la cabecera que le llega y suma
+  `x-forwarded-host`, y las lecturas de su servidor (`lib/api.server.ts`) no la mandan. Hace falta
+  un proxy delante de la tienda que la escriba con la IP del cliente (pisando la que mande el
+  navegador), o que la tienda la agregue.
+- Listá solo proxies que escriban la IP real: si la tienda reenvía tal cual lo que manda el
+  navegador, cualquiera puede inventarse una IP y saltear los límites.
+- Ejemplo: tienda en `10.0.0.5` y el back detrás de un proxy en `10.0.0.2`:
+  `TRUST_PROXY=10.0.0.5,10.0.0.2`.
+
+**Cuerpos de los pedidos:** JSON de hasta 100 kB y sin comprimir (`Content-Encoding: gzip` da 415).
+Los formularios (`application/x-www-form-urlencoded`) solo se aceptan con el simulador de pagos
+prendido (nunca en producción), planos y chicos.
+
+**Caché:** toda respuesta que no sea una lectura pública sale con `Cache-Control: no-store` y
+`Vary: Cookie` (cuenta, admin, pedido por token, pagos, `GET /auth/csrf`): un CDN o proxy no las
+guarda. Las lecturas públicas no cambian.
+
 **CORS:** solo `ADMIN_ORIGIN` (en desarrollo `http://localhost:5173`) recibe permiso, con
 credenciales (las cookies de sesión del admin). La tienda no lo necesita: su servidor llama al back
 y reescribe `/api/v1/*` hacia él, así que el navegador siempre habla con la tienda. Un pedido desde
@@ -137,8 +164,9 @@ sin `/` inicial o entre comillas, para que no la convierta en una ruta de Window
 ## Probar la tienda contra este back
 
 Las 13 lecturas públicas del contrato (`/categories`, `/products…`, `/reviews/featured`,
-`/content/*`, `/settings/public`) están implementadas, sin límite de pedidos por IP (la tienda las
-pide desde un solo servidor). Desde B3 funcionan la cuenta y el admin, desde B4 el carrito, el
+`/content/*`, `/settings/public`) están implementadas. Con `TRUST_PROXY` llevan un límite de 300 por
+minuto por IP real del cliente; el servidor de la tienda (que las pide para armar sus páginas) no se
+limita, y sin `TRUST_PROXY` no se limita nada (ver "Puertos y orígenes"). Desde B3 funcionan la cuenta y el admin, desde B4 el carrito, el
 checkout y los pedidos (ver "Pedidos y stock"), y desde B5 el pago con Mercado Pago contra el
 simulador del back (ver "Pagos con Mercado Pago"). Probadas contra Postgres y Redis reales: los
 E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada pieza en
@@ -232,6 +260,8 @@ cookies `__Host-` y un token CSRF por sesión
     mismo email desde la misma IP en 15 minutos y el siguiente responde 429 con `Retry-After` (el
     décimo también, si falla). Durante esa espera tampoco entra la contraseña correcta desde esa IP;
     desde otra, sí.
+  - La libreta guarda hasta 20 direcciones por cliente: la siguiente responde 422
+    `validation_error` con el error en `addresses` (`address_book_full`).
   - Sin Redis, las rutas con sesión responden 503: ninguna deja pasar sin verificar.
 - **Admin contra este back:** el back tiene que permitir el origen del admin en `ADMIN_ORIGIN`
   (`http://localhost:5173` con `vite dev`). Para el admin compilado, desde `../frontend`:

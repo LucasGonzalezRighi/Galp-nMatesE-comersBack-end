@@ -102,6 +102,32 @@ describe('CachedProductRepository', () => {
     expect(set).not.toHaveBeenCalled()
   })
 
+  it('no cachea búsquedas ni tamaños de página sueltos: las claves no dependen del cliente (NV-13)', async () => {
+    const inner = innerRepository()
+    const { cache, set } = memoryCache()
+    const repository = new CachedProductRepository(inner, cache)
+
+    await repository.list({ ...FILTER, q: 'imperial' })
+    await repository.list({ ...FILTER, pageSize: 7 })
+    await repository.list({ ...FILTER, pageSize: 24 })
+
+    expect(inner.list).toHaveBeenCalledTimes(3)
+    expect(set).toHaveBeenCalledTimes(1)
+    expect(set.mock.calls[0]?.[0]).toContain('"menor",false,1,24]')
+  })
+
+  it('no guarda las páginas vacías (página fuera de rango o línea que no existe) (NV-13)', async () => {
+    const inner = innerRepository()
+    inner.list.mockResolvedValue({ items: [], total: 1 })
+    const { cache, set } = memoryCache()
+    const repository = new CachedProductRepository(inner, cache)
+
+    const page = await repository.list({ ...FILTER, page: 9999 })
+
+    expect(page).toEqual({ items: [], total: 1 })
+    expect(set).not.toHaveBeenCalled()
+  })
+
   it('cachea la ficha por slug y no guarda los que no existen', async () => {
     const inner = innerRepository()
     const { cache, set } = memoryCache()

@@ -17,6 +17,15 @@ export interface Env {
   HOST: string
   /** Puerto HTTP (por defecto 3001, donde la tienda y el admin esperan el back). */
   PORT: number
+  /**
+   * Proxies de confianza (NV-25): IPs o redes CIDR separadas por comas, o los nombres `loopback`,
+   * `linklocal` y `uniquelocal` de Express. Vacía (por defecto) queda apagada: `req.ip` es la IP
+   * del socket y todo lo que llega por el servidor de la tienda comparte sus contadores. Con la
+   * lista, Express toma la IP del cliente de `X-Forwarded-For` saltando solo esos proxies, y los
+   * límites por IP cuentan por la IP real. Solo hay que listar proxies que pongan la IP real del
+   * cliente en `X-Forwarded-For` (si no, cualquiera puede inventarse una).
+   */
+  TRUST_PROXY: readonly string[]
   /** Conexión a Postgres: `postgresql://usuario:clave@host:5432/base`. */
   DATABASE_URL: string
   /** Conexión a Redis: `redis://host:6379` (o `rediss://` con TLS). */
@@ -87,6 +96,31 @@ export function defaultHost(nodeEnv: Env['NODE_ENV']): string {
   return nodeEnv === 'production' ? '0.0.0.0' : '127.0.0.1'
 }
 
+/** Nombres de redes que Express acepta en `trust proxy` además de IPs y CIDR. */
+const TRUST_PROXY_NAMES = ['loopback', 'linklocal', 'uniquelocal'] as const
+
+/** Un elemento de `TRUST_PROXY`: IP, red CIDR o nombre de red de Express. */
+const trustedProxySchema = z.union([
+  z.ipv4(),
+  z.ipv6(),
+  z.cidrv4(),
+  z.cidrv6(),
+  z.enum(TRUST_PROXY_NAMES),
+])
+
+/**
+ * Separa `TRUST_PROXY` por comas, sin espacios ni elementos vacíos.
+ *
+ * @param value - La variable cruda (puede faltar).
+ * @returns Los proxies de confianza; vacío si la variable falta o está vacía.
+ */
+export function splitTrustProxy(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item !== '')
+}
+
 /** Indica si `value` es un origen sin ruta, query ni barra final (`https://host[:puerto]`). */
 function isBareOrigin(value: string): boolean {
   return URL.canParse(value) && new URL(value).origin === value
@@ -105,6 +139,7 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']),
     HOST: z.union([z.ipv4(), z.ipv6(), z.literal('localhost')]).optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+    TRUST_PROXY: z.string().optional().transform(splitTrustProxy).pipe(z.array(trustedProxySchema)),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }),
     ADMIN_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).default('http://localhost:5173'),
@@ -155,6 +190,8 @@ export const ENV_HINTS: Record<keyof Env, string> = {
     'development, test o production (sin NODE_ENV el back no arranca: tiene que decirse explícito)',
   HOST: 'una IP (por ejemplo 127.0.0.1 o 0.0.0.0) o localhost',
   PORT: 'un número entero entre 1 y 65535',
+  TRUST_PROXY:
+    'IPs o redes CIDR separadas por comas (por ejemplo 10.0.0.5,10.1.0.0/16), o loopback, linklocal o uniquelocal; vacía para apagarla',
   DATABASE_URL: 'una URL de Postgres (postgresql://usuario:clave@host:5432/base)',
   REDIS_URL: 'una URL de Redis (redis://host:6379)',
   ADMIN_ORIGIN: 'una URL http o https (por ejemplo http://localhost:5173)',

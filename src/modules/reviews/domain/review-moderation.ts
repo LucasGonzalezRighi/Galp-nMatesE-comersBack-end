@@ -16,6 +16,15 @@ export const REVIEW_MODERATED_REASON = 'review.moderated'
 /** Largo máximo del nombre con el que firma (`ReviewInput.authorName`). */
 export const AUTHOR_NAME_MAX_LENGTH = 40
 
+/**
+ * Reseñas pendientes que puede mandar una misma IP real por día (NV-21). El contrato no pide email
+ * en la reseña, así que el tope es solo por IP.
+ */
+export const MAX_PENDING_REVIEWS_PER_IP = 5
+
+/** Ventana del cupo de reseñas por IP: un día, desde la primera reseña. */
+export const REVIEW_QUOTA_WINDOW_SECONDS = 86_400
+
 /** Reseña en cualquier estado, como la ve el dashboard, con su producto. */
 export interface ModeratedReview extends ProductReview {
   /** Estado de moderación. */

@@ -133,6 +133,16 @@ Requisitos que salen del spec y de los Rulings:
 - `NODE_ENV` obligatorio y el admin semilla con credenciales propias en producción ya no son
   pendientes de B8. Siguen pendientes `trust proxy` (otra tanda) y `exposedHeaders`.
 
+### Actualización 2026-11-15 (auditoría de seguridad, tanda C)
+
+- **`trust proxy` con `TRUST_PROXY`** (apagada por defecto): la lista de proxies de confianza (IPs,
+  CIDR o `loopback`, `linklocal`, `uniquelocal`). Con ella `req.ip` es la IP del cliente según
+  `X-Forwarded-For`, y el límite por IP y el bloqueo de login cuentan por cliente. Para que sirva, la
+  tienda tiene que llegar con `X-Forwarded-For` escrito por un proxy de confianza: hoy su rewrite no
+  lo agrega (README, "Puertos y orígenes").
+- **`Cache-Control: no-store` y `Vary: Cookie`** en todo lo que depende de la sesión o de un token,
+  y en `GET /auth/csrf` (que puede mandar `Set-Cookie`).
+
 ## Alternativas descartadas
 
 - **JWT (tokens firmados sin estado):**

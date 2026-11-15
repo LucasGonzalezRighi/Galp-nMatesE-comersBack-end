@@ -12,6 +12,7 @@ import type {
 import {
   CATALOG_CACHE_TTL_SECONDS,
   catalogCacheVersion,
+  isCacheableProductList,
   productGroupCacheKey,
   productListCacheKey,
   productSlugCacheKey,
@@ -31,7 +32,8 @@ interface CachedProductList {
  *
  * Los listados filtrados por `ids` no se cachean: la tienda los usa para conciliar las cantidades
  * del carrito con el stock, que cambia con cada reserva (y sus claves no se pueden borrar sin
- * enumerarlas).
+ * enumerarlas). Tampoco las búsquedas, los tamaños de página que no usa la tienda ni las páginas
+ * vacías (NV-13, {@link isCacheableProductList}): así un cliente no puede crear claves sin tope.
  */
 @Injectable()
 export class CachedProductRepository implements ProductRepository {
@@ -46,17 +48,21 @@ export class CachedProductRepository implements ProductRepository {
 
   /** {@inheritDoc ProductRepository.list} */
   async list(filter: ProductFilter): Promise<ProductList> {
-    if (filter.ids !== undefined) return this.inner.list(filter)
-    const cached = await readThrough<CachedProductList>(
-      this.cache,
-      productListCacheKey(filter, await catalogCacheVersion(this.cache)),
-      CATALOG_CACHE_TTL_SECONDS,
-      async () => {
-        const list = await this.inner.list(filter)
-        return { items: list.items.map((product) => product.toProps()), total: list.total }
-      },
-    )
-    return { items: cached.items.map((props) => Product.create(props)), total: cached.total }
+    if (!isCacheableProductList(filter)) return this.inner.list(filter)
+    const key = productListCacheKey(filter, await catalogCacheVersion(this.cache))
+    const cached = await this.cache.get<CachedProductList>(key)
+    if (cached !== null) {
+      return { items: cached.items.map((props) => Product.create(props)), total: cached.total }
+    }
+    const list = await this.inner.list(filter)
+    if (list.items.length > 0) {
+      const value: CachedProductList = {
+        items: list.items.map((product) => product.toProps()),
+        total: list.total,
+      }
+      await this.cache.set(key, value, CATALOG_CACHE_TTL_SECONDS)
+    }
+    return list
   }
 
   /** {@inheritDoc ProductRepository.findBySlug} */

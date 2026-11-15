@@ -216,11 +216,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Convierte cada línea cruda a la clase que dice su `type` (el discriminador de `CartItemInput`).
  * Se hace con `@Transform` y no con `@Type({ discriminator })` porque class-transformer 0.5.1 lee
  * `línea.type` sin mirar si la línea es `null` y respondería 500 en lugar de 422.
+ *
+ * Con más de `MAX_CART_LINES` líneas convierte solo las primeras `MAX_CART_LINES + 1` (NV-23): la
+ * lista ya es inválida (`ArrayMaxSize` la sigue rechazando) y así un arreglo enorme no multiplica
+ * el trabajo de la validación ni los errores.
  */
 function toItemInstances({ obj, key }: TransformFnParams): unknown {
   const value = (obj as Record<string, unknown>)[key]
   if (!Array.isArray(value)) return value
-  return value.map((item: unknown) => {
+  return value.slice(0, MAX_CART_LINES + 1).map((item: unknown) => {
     if (isRecord(item) && item.type === 'product') {
       return plainToInstance(ProductCartItemInputDto, item)
     }

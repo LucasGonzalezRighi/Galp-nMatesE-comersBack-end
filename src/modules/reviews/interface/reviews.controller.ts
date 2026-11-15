@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Query,
+  Req,
 } from '@nestjs/common'
 import {
   ApiAcceptedResponse,
@@ -17,10 +18,11 @@ import {
   ApiTags,
   PickType,
 } from '@nestjs/swagger'
-import { SkipThrottle } from '@nestjs/throttler'
 
+import { type ClientIpRequest, knownClientIp } from '../../../shared/infrastructure/http/client-ip'
 import { ApiProblemResponses, schemaRef } from '../../../shared/infrastructure/http/openapi'
 import { PageQueryDto } from '../../../shared/infrastructure/http/page.dto'
+import { PublicRead } from '../../../shared/infrastructure/throttler/public-read'
 import {
   PRODUCT_NOT_FOUND,
   ProductSlugParamDto,
@@ -39,13 +41,13 @@ export class ReviewsPageQueryDto extends PickType(PageQueryDto, ['page'] as cons
  * Reseñas públicas: las de un producto, las destacadas del inicio y el envío de una reseña nueva
  * (`POST /products/{slug}/reviews`), que queda pendiente de moderación.
  *
- * Las lecturas van sin límite de pedidos por IP: la tienda lee desde un solo servidor (SSR/ISR y
- * `next build`) y el spec §3.2 solo limita login, formularios públicos y creación de pedidos. El
- * `POST` es un formulario público: repone el límite global con `@SkipThrottle({ default: false })`.
+ * Las lecturas son públicas (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP
+ * real del cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda no se limita. El
+ * `POST` es un formulario público con el límite global por IP y un tope diario de reseñas
+ * pendientes por IP real (NV-21).
  */
 @ApiTags('reviews')
 @ApiExtraModels(ReviewDto, ReviewReceiptDto)
-@SkipThrottle()
 @Controller()
 export class ReviewsController {
   /**
@@ -63,16 +65,18 @@ export class ReviewsController {
    * Recibe la reseña de un producto publicado: queda pendiente hasta que el admin la apruebe. El
    * pipe valida antes; después, un slug que no existe da 404 aunque el campo trampa venga lleno
    * (orden del mock), y con el campo trampa lleno responde igual sin guardar nada. No avisa a la
-   * tienda: una pendiente no se ve.
+   * tienda: una pendiente no se ve. Con la IP real del cliente conocida, cuenta en su cupo diario
+   * (NV-21).
    *
    * @param params - Slug de la ruta ya validado (actual o anterior).
    * @param body - Reseña ya validada.
+   * @param req - Pedido de Express, para la IP real del cliente.
    * @returns `{ status: 'pending' }` (202).
    * @throws {NotFoundException} Si no hay un producto publicado con ese slug (404).
+   * @throws {TooManyReviewsError} 429 si la IP ya agotó el cupo del día.
    */
   @Post('products/:slug/reviews')
   @HttpCode(HttpStatus.ACCEPTED)
-  @SkipThrottle({ default: false })
   @ApiOperation({ operationId: 'createReview', summary: 'Enviar una reseña' })
   @ApiAcceptedResponse({
     type: ReviewReceiptDto,
@@ -82,8 +86,9 @@ export class ReviewsController {
   async create(
     @Param() params: ProductSlugParamDto,
     @Body() body: ReviewInputDto,
+    @Req() req: ClientIpRequest,
   ): Promise<ReviewReceipt> {
-    const receipt = await this.submitReview.execute(params.slug, body.toInput())
+    const receipt = await this.submitReview.execute(params.slug, body.toInput(), knownClientIp(req))
     if (receipt === null) throw new NotFoundException(PRODUCT_NOT_FOUND)
     return receipt
   }
@@ -98,6 +103,7 @@ export class ReviewsController {
    * @throws {NotFoundException} Si no hay un producto publicado con ese slug (404).
    */
   @Get('products/:slug/reviews')
+  @PublicRead()
   @ApiOperation({ operationId: 'listProductReviews', summary: 'Listar las reseñas de un producto' })
   @ApiOkResponse({ type: ReviewPageDto, description: 'Página de reseñas con sus estadísticas.' })
   @ApiProblemResponses(404, 422, 429, 500)
@@ -116,6 +122,7 @@ export class ReviewsController {
    * @returns Las destacadas, de la más nueva a la más vieja.
    */
   @Get('reviews/featured')
+  @PublicRead()
   @ApiOperation({ operationId: 'listFeaturedReviews', summary: 'Listar las reseñas destacadas' })
   @ApiOkResponse({
     description: 'Reseñas destacadas.',

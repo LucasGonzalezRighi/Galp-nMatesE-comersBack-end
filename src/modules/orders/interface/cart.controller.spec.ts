@@ -235,6 +235,20 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
     expect(quoteCart.execute).not.toHaveBeenCalled()
   })
 
+  it('POST /cart/quote con 5000 líneas inválidas valida solo las primeras 51 (NV-23)', async () => {
+    const response = await post('/cart/quote', {
+      items: Array.from({ length: 5000 }, () => ({ type: 'kit' })),
+    })
+
+    const { errors } = response.body as { errors: { field: string }[] }
+    expect(response.status).toBe(422)
+    expect(firstError(response)).toMatchObject({ field: 'items', code: 'too_big' })
+    expect(errors.length).toBeLessThanOrEqual(50)
+    expect(errors.filter(({ field }) => /^items\.(5[1-9]|[6-9]\d|\d{3,})\./.test(field))).toEqual(
+      [],
+    )
+  })
+
   it('POST /shipping/quote → 200; el código postal va en mayúsculas y admite null', async () => {
     const home = await post('/shipping/quote', {
       method: 'home',

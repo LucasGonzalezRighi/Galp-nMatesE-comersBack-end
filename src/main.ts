@@ -1,8 +1,9 @@
 import { NestFactory } from '@nestjs/core'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import { existsSync } from 'node:fs'
 
 import { AppModule } from './app.module'
-import { setupApp } from './app.setup'
+import { APP_OPTIONS, setupApp } from './app.setup'
 import { ENV, type Env } from './config/env'
 import { setupSwagger } from './swagger'
 
@@ -24,7 +25,10 @@ function loadDotEnv(): void {
  */
 async function bootstrap(): Promise<void> {
   loadDotEnv()
-  const app = await NestFactory.create(AppModule, { bufferLogs: true })
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    ...APP_OPTIONS,
+    bufferLogs: true,
+  })
   setupApp(app)
   const env = app.get<Env>(ENV)
   setupSwagger(app, env)
