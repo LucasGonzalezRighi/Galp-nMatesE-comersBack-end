@@ -8,6 +8,7 @@ import { InMemorySessionStore } from '../../../../test/support/session'
 import { SESSION_PORT, type SessionRecord } from '../../../shared/application/ports/session.port'
 import { CUSTOMER_SESSION_COOKIE } from '../../../shared/infrastructure/auth/cookies'
 import { CreateMyAddressCommand } from '../application/commands/create-my-address.command'
+import { DeleteAccountCommand } from '../application/commands/delete-account.command'
 import { DeleteMyAddressCommand } from '../application/commands/delete-my-address.command'
 import { UpdateMeCommand } from '../application/commands/update-me.command'
 import { UpdateMyAddressCommand } from '../application/commands/update-my-address.command'
@@ -60,6 +61,7 @@ describe('MeController (HTTP con casos de uso simulados)', () => {
     ),
   }
   const deleteAddress = { execute: vi.fn(() => Promise.resolve()) }
+  const deleteAccount = { execute: vi.fn(() => Promise.resolve({ ok: true, value: undefined })) }
   let app: INestApplication<Server> | undefined
   let session: SessionRecord
 
@@ -74,6 +76,7 @@ describe('MeController (HTTP con casos de uso simulados)', () => {
         { provide: CreateMyAddressCommand, useValue: createAddress },
         { provide: UpdateMyAddressCommand, useValue: updateAddress },
         { provide: DeleteMyAddressCommand, useValue: deleteAddress },
+        { provide: DeleteAccountCommand, useValue: deleteAccount },
       ],
     })
   })

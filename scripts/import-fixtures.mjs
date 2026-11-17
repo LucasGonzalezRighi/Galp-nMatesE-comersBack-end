@@ -162,6 +162,8 @@ function mapFixtures(fixtures) {
     { key: 'product-tabs', data: FIXTURE_CONTENT.productTabs },
     { key: 'legal-terms', data: FIXTURE_CONTENT.legal?.terms },
     { key: 'legal-privacy', data: FIXTURE_CONTENT.legal?.privacy },
+    { key: 'legal-cookies', data: FIXTURE_CONTENT.legal?.cookies },
+    { key: 'legal-returns', data: FIXTURE_CONTENT.legal?.returns },
   ]
   for (const block of content) check(block.data !== undefined, `falta el contenido ${block.key}`)
 
@@ -175,7 +177,13 @@ function mapFixtures(fixtures) {
     vatRatePercent: s.vatRatePercent,
     showNetPrice: s.priceDisplay.showNetPrice,
     seller: s.seller,
+    consumerLinks: s.consumerLinks,
   }
+  check(
+    typeof s.consumerLinks?.cabaUrl === 'string' &&
+      typeof s.consumerLinks?.nationalUrl === 'string',
+    'faltan los enlaces de Defensa del Consumidor (consumerLinks)',
+  )
   const shippingOptions = s.shippingOptions.map((o) => ({
     method: o.method,
     label: o.label,

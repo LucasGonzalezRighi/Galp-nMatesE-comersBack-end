@@ -7,13 +7,18 @@ export const CONTENT_KEYS = [
   'product-tabs',
   'legal-terms',
   'legal-privacy',
+  'legal-cookies',
+  'legal-returns',
 ] as const
 
 /** Clave de un contenido editable. */
 export type ContentKey = (typeof CONTENT_KEYS)[number]
 
-/** Documentos legales del contrato (`/content/legal/{document}`). */
-export const LEGAL_DOCUMENTS = ['terms', 'privacy'] as const
+/**
+ * Documentos legales del contrato (`/content/legal/{document}`), en el orden en que se listan
+ * (copia de `LEGAL_DOCUMENTS` de `@galpon/domain`).
+ */
+export const LEGAL_DOCUMENTS = ['terms', 'privacy', 'cookies', 'returns'] as const
 
 /** Documento legal del contrato. */
 export type LegalDocument = (typeof LEGAL_DOCUMENTS)[number]
@@ -28,17 +33,30 @@ export function isContentKey(value: string): value is ContentKey {
   return (CONTENT_KEYS as readonly string[]).includes(value)
 }
 
+/** Clave de contenido de un documento legal (`legal-terms`, `legal-cookies`…). */
+export type LegalContentKey = `legal-${LegalDocument}`
+
+/**
+ * Indica si un texto es un documento legal del contrato.
+ *
+ * @param value - Texto a revisar (por ejemplo, `{document}` de la ruta).
+ * @returns `true` si es `terms`, `privacy`, `cookies` o `returns`.
+ */
+export function isLegalDocument(value: string): value is LegalDocument {
+  return (LEGAL_DOCUMENTS as readonly string[]).includes(value)
+}
+
 /**
  * Da la clave de contenido de un documento legal.
  *
- * @param document - `terms` o `privacy`.
- * @returns `legal-terms` o `legal-privacy`.
+ * @param document - `terms`, `privacy`, `cookies` o `returns`.
+ * @returns `legal-terms`, `legal-privacy`, `legal-cookies` o `legal-returns`.
  * @throws {RangeError} En español, si no es un documento legal del contrato.
  */
-export function legalContentKey(document: LegalDocument): ContentKey {
-  if (!(LEGAL_DOCUMENTS as readonly string[]).includes(document)) {
+export function legalContentKey(document: LegalDocument): LegalContentKey {
+  if (!isLegalDocument(document)) {
     throw new RangeError(
-      `El documento legal tiene que ser terms o privacy; se recibió "${document}".`,
+      `El documento legal tiene que ser ${LEGAL_DOCUMENTS.join(', ')}; se recibió "${String(document)}".`,
     )
   }
   return `legal-${document}`

@@ -7,6 +7,7 @@ import {
   ComboInputDto,
   ComboOrderInputDto,
 } from '../../src/modules/catalog/interface/dto/combo-input.dto'
+import { AccountDeletionDto } from '../../src/modules/identity/interface/dto/account-deletion.dto'
 import { AddressBookInputDto } from '../../src/modules/identity/interface/dto/address-book-input.dto'
 import { AdminLoginDto } from '../../src/modules/identity/interface/dto/admin-login.dto'
 import { CustomerUpdateDto } from '../../src/modules/identity/interface/dto/customer-update.dto'
@@ -107,6 +108,11 @@ const identity = (value: Record<string, unknown>): Record<string, unknown> => va
 const MAPPINGS: readonly Mapping[] = [
   { name: 'RegisterDto (registerSchema)', dto: RegisterDto, check: wholeCase('registerSchema') },
   { name: 'LoginDto (loginSchema)', dto: LoginDto, check: wholeCase('loginSchema') },
+  {
+    name: 'AccountDeletionDto (deleteAccountSchema)',
+    dto: AccountDeletionDto,
+    check: wholeCase('deleteAccountSchema'),
+  },
   {
     name: 'AdminLoginDto (adminLoginSchema)',
     dto: AdminLoginDto,

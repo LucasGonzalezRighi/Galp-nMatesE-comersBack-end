@@ -102,8 +102,6 @@ export interface FooterContent {
   text: string
   /** Medios de pago que se muestran. */
   paymentMethods: string[]
-  /** Enlace a Defensa del Consumidor, o `null`. */
-  consumerDefenseUrl: string | null
 }
 
 /** Pestañas de la ficha de un grupo de productos (`ProductTabsGroupContent`). */
@@ -151,4 +149,6 @@ export interface ContentByKey {
   'product-tabs': ProductTabsContent
   'legal-terms': LegalContent
   'legal-privacy': LegalContent
+  'legal-cookies': LegalContent
+  'legal-returns': LegalContent
 }

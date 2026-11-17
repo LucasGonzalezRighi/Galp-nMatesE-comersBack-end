@@ -86,6 +86,10 @@ export class UpdateSettingsCommand {
         supportHours: seller.supportHours,
         dataFiscalUrl: seller.dataFiscalUrl,
       },
+      consumerLinks: {
+        cabaUrl: input.consumerLinks.cabaUrl,
+        nationalUrl: input.consumerLinks.nationalUrl,
+      },
       shippingOptions,
     }
     // Los mismos rangos que se revisan al leer: un valor imposible no llega a la base.

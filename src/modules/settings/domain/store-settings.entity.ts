@@ -34,8 +34,42 @@ export interface Seller {
   supportArea: string | null
   /** Horario de atención. */
   supportHours: string | null
-  /** URL del formulario "Data fiscal" de ARCA. */
+  /** El `href` del código de Data Fiscal que entrega ARCA. */
   dataFiscalUrl: string | null
+}
+
+/** Enlaces a Defensa del Consumidor que el pie de la tienda muestra siempre (LS-3). */
+export interface ConsumerLinks {
+  /** Defensa del Consumidor de la Ciudad de Buenos Aires (Ley 2244). */
+  cabaUrl: string
+  /** Formulario de reclamos de Defensa del Consumidor de la Nación. */
+  nationalUrl: string
+}
+
+/** Enlaces de fábrica de Defensa del Consumidor (copia de `DEFAULT_CONSUMER_LINKS` del front). */
+export const DEFAULT_CONSUMER_LINKS: Readonly<ConsumerLinks> = {
+  cabaUrl: 'https://buenosaires.gob.ar/gobierno/atencion-ciudadana/defensa-al-consumidor',
+  nationalUrl: 'https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario',
+}
+
+/** El `href` de un `<a>` con comillas dobles o simples. */
+const ANCHOR_HREF = /<a\b[^>]*?\shref\s*=\s*(["'])(.*?)\1/i
+
+/**
+ * Saca el enlace de Data Fiscal de lo que pega el vendedor: el código entero que entrega ARCA
+ * (`<a href="…"><img …></a>`) o solo la URL (como `extractDataFiscalUrl` de `@galpon/domain`).
+ *
+ * @param input - El código o la URL.
+ * @returns El `href` del código si lo trae (con `&amp;` como `&`); si no, el texto recortado.
+ * @throws {TypeError} En español, si no es un texto.
+ */
+export function extractDataFiscalUrl(input: string): string {
+  if (typeof input !== 'string') {
+    throw new TypeError('El código de Data Fiscal tiene que ser un texto.')
+  }
+  const match = ANCHOR_HREF.exec(input)
+  if (match?.[2] !== undefined) return match[2].replace(/&amp;/g, '&').trim()
+  return input.trim()
 }
 
 /** Ajustes completos de la tienda (incluye lo que no es público: IVA y stock bajo). */
@@ -56,6 +90,8 @@ export interface StoreSettings {
   showNetPrice: boolean
   /** Datos del vendedor. */
   seller: Seller
+  /** Enlaces a Defensa del Consumidor. */
+  consumerLinks: ConsumerLinks
   /** Opciones de envío, en el orden del contrato. */
   shippingOptions: ShippingOption[]
 }
@@ -74,7 +110,8 @@ function assertIntegerInRange(value: number, min: number, max: number, message: 
  * @returns Los mismos ajustes, ya validados.
  * @throws {RangeError} En español, si el descuento, las cuotas, el umbral, la alícuota o un costo
  *   de envío están fuera de rango.
- * @throws {TypeError} En español, si falta el email de contacto.
+ * @throws {TypeError} En español, si falta el email de contacto o un enlace a Defensa del
+ *   Consumidor.
  */
 export function createStoreSettings(props: StoreSettings): StoreSettings {
   assertIntegerInRange(
@@ -101,6 +138,9 @@ export function createStoreSettings(props: StoreSettings): StoreSettings {
   }
   if (props.contactEmail.trim() === '') {
     throw new TypeError('Falta el email de contacto de la tienda.')
+  }
+  if (props.consumerLinks.cabaUrl.trim() === '' || props.consumerLinks.nationalUrl.trim() === '') {
+    throw new TypeError('Faltan los enlaces a Defensa del Consumidor.')
   }
   for (const option of props.shippingOptions) {
     assertIntegerInRange(

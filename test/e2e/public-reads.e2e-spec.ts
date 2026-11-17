@@ -230,6 +230,27 @@ describe('lecturas públicas del contrato (HTTP + Postgres + Redis)', () => {
     expect(response.status).toBe(200)
   })
 
+  it('GET /content/legal/cookies y /returns → 200 con el texto del seed', async () => {
+    const cookies = await request(server()).get('/api/v1/content/legal/cookies')
+    const returns = await request(server()).get('/api/v1/content/legal/returns')
+
+    expect(cookies.status).toBe(200)
+    expect((cookies.body as LegalContent).title).toBe('Política de cookies')
+    expect(returns.status).toBe(200)
+    expect((returns.body as LegalContent).title).toBe('Cambios, devoluciones y arrepentimiento')
+  })
+
+  it('GET /settings/public → consumerLinks de fábrica; el pie ya no trae el suyo', async () => {
+    const settings = await request(server()).get('/api/v1/settings/public')
+    const footer = await request(server()).get('/api/v1/content/footer')
+
+    expect((settings.body as { consumerLinks: unknown }).consumerLinks).toEqual({
+      cabaUrl: 'https://buenosaires.gob.ar/gobierno/atencion-ciudadana/defensa-al-consumidor',
+      nationalUrl: 'https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario',
+    })
+    expect(footer.body).not.toHaveProperty('consumerDefenseUrl')
+  })
+
   it('GET /content/legal/terms y /privacy → 200; /content/legal/otro → 404 (contrato)', async () => {
     const terms = await request(server()).get('/api/v1/content/legal/terms')
     const privacy = await request(server()).get('/api/v1/content/legal/privacy')

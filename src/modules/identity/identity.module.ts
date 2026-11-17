@@ -9,6 +9,7 @@ import { type Clock, CLOCK } from '../../shared/domain/clock'
 import { RedisService } from '../../shared/infrastructure/redis/redis.service'
 import { AdminLoginCommand } from './application/commands/admin-login.command'
 import { ChangeAdminPasswordCommand } from './application/commands/change-admin-password.command'
+import { DeleteAccountCommand } from './application/commands/delete-account.command'
 import { CreateMyAddressCommand } from './application/commands/create-my-address.command'
 import { DeleteMyAddressCommand } from './application/commands/delete-my-address.command'
 import { IssueCsrfTokenCommand } from './application/commands/issue-csrf-token.command'
@@ -19,6 +20,10 @@ import { RequestPasswordResetCommand } from './application/commands/request-pass
 import { ResetPasswordCommand } from './application/commands/reset-password.command'
 import { UpdateMeCommand } from './application/commands/update-me.command'
 import { UpdateMyAddressCommand } from './application/commands/update-my-address.command'
+import {
+  ACCOUNT_DELETION_REPOSITORY,
+  type AccountDeletionRepository,
+} from './application/ports/account-deletion.port'
 import {
   ADDRESS_REPOSITORY,
   type AddressRepository,
@@ -42,6 +47,7 @@ import { GetAdminSessionQuery } from './application/queries/get-admin-session.qu
 import { GetMeQuery } from './application/queries/get-me.query'
 import { ListMyAddressesQuery } from './application/queries/list-my-addresses.query'
 import { Argon2PasswordHasher } from './infrastructure/argon2-password.hasher'
+import { PrismaAccountDeletionRepository } from './infrastructure/prisma-account-deletion.repository'
 import { PrismaAddressRepository } from './infrastructure/prisma-address.repository'
 import { PrismaCustomerRepository } from './infrastructure/prisma-customer.repository'
 import { PrismaPasswordResetRepository } from './infrastructure/prisma-password-reset.repository'
@@ -53,7 +59,7 @@ import { MeController } from './interface/me.controller'
 
 /**
  * Identidad: cuentas de clientes y admins, sesiones, recuperación de contraseña y libreta de
- * direcciones. Los repositorios son de Prisma, las contraseñas van con argon2id, los fallos de
+ * direcciones, y la baja de la cuenta (`DELETE /me`). Los repositorios son de Prisma, las contraseñas van con argon2id, los fallos de
  * inicio de sesión se cuentan en Redis (falla abierta) y el mail de recuperación sale por la cola
  * `mails` de `NotificationsModule` (B7). Las sesiones y los secretos vienen de `RedisModule`
  * (global) y el reloj de `SharedModule`.
@@ -70,6 +76,7 @@ import { MeController } from './interface/me.controller'
     { provide: CUSTOMER_REPOSITORY, useClass: PrismaCustomerRepository },
     { provide: ADDRESS_REPOSITORY, useClass: PrismaAddressRepository },
     { provide: PASSWORD_RESET_REPOSITORY, useClass: PrismaPasswordResetRepository },
+    { provide: ACCOUNT_DELETION_REPOSITORY, useClass: PrismaAccountDeletionRepository },
     { provide: PASSWORD_HASHER, useValue: new Argon2PasswordHasher() },
     { provide: MAILER_PORT, useExisting: QueuedPasswordResetMailer },
     {
@@ -205,6 +212,27 @@ import { MeController } from './interface/me.controller'
         clock: Clock,
       ) => new AdminLoginCommand(users, hasher, attempts, sessions, clock),
       inject: [USER_REPOSITORY, PASSWORD_HASHER, LOGIN_ATTEMPTS_PORT, SESSION_PORT, CLOCK],
+    },
+    {
+      provide: DeleteAccountCommand,
+      useFactory: (
+        users: UserRepository,
+        customers: CustomerRepository,
+        accounts: AccountDeletionRepository,
+        hasher: PasswordHasher,
+        attempts: LoginAttemptsPort,
+        sessions: SessionPort,
+        mailer: MailerPort,
+      ) => new DeleteAccountCommand(users, customers, accounts, hasher, attempts, sessions, mailer),
+      inject: [
+        USER_REPOSITORY,
+        CUSTOMER_REPOSITORY,
+        ACCOUNT_DELETION_REPOSITORY,
+        PASSWORD_HASHER,
+        LOGIN_ATTEMPTS_PORT,
+        SESSION_PORT,
+        MAILER_PORT,
+      ],
     },
     {
       provide: GetAdminSessionQuery,

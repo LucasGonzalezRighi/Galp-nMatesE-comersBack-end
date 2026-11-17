@@ -14,7 +14,7 @@ export const SEED_CATEGORIES: readonly SeedCategory[] = [
       url: '/mock-images/mate-imperial-premium.jpg',
       width: 960,
       height: 1280,
-      alt: 'Mate Imperial Premium con virola de alpaca cincelada y base con pelotitas de bronce',
+      alt: 'Calabaza marrón oscura con virola ancha plateada cincelada con rombos y base de patas con pelotitas doradas',
     },
   },
   {
@@ -37,7 +37,7 @@ export const SEED_CATEGORIES: readonly SeedCategory[] = [
     slug: 'ranchero',
     name: 'Ranchero y Galleta',
     group: 'mate',
-    blurb: 'Formatos criollos, cueros con pelo y terminaciones cálidas.',
+    blurb: 'Formatos criollos y terminaciones cálidas.',
     position: 4,
     image: null,
   },

@@ -35,7 +35,6 @@ const FOOTER: FooterContent = {
   tagline: 'Mates de verdad',
   text: 'Hechos a mano en el galpón.',
   paymentMethods: ['Visa'],
-  consumerDefenseUrl: null,
 }
 
 const LEGAL: LegalContent = { title: 'Términos', updatedAt: '2026-11-04', body: 'Texto.' }

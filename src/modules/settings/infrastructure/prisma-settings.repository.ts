@@ -6,7 +6,9 @@ import { createDomainEvent } from '../../../shared/domain/domain-event'
 import { OutboxRepository } from '../../../shared/infrastructure/outbox/outbox.repository'
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
 import {
+  type ConsumerLinks,
   createStoreSettings,
+  DEFAULT_CONSUMER_LINKS,
   DEFAULT_SHIPPING_LABELS,
   type Seller,
   type StoreSettings,
@@ -46,6 +48,19 @@ function toSeller(json: Prisma.JsonValue): Seller {
   return seller
 }
 
+/**
+ * Pasa la columna `consumer_links` (JSON) a los enlaces a Defensa del Consumidor: un enlace que
+ * falta o no es texto queda con el de fábrica.
+ */
+function toConsumerLinks(json: Prisma.JsonValue): ConsumerLinks {
+  const source = json !== null && typeof json === 'object' && !Array.isArray(json) ? json : {}
+  const { cabaUrl, nationalUrl } = source
+  return {
+    cabaUrl: typeof cabaUrl === 'string' ? cabaUrl : DEFAULT_CONSUMER_LINKS.cabaUrl,
+    nationalUrl: typeof nationalUrl === 'string' ? nationalUrl : DEFAULT_CONSUMER_LINKS.nationalUrl,
+  }
+}
+
 /** Cliente con el que se lee: el de la app o el de una transacción. */
 type SettingsClient = Pick<Prisma.TransactionClient, 'settings' | 'shippingOption'>
 
@@ -70,13 +85,14 @@ export class PrismaSettingsRepository implements SettingsRepository {
 
   /** {@inheritDoc SettingsRepository.save} */
   save(changes: SettingsChanges, write: SettingsWrite): Promise<StoreSettings> {
-    const { shippingOptions, seller, ...settings } = changes
+    const { shippingOptions, seller, consumerLinks, ...settings } = changes
     return this.prisma.$transaction(async (tx) => {
       const { count } = await tx.settings.updateMany({
         where: { id: 1 },
         data: {
           ...settings,
           seller: { ...seller },
+          consumerLinks: { ...consumerLinks },
           version: { increment: 1 },
           updatedBy: write.updatedBy,
         },
@@ -119,6 +135,7 @@ async function read(client: SettingsClient): Promise<StoreSettings> {
     vatRatePercent: settings.vatRatePercent.toNumber(),
     showNetPrice: settings.showNetPrice,
     seller: toSeller(settings.seller),
+    consumerLinks: toConsumerLinks(settings.consumerLinks),
     shippingOptions,
   })
 }

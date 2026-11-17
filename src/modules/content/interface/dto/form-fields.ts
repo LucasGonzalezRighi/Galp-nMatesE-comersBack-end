@@ -31,7 +31,7 @@ import { maxMessage, RawValue, Trimmed } from '../../../identity/interface/dto/i
 import { SLUG_MAX_LENGTH, SLUG_PATTERN } from '../../../../shared/infrastructure/http/openapi'
 import { EachItem, type ItemRule } from '../../../../shared/infrastructure/http/validation.pipe'
 
-/** Largo máximo de una URL (`consumerDefenseUrl`, `seller.dataFiscalUrl`). */
+/** Largo máximo de una URL (`consumerLinks`, `seller.dataFiscalUrl`). */
 export const URL_MAX_LENGTH = 2048
 
 /** Fecha sin hora, como `LegalContent.updatedAt`. */
@@ -213,14 +213,17 @@ export function NullableTextField(max: number): PropertyDecorator {
 }
 
 /**
- * URL http o https que puede faltar (`consumerDefenseUrl` y `seller.dataFiscalUrl`): se recorta,
- * vacía queda en `null`, hasta 2048 caracteres.
+ * URL http o https obligatoria (`consumerLinks` de los ajustes): se recorta; vacía da "Requerido";
+ * hasta 2048 caracteres.
  *
  * @returns El decorador de la propiedad.
  */
-export function NullableUrlField(): PropertyDecorator {
+export function RequiredUrlField(): PropertyDecorator {
   return applyDecorators(
-    NullableTextField(URL_MAX_LENGTH),
+    Trimmed(),
+    IsString({ message: FORM_MESSAGES.required }),
+    IsNotEmpty({ message: FORM_MESSAGES.required }),
+    MaxLength(URL_MAX_LENGTH, { message: maxMessage(URL_MAX_LENGTH) }),
     ValidateBy(
       {
         name: 'isHttpUrl',

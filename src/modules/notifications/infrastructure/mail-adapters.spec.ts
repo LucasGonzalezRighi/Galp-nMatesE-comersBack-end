@@ -115,4 +115,49 @@ describe('QueuedPasswordResetMailer', () => {
     expect(opts.removeOnFail).toEqual({ age: 24 * 60 * 60 })
     expect(opts.jobId).toMatch(/^password-reset-/)
   })
+
+  const storeReader = {
+    storeInfo: () =>
+      Promise.resolve({
+        contactEmail: 'hola@galpon.test',
+        legalName: null,
+        cuit: null,
+        address: null,
+      }),
+  }
+
+  it('encola el aviso de cuenta eliminada con las mismas opciones que los directos', async () => {
+    const add = vi.fn<(...args: unknown[]) => Promise<Job<MailJobData>>>(() =>
+      Promise.resolve({} as Job<MailJobData>),
+    )
+
+    await new QueuedPasswordResetMailer(
+      { add },
+      storeReader,
+      'http://localhost:3000',
+    ).sendAccountDeleted({ to: 'ana@mail.com', firstName: 'Ana' })
+
+    expect(add).toHaveBeenCalledTimes(1)
+    const [, data, opts] = add.mock.calls[0] as unknown as [
+      string,
+      { kind: string; mail: OutgoingMail },
+      { removeOnComplete: unknown; removeOnFail: unknown; jobId: string },
+    ]
+    expect(data.mail).toMatchObject({ to: 'ana@mail.com', template: 'account-deleted' })
+    expect(opts.removeOnComplete).toBe(true)
+    expect(opts.removeOnFail).toEqual({ age: 24 * 60 * 60 })
+    expect(opts.jobId).toMatch(/^account-deleted-/)
+  })
+
+  it('si Redis no acepta el aviso de cuenta eliminada, no lanza (la cuenta ya se borró)', async () => {
+    const add = vi.fn(() => Promise.reject(new Error('Redis caído')))
+
+    await expect(
+      new QueuedPasswordResetMailer(
+        { add },
+        storeReader,
+        'http://localhost:3000',
+      ).sendAccountDeleted({ to: 'ana@mail.com', firstName: 'Ana' }),
+    ).resolves.toBeUndefined()
+  })
 })

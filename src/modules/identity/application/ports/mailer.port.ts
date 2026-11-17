@@ -8,6 +8,14 @@ export interface PasswordResetMail {
   link: string
 }
 
+/** Mail de cuenta eliminada (`account-deleted`). */
+export interface AccountDeletedMail {
+  /** Destinatario: el email que tenía la cuenta, leído antes de borrarla. */
+  to: string
+  /** Nombre para el saludo (el que tenía la cuenta). */
+  firstName: string
+}
+
 /** Envío de mails de la cuenta (en la app, la cola `mails` de `notifications`, B7). */
 export interface MailerPort {
   /**
@@ -16,6 +24,14 @@ export interface MailerPort {
    * @param input - Destinatario, nombre y enlace.
    */
   sendPasswordReset(input: PasswordResetMail): Promise<void>
+
+  /**
+   * Manda el aviso de que la cuenta se eliminó. Nunca lanza: la cuenta ya se borró, así que si el
+   * mail no se puede encolar se registra un `warn` sin datos personales.
+   *
+   * @param input - Destinatario y nombre.
+   */
+  sendAccountDeleted(input: AccountDeletedMail): Promise<void>
 }
 
 /** Token de inyección del {@link MailerPort}. */

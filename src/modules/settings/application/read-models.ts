@@ -1,7 +1,12 @@
 // Formas de lectura de los ajustes: copian exactamente `components/schemas` del contrato
 // (`../frontend/docs/api/openapi.yaml`).
 
-import type { Seller, ShippingOption, StoreSettings } from '../domain/store-settings.entity'
+import type {
+  ConsumerLinks,
+  Seller,
+  ShippingOption,
+  StoreSettings,
+} from '../domain/store-settings.entity'
 
 /** Ajustes que la tienda puede mostrar (`PublicSettings`): nunca la alícuota ni el stock bajo. */
 export interface PublicSettings {
@@ -25,6 +30,8 @@ export interface PublicSettings {
   }
   /** Datos del vendedor. */
   seller: Seller
+  /** Enlaces a Defensa del Consumidor que el pie muestra siempre. */
+  consumerLinks: ConsumerLinks
 }
 
 /** Ajustes del dashboard (`AdminSettings`): los públicos más el umbral de poco stock y el IVA. */
@@ -52,6 +59,7 @@ export function toPublicSettings(settings: StoreSettings): PublicSettings {
     contactEmail: settings.contactEmail,
     priceDisplay: { showNetPrice: settings.showNetPrice },
     seller: settings.seller,
+    consumerLinks: { ...settings.consumerLinks },
   }
 }
 

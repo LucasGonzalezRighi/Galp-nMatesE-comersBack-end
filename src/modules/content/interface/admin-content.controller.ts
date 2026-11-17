@@ -35,8 +35,13 @@ import type {
   LegalContent,
   ProductTabsContent,
 } from '../application/read-models'
-import { type ContentKey, LEGAL_DOCUMENTS, type LegalDocument } from '../domain/content-key'
-import { isLegalDocument, LEGAL_DOCUMENT_NOT_FOUND } from './content.controller'
+import {
+  type ContentKey,
+  isLegalDocument,
+  LEGAL_DOCUMENTS,
+  legalContentKey,
+} from '../domain/content-key'
+import { LEGAL_DOCUMENT_DESCRIPTION, LEGAL_DOCUMENT_NOT_FOUND } from './content.controller'
 import {
   AboutContentInputDto,
   FaqContentInputDto,
@@ -47,16 +52,6 @@ import {
 } from './dto/content-input.dto'
 import { AboutContentInputSchemaDto } from './dto/content.response.dto'
 
-/**
- * Clave de un documento legal.
- *
- * @param document - `terms` o `privacy`.
- * @returns `legal-terms` o `legal-privacy`.
- */
-function legalKey(document: LegalDocument): 'legal-terms' | 'legal-privacy' {
-  return document === 'terms' ? 'legal-terms' : 'legal-privacy'
-}
-
 /** Seguridad de las escrituras del dashboard: sesión de admin y token CSRF. */
 const SESSION_AND_CSRF = { adminSession: [], csrfToken: [] }
 
@@ -64,7 +59,7 @@ const SESSION_AND_CSRF = { adminSession: [], csrfToken: [] }
 const LEGAL_DOCUMENT_PARAM = {
   name: 'document',
   enum: [...LEGAL_DOCUMENTS],
-  description: 'Documento legal: `terms` o `privacy`.',
+  description: LEGAL_DOCUMENT_DESCRIPTION,
 } as const
 
 /**
@@ -74,9 +69,9 @@ const LEGAL_DOCUMENT_PARAM = {
  * reemplazan el contenido completo y le avisan a la tienda qué regenerar (`storefront.stale` en el
  * outbox, en la misma transacción); un 4xx no avisa nada.
  *
- * El 404 de un documento legal que no es `terms` ni `privacy` lo da el handler: el
- * `ValidationPipe` corre antes, así que un `PUT` con un cuerpo inválido a `/legal/cookies` responde
- * 422 (Ruling B-80, como B-63).
+ * El 404 de un documento legal que no es del contrato lo da el handler: el `ValidationPipe` corre
+ * antes, así que un `PUT` con un cuerpo inválido a `/legal/otro` responde 422 (Ruling B-80, como
+ * B-63).
  */
 @ApiTags('admin')
 @ApiExtraModels(ImageInputDto, AboutContentInputSchemaDto)
@@ -268,7 +263,7 @@ export class AdminContentController {
   /**
    * @param document - Documento de la ruta.
    * @returns El documento legal.
-   * @throws {NotFoundException} Si no es `terms` ni `privacy`, o si no está cargado.
+   * @throws {NotFoundException} Si no es un documento del contrato, o si no está cargado.
    */
   @Get('legal/:document')
   @UseGuards(AdminSessionGuard)
@@ -279,7 +274,7 @@ export class AdminContentController {
   @ApiProblemResponses(401, 404, 429, 500)
   async legal(@Param('document') document: string): Promise<LegalContent> {
     if (!isLegalDocument(document)) throw new NotFoundException(LEGAL_DOCUMENT_NOT_FOUND)
-    const content = await this.getContent.execute(legalKey(document))
+    const content = await this.getContent.execute(legalContentKey(document))
     if (content === null) throw new NotFoundException(LEGAL_DOCUMENT_NOT_FOUND)
     return content
   }
@@ -288,8 +283,9 @@ export class AdminContentController {
    * @param document - Documento de la ruta.
    * @param body - Documento completo, ya validado (el 422 va antes que el 404, Ruling B-80).
    * @param session - Sesión de admin.
-   * @returns El documento guardado.
-   * @throws {NotFoundException} Si no es `terms` ni `privacy`.
+   * @returns El documento guardado, con los marcadores `{{clave}}` tal cual (422 si una clave no
+   *   está en `LEGAL_MARKERS`).
+   * @throws {NotFoundException} Si no es un documento del contrato.
    */
   @Put('legal/:document')
   @UseGuards(AdminSessionGuard, AdminCsrfGuard)
@@ -305,7 +301,7 @@ export class AdminContentController {
     @CurrentSession() session: SessionRecord,
   ): Promise<LegalContent> {
     if (!isLegalDocument(document)) throw new NotFoundException(LEGAL_DOCUMENT_NOT_FOUND)
-    return this.save(legalKey(document), body, session)
+    return this.save(legalContentKey(document), body, session)
   }
 
   /**

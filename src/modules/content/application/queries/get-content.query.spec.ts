@@ -16,7 +16,6 @@ describe('GetContentQuery', () => {
       tagline: 'Mates',
       text: 'Hechos a mano.',
       paymentMethods: [],
-      consumerDefenseUrl: null,
     }
     const query = new GetContentQuery(repository({ footer }))
     await expect(query.execute('footer')).resolves.toEqual(footer)

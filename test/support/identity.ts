@@ -13,6 +13,7 @@ import type {
   LoginAttemptsPort,
 } from '../../src/modules/identity/application/ports/login-attempts.port'
 import type {
+  AccountDeletedMail,
   MailerPort,
   PasswordResetMail,
 } from '../../src/modules/identity/application/ports/mailer.port'
@@ -312,9 +313,18 @@ export class RecordingMailer implements MailerPort {
   /** Mails de recuperación "enviados", en orden. */
   readonly passwordResets: PasswordResetMail[] = []
 
+  /** Avisos de cuenta eliminada "enviados", en orden. */
+  readonly accountDeletions: AccountDeletedMail[] = []
+
   /** {@inheritDoc MailerPort.sendPasswordReset} */
   sendPasswordReset(input: PasswordResetMail): Promise<void> {
     this.passwordResets.push({ ...input })
+    return Promise.resolve()
+  }
+
+  /** {@inheritDoc MailerPort.sendAccountDeleted} */
+  sendAccountDeleted(input: AccountDeletedMail): Promise<void> {
+    this.accountDeletions.push({ ...input })
     return Promise.resolve()
   }
 }

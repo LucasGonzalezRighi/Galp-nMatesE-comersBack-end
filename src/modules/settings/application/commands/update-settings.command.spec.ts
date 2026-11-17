@@ -36,6 +36,7 @@ const INPUT: AdminSettingsInput = {
   vatRatePercent: 10.555,
   priceDisplay: { showNetPrice: true },
   seller: SELLER,
+  consumerLinks: { cabaUrl: 'https://caba.example/defensa', nationalUrl: 'https://nacion.example' },
 }
 
 /** Repositorio en memoria: conserva el `label` guardado de cada envío y anota cada guardado. */
@@ -101,7 +102,9 @@ describe('UpdateSettingsCommand', () => {
       lowStockThreshold: 3,
       vatRatePercent: 10.56,
       seller: SELLER,
+      consumerLinks: INPUT.consumerLinks,
     })
+    expect(saved[0]?.changes.consumerLinks).toEqual(INPUT.consumerLinks)
   })
 
   it('dos envíos, un método repetido, un valor fuera de rango o sin admin no guarda nada', async () => {

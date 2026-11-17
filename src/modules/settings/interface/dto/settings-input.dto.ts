@@ -25,9 +25,11 @@ import {
   IntField,
   NestedField,
   NestedListField,
+  isHttpUrl,
   NullableTextField,
-  NullableUrlField,
   NumberField,
+  RequiredUrlField,
+  URL_MAX_LENGTH,
 } from '../../../content/interface/dto/form-fields'
 import {
   EmailField,
@@ -38,6 +40,8 @@ import {
 import type { AdminSettingsInput } from '../../application/commands/update-settings.command'
 import type { ShippingOptionChanges } from '../../application/ports/settings.repository.port'
 import {
+  type ConsumerLinks,
+  extractDataFiscalUrl,
   type Seller,
   SHIPPING_METHODS,
   type ShippingMethod,
@@ -235,9 +239,49 @@ export class SellerInputDto implements Seller {
   @NullableTextField(120)
   supportHours!: string | null
 
-  /** URL del formulario "Data fiscal" (http o https). */
-  @NullableUrlField()
+  /** El `href` de Data Fiscal (http o https); acepta el código de ARCA pegado entero. */
+  @DataFiscalUrlField()
   dataFiscalUrl!: string | null
+}
+
+/** Enlaces a Defensa del Consumidor (`consumerLinks`): los dos obligatorios, http o https. */
+export class ConsumerLinksInputDto implements ConsumerLinks {
+  /** Defensa del Consumidor de la Ciudad de Buenos Aires. */
+  @RequiredUrlField()
+  cabaUrl!: string
+
+  /** Formulario de reclamos de la Nación. */
+  @RequiredUrlField()
+  nationalUrl!: string
+}
+
+/** Data Fiscal crudo: si es texto, el `href` del código de ARCA (o el texto) recortado; vacío, `null`. */
+function dataFiscalHref({ obj, key }: TransformFnParams): unknown {
+  const value: unknown = (obj as Record<string, unknown>)[key]
+  if (typeof value !== 'string') return value
+  const href = extractDataFiscalUrl(value)
+  return href === '' ? null : href
+}
+
+/**
+ * Data Fiscal (`emptyAsNull(dataFiscalUrlSchema)`): vacío o `null` queda en `null`; el código
+ * `<a href="…">` que entrega ARCA se guarda solo con su `href`; después, http o https y hasta 2048
+ * caracteres.
+ */
+function DataFiscalUrlField(): PropertyDecorator {
+  return applyDecorators(
+    Transform(dataFiscalHref),
+    ValidateIf((_object, value) => value !== null),
+    IsString({ message: FORM_MESSAGES.required }),
+    MaxLength(URL_MAX_LENGTH, { message: maxMessage(URL_MAX_LENGTH) }),
+    ValidateBy(
+      {
+        name: 'isHttpUrl',
+        validator: { validate: (value) => typeof value === 'string' && isHttpUrl(value) },
+      },
+      { message: FORM_MESSAGES.invalidUrl },
+    ),
+  )
 }
 
 /** Cuerpo de `PUT /admin/settings` (`settingsFormSchema`). */
@@ -280,4 +324,8 @@ export class AdminSettingsInputDto implements AdminSettingsInput {
   /** Datos del vendedor. */
   @NestedField(() => SellerInputDto)
   seller!: SellerInputDto
+
+  /** Enlaces a Defensa del Consumidor (obligatorios). */
+  @NestedField(() => ConsumerLinksInputDto)
+  consumerLinks!: ConsumerLinksInputDto
 }

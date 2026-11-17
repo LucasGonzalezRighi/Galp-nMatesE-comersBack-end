@@ -770,7 +770,8 @@ model Review {
 }
 
 /// Contenido editable por clave (`home`, `about`, `faq`, `footer`, `product-tabs`,
-/// `legal-terms`, `legal-privacy`); `data` lo valida el schema de cada contenido.
+/// `legal-terms`, `legal-privacy`, `legal-cookies`, `legal-returns`); `data` lo valida el schema
+/// de cada contenido.
 model ContentBlock {
   key       String   @id
   data      Json
@@ -799,6 +800,9 @@ model Settings {
   showNetPrice              Boolean  @map("show_net_price")
   /// Datos del vendedor (`legalName`, `cuit`, `taxCondition`…), con `null` en lo no cargado.
   seller                    Json
+  /// Enlaces a Defensa del Consumidor (`cabaUrl`, `nationalUrl`); una base vieja recibe los de
+  /// fábrica con la migración `b7_contrato_legal`.
+  consumerLinks             Json     @default("{\"cabaUrl\":\"https://buenosaires.gob.ar/gobierno/atencion-ciudadana/defensa-al-consumidor\",\"nationalUrl\":\"https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario\"}") @map("consumer_links")
   /// Sube de a 1 con cada guardado del dashboard.
   version                   Int      @default(1)
   /// Usuario admin que los guardó por última vez (null si nunca se guardaron o si se borró el usuario).

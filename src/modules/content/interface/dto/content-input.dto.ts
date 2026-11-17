@@ -43,12 +43,12 @@ import {
   NestedField,
   NestedListField,
   NullableTextField,
-  NullableUrlField,
   SlugField,
   SlugListField,
   TextField,
   TextListField,
 } from './form-fields'
+import { unknownLegalMarkerMessage, unknownLegalMarkers } from '../../domain/legal-markers'
 
 /** Escenas del recorrido del inicio, una vez cada una. */
 const STORY_SCENE_KEYS = ['pieces', 'gourd', 'bombilla', 'yerba', 'ritual', 'leather'] as const
@@ -384,10 +384,6 @@ export class FooterContentInputDto implements FooterContent {
     ArrayMaxSize(10, { message: maxItemsMessage(10, 'medios de pago') }),
   )
   paymentMethods!: string[]
-
-  /** Enlace a Defensa del Consumidor (http o https); vacío queda en `null`. */
-  @NullableUrlField()
-  consumerDefenseUrl!: string | null
 }
 
 /** Pestañas de la ficha de un grupo (`ProductTabsGroupContent`). */
@@ -442,7 +438,24 @@ export class LegalContentInputDto implements LegalContent {
   @CalendarDateField()
   updatedAt!: string
 
-  /** Texto completo, hasta 60000 caracteres. */
+  /**
+   * Texto completo, hasta 60000 caracteres; sus marcadores `{{clave}}` usan claves de
+   * `LEGAL_MARKERS` (si no, el mensaje con la primera desconocida).
+   */
   @TextField(60_000)
+  @ValidateBy(
+    {
+      name: 'custom',
+      validator: {
+        validate: (value) => typeof value !== 'string' || unknownLegalMarkers(value).length === 0,
+      },
+    },
+    {
+      message: ({ value }) =>
+        unknownLegalMarkerMessage(
+          typeof value === 'string' ? (unknownLegalMarkers(value)[0] ?? '') : '',
+        ),
+    },
+  )
   body!: string
 }

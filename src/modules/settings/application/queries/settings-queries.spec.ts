@@ -25,6 +25,10 @@ const SETTINGS: StoreSettings = {
   vatRatePercent: 21,
   showNetPrice: true,
   seller: SELLER,
+  consumerLinks: {
+    cabaUrl: 'https://buenosaires.gob.ar/gobierno/atencion-ciudadana/defensa-al-consumidor',
+    nationalUrl: 'https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario',
+  },
   shippingOptions: [
     { method: 'home', label: 'Envío a domicilio', costArs: 6500, eta: '3 a 6 días', enabled: true },
     {
@@ -50,6 +54,7 @@ describe('GetPublicSettingsQuery', () => {
       contactEmail: 'galpon.mates@gmail.com',
       priceDisplay: { showNetPrice: true },
       seller: SELLER,
+      consumerLinks: SETTINGS.consumerLinks,
     })
   })
 })
@@ -70,5 +75,11 @@ describe('createStoreSettings', () => {
     expect(() => createStoreSettings({ ...SETTINGS, installmentsMax: 0 })).toThrow(/cuotas/)
     expect(() => createStoreSettings({ ...SETTINGS, vatRatePercent: 101 })).toThrow(/alícuota/)
     expect(() => createStoreSettings({ ...SETTINGS, contactEmail: ' ' })).toThrow(/email/)
+    expect(() =>
+      createStoreSettings({
+        ...SETTINGS,
+        consumerLinks: { ...SETTINGS.consumerLinks, cabaUrl: '' },
+      }),
+    ).toThrow(/Defensa del Consumidor/)
   })
 })

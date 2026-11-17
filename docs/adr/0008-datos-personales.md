@@ -52,6 +52,30 @@ búsqueda del admin (`GET /admin/orders?q=juan@mail.com`) dejaba emails y nombre
    `Idempotency-Key`). La IP y el user-agent se conservan por seguridad y se declaran en la
    política. El mailer de log enmascara el destinatario (Task 1).
 
+5. **Eliminar la cuenta** (`DELETE /me`, Task 3; `DeleteAccountCommand` y
+   `PrismaAccountDeletionRepository`): con la contraseña confirmada (las equivocadas cuentan para
+   el bloqueo del inicio de sesión), en una transacción, tabla por tabla:
+
+   | Tabla                                                | Qué pasa                                                                                                                                                                                          |
+   | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `users`                                              | Se borra la fila: no se puede volver a entrar con ese email y esa contraseña, y el email queda libre (una cuenta nueva con él arranca vacía).                                                     |
+   | `customers` (el de la cuenta)                        | Se borra la fila (nombre, apellido, teléfono, email).                                                                                                                                             |
+   | `addresses`                                          | Se borran todas las de la cuenta.                                                                                                                                                                 |
+   | sesiones (Redis)                                     | Se cierran todas las del usuario (`destroyAllForUser`) y la respuesta borra la cookie.                                                                                                            |
+   | `password_reset_tokens`                              | Se borran los del usuario.                                                                                                                                                                        |
+   | `orders` (con líneas, pagos, envíos y devoluciones)  | Se conservan por los 10 años, **sin vínculo** (`customer_id = null`), con los datos del comprobante (nombre, email, teléfono y dirección de contacto del pedido). Se siguen leyendo con su token. |
+   | `reviews` pendientes                                 | Se borran (nadie las publicó todavía).                                                                                                                                                            |
+   | `reviews` aprobadas u ocultas                        | Quedan sin vínculo (`customer_id = null`) con el nombre que la persona eligió publicar; las ocultas siguen la purga de 12 meses.                                                                  |
+   | `contact_messages` (contacto y arrepentimientos)     | No tienen vínculo con la cuenta: siguen sus plazos (24 meses y 10 años).                                                                                                                          |
+   | cliente invitado con el mismo email                  | No es la cuenta (el registro nunca lo adopta, NV-02): no se toca.                                                                                                                                 |
+   | `idempotency_keys`, `outbox_events`, jobs de `mails` | Sin cambios: la purga de 48 h y 90 días los saca; los eventos guardan ids, y el mail de un evento de un cliente borrado no sale.                                                                  |
+
+   Nada se vuelve a vincular: ni el registro ni la baja asocian pedidos por email. El mail
+   `account-deleted` va directo a la cola `mails` (no pasa por el outbox, así el email de la cuenta
+   borrada no queda en Postgres), al email que tenía la cuenta, leído antes de borrarla; el job se
+   borra al salir o, si agota los intentos, a las 24 horas. Si no se puede encolar, se registra un
+   `warn` sin datos y la baja igual responde 204.
+
 ## Consecuencias
 
 - Una repetición idempotente después de 48 h ya no encuentra la clave: el TTL de la clave es de

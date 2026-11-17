@@ -17,6 +17,14 @@ function nullableText(maxLength: number): OpenApiSchema {
   return { type: ['string', 'null'], maxLength }
 }
 
+/** URL http o https obligatoria (los enlaces de `consumerLinks`). */
+const HTTP_URL: OpenApiSchema = {
+  type: 'string',
+  format: 'uri',
+  maxLength: 2048,
+  pattern: '^https?://',
+}
+
 /** Opción de envío (`ShippingOption`). */
 @ApiSchema({ name: 'ShippingOption' })
 export class ShippingOptionDto {
@@ -105,6 +113,14 @@ export class PublicSettingsDto {
     },
   })
   seller!: unknown
+
+  /** Enlaces a Defensa del Consumidor que el pie muestra siempre. */
+  @ApiSchemaProperty({
+    type: 'object',
+    required: ['cabaUrl', 'nationalUrl'],
+    properties: { cabaUrl: HTTP_URL, nationalUrl: HTTP_URL },
+  })
+  consumerLinks!: unknown
 }
 
 /**

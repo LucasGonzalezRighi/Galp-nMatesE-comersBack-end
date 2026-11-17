@@ -40,7 +40,7 @@ export const CONTENT_PATHS: readonly string[] = [
 /**
  * Como {@link wholeCase}, pero la salida esperada también pierde los `null` de la raíz: la spec
  * se los saca a lo que da el DTO (`withoutNulls`), y en estos formularios un campo de la raíz que
- * queda en `null` (`consumerDefenseUrl` vacío del pie) es parte de la salida del front.
+ * queda en `null` (un dato del vendedor vacío en los ajustes) es parte de la salida del front.
  *
  * @param schema - Nombre del schema del front.
  * @returns El armado del chequeo de cada caso de ese schema.

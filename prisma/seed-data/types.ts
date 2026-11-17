@@ -102,7 +102,15 @@ export interface SeedReview {
 
 /** Clave de un contenido editable (`content_blocks.key`). */
 export type SeedContentKey =
-  'home' | 'about' | 'faq' | 'footer' | 'product-tabs' | 'legal-terms' | 'legal-privacy'
+  | 'home'
+  | 'about'
+  | 'faq'
+  | 'footer'
+  | 'product-tabs'
+  | 'legal-terms'
+  | 'legal-privacy'
+  | 'legal-cookies'
+  | 'legal-returns'
 
 /** Contenido editable por clave. */
 export interface SeedContentBlock {
@@ -130,6 +138,8 @@ export interface SeedSettings {
   showNetPrice: boolean
   /** Datos del vendedor, con `null` en lo que todavía no se cargó. */
   seller: SeedJsonObject
+  /** Enlaces a Defensa del Consumidor de CABA y de la Nación (`consumerLinks`). */
+  consumerLinks: { cabaUrl: string; nationalUrl: string }
 }
 
 /** Combo del diseño: 2 o 3 productos de grupos distintos con un precio final. */

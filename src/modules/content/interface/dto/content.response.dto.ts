@@ -28,15 +28,6 @@ function nullableText(maxLength: number): OpenApiSchema {
   return { type: 'string', nullable: true, maxLength }
 }
 
-/** URL `http(s)` o `null`, como las del contrato (propiedad de la clase: ver `nullableText`). */
-const NULLABLE_URL: OpenApiSchema = {
-  type: 'string',
-  nullable: true,
-  format: 'uri',
-  maxLength: 2048,
-  pattern: '^https?://',
-}
-
 /** Slug del contrato. */
 const SLUG: OpenApiSchema = {
   type: 'string',
@@ -261,10 +252,6 @@ export class FooterContentDto {
   /** Medios de pago (hasta 10). */
   @ApiSchemaProperty(list(undefined, 10, text(40)))
   paymentMethods!: string[]
-
-  /** Enlace a Defensa del Consumidor, o `null`. */
-  @ApiSchemaProperty(NULLABLE_URL)
-  consumerDefenseUrl!: string | null
 }
 
 /** Textos de fábrica de las pestañas de un grupo (`ProductTabsGroupContent`). */

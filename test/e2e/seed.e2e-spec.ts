@@ -83,7 +83,7 @@ describe('seed', () => {
       categories: 6,
       products: 27,
       reviews: 18,
-      contentBlocks: 7,
+      contentBlocks: 9,
       combos: 5,
       users: 1,
     })
@@ -97,7 +97,7 @@ describe('seed', () => {
       published: 27,
       inventory: 27,
       reviews: 18,
-      contentBlocks: 7,
+      contentBlocks: 9,
       settings: 1,
       shippingOptions: 3,
       users: 1,
@@ -156,7 +156,7 @@ describe('seed', () => {
     // El texto alternativo es por uso: cada foto del producto y la de la línea guardan el suyo.
     expect(premium.images.map((i) => i.alt)).toEqual(premium.images.map((i) => i.mediaAsset.alt))
     expect(categories[0]?.imageAlt).toBe(
-      'Mate Imperial Premium con virola de alpaca cincelada y base con pelotitas de bronce',
+      'Calabaza marrón oscura con virola ancha plateada cincelada con rombos y base de patas con pelotitas doradas',
     )
     expect(categories.slice(1).every((c) => c.imageAlt === null)).toBe(true)
 
@@ -191,7 +191,9 @@ describe('seed', () => {
       'faq',
       'footer',
       'home',
+      'legal-cookies',
       'legal-privacy',
+      'legal-returns',
       'legal-terms',
       'product-tabs',
     ])
@@ -362,13 +364,24 @@ describe('seed', () => {
       where: { key: 'home' },
       data: { data: editedHome, version: 2 },
     })
-    await db().settings.update({ where: { id: 1 }, data: { kitDiscountPercent: 15, version: 2 } })
+    const consumerLinks = {
+      cabaUrl: 'https://caba.example/',
+      nationalUrl: 'https://nacion.example/',
+    }
+    await db().settings.update({
+      where: { id: 1 },
+      data: { kitDiscountPercent: 15, version: 2, consumerLinks },
+    })
+    // Una base sembrada antes de B7: le faltan los documentos de cookies y de devoluciones.
+    await db().contentBlock.deleteMany({
+      where: { key: { in: ['legal-cookies', 'legal-returns'] } },
+    })
     await db().shippingOption.update({
       where: { method: 'home' },
       data: { costArs: 7000, enabled: false },
     })
 
-    await expect(seed(db())).resolves.toMatchObject({ contentBlocks: 7 })
+    await expect(seed(db())).resolves.toMatchObject({ contentBlocks: 9 })
 
     expect(await db().contentBlock.findUniqueOrThrow({ where: { key: 'home' } })).toMatchObject({
       data: editedHome,
@@ -377,7 +390,16 @@ describe('seed', () => {
     expect(await db().settings.findUniqueOrThrow({ where: { id: 1 } })).toMatchObject({
       kitDiscountPercent: 15,
       version: 2,
+      consumerLinks,
     })
+    const legal = await db().contentBlock.findMany({
+      where: { key: { in: ['legal-cookies', 'legal-returns'] } },
+      orderBy: { key: 'asc' },
+    })
+    expect(legal.map(({ key, data }) => [key, (data as { title: string }).title])).toEqual([
+      ['legal-cookies', 'Política de cookies'],
+      ['legal-returns', 'Cambios, devoluciones y arrepentimiento'],
+    ])
     expect(
       await db().shippingOption.findUniqueOrThrow({ where: { method: 'home' } }),
     ).toMatchObject({ costArs: 7000, enabled: false })

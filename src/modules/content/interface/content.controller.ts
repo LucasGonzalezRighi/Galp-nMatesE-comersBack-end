@@ -13,7 +13,12 @@ import type {
   LegalContent,
   ProductTabsContent,
 } from '../application/read-models'
-import { type ContentKey, LEGAL_DOCUMENTS, type LegalDocument } from '../domain/content-key'
+import {
+  type ContentKey,
+  isLegalDocument,
+  LEGAL_DOCUMENTS,
+  legalContentKey,
+} from '../domain/content-key'
 import {
   AboutContentDto,
   FaqContentDto,
@@ -24,18 +29,12 @@ import {
   StorySceneDto,
 } from './dto/content.response.dto'
 
-/** Detalle del 404 de un documento legal que no es `terms` ni `privacy` (el mismo que el mock). */
+/** Detalle del 404 de un documento legal que no es del contrato (el mismo que el mock). */
 export const LEGAL_DOCUMENT_NOT_FOUND = 'No existe ese documento legal.'
 
-/**
- * Indica si un texto de la ruta es un documento legal del contrato.
- *
- * @param value - Texto de `{document}`.
- * @returns `true` si es `terms` o `privacy`.
- */
-export function isLegalDocument(value: string): value is LegalDocument {
-  return (LEGAL_DOCUMENTS as readonly string[]).includes(value)
-}
+/** Descripción del parámetro `{document}` (`LegalDocument` del contrato). */
+export const LEGAL_DOCUMENT_DESCRIPTION =
+  'Documento legal: `terms`, `privacy`, `cookies` o `returns`.'
 
 /**
  * Textos editables de la tienda (`/content/*`).
@@ -101,27 +100,26 @@ export class ContentController {
   }
 
   /**
-   * Devuelve los términos y condiciones (`terms`) o la política de privacidad (`privacy`).
+   * Devuelve un documento legal: términos (`terms`), privacidad (`privacy`), cookies (`cookies`) o
+   * devoluciones (`returns`), con los marcadores `{{clave}}` tal cual (los resuelve la tienda).
    *
    * @param document - Documento de la ruta.
    * @returns El documento legal.
-   * @throws {NotFoundException} Si no es `terms` ni `privacy`, o si no está cargado (404, como
-   *   dice el contrato).
+   * @throws {NotFoundException} Si no es un documento del contrato, o si no está cargado (404,
+   *   como dice el contrato).
    */
   @Get('legal/:document')
   @ApiOperation({ operationId: 'getLegalContent', summary: 'Obtener un documento legal' })
   @ApiParam({
     name: 'document',
     enum: [...LEGAL_DOCUMENTS],
-    description: 'Documento legal: `terms` o `privacy`.',
+    description: LEGAL_DOCUMENT_DESCRIPTION,
   })
   @ApiOkResponse({ type: LegalContentDto, description: 'Documento legal.' })
   @ApiProblemResponses(404, 429, 500)
   async legal(@Param('document') document: string): Promise<LegalContent> {
     if (!isLegalDocument(document)) throw new NotFoundException(LEGAL_DOCUMENT_NOT_FOUND)
-    const content = await this.getContent.execute(
-      document === 'terms' ? 'legal-terms' : 'legal-privacy',
-    )
+    const content = await this.getContent.execute(legalContentKey(document))
     if (content === null) throw new NotFoundException(LEGAL_DOCUMENT_NOT_FOUND)
     return content
   }

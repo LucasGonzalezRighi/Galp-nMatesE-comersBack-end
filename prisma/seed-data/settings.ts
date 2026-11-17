@@ -20,6 +20,10 @@ export const SEED_SETTINGS: SeedSettings = {
     supportHours: null,
     dataFiscalUrl: null,
   },
+  consumerLinks: {
+    cabaUrl: 'https://buenosaires.gob.ar/gobierno/atencion-ciudadana/defensa-al-consumidor',
+    nationalUrl: 'https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario',
+  },
 }
 
 /** Opciones de envío del checkout, en el orden en que se muestran. */

@@ -58,6 +58,8 @@ const IMPLEMENTED_PATHS: readonly string[] = [
   'POST /me/addresses',
   'PATCH /me/addresses/{id}',
   'DELETE /me/addresses/{id}',
+  // B7: eliminar la cuenta (LS-5).
+  'DELETE /me',
   'POST /admin/auth/login',
   'POST /admin/auth/logout',
   'GET /admin/auth/me',
