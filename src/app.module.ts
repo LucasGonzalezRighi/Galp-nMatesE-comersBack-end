@@ -9,6 +9,7 @@ import { IdentityModule } from './modules/identity/identity.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { OrdersModule } from './modules/orders/orders.module'
 import { PaymentsModule } from './modules/payments/payments.module'
+import { PrivacyModule } from './modules/privacy/privacy.module'
 import { ReviewsModule } from './modules/reviews/reviews.module'
 import { SettingsModule } from './modules/settings/settings.module'
 import { StorefrontSyncModule } from './modules/storefront-sync/storefront-sync.module'
@@ -40,6 +41,7 @@ import { SharedModule } from './shared/shared.module'
     DashboardModule,
     StorefrontSyncModule,
     NotificationsModule,
+    PrivacyModule,
   ],
 })
 export class AppModule {}

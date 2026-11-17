@@ -258,16 +258,14 @@ model User {
 /// compras (auditoría, NV-02). Un solo invitado por email: índice único parcial
 /// `customers_guest_email_key` en la migración; la cuenta es única por `users.email`.
 model Customer {
-  id             String   @id @default(uuid(7)) @db.Uuid
-  userId         String?  @unique @map("user_id") @db.Uuid
-  email          String   @db.Citext
-  firstName      String   @map("first_name")
-  lastName       String   @map("last_name")
-  phone          String?
-  documentType   String?  @map("document_type")
-  documentNumber String?  @map("document_number")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String?  @unique @map("user_id") @db.Uuid
+  email     String   @db.Citext
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  phone     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   addresses Address[]

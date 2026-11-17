@@ -1866,3 +1866,24 @@ verificados donde iban 100 en Redis; 200 y 204 donde iba 429 en cuotas y cancela
 final: `typecheck`, `lint` y `format:check` sin errores; `npm test` 118
 archivos y 1411 tests; `test:e2e` 27 archivos y 1 salteado, 782 tests y 4 salteados;
 `contract:check` 3 archivos, 454 tests y 1 salteado. Sin migraciones ni dependencias nuevas.
+
+## B7 · Datos personales: purga, columnas sin uso y logs (2026-11-17)
+
+Decisión en [ADR 0008](adr/0008-datos-personales.md) (Ruling LS-5).
+
+- **Plazos** en `RETENTION` (`src/modules/privacy/domain/retention.ts`): claves de idempotencia
+  48 h desde que se crean; tokens de contraseña 7 días después de vencer; mensajes de contacto 24
+  meses; eventos de webhook procesados y del outbox publicados 90 días; reseñas pendientes u
+  ocultas 12 meses; pedidos y arrepentimientos 10 años (no se purgan en esta pieza). Las reseñas
+  aprobadas nunca.
+- **Purga:** módulo `privacy` con `PurgeExpiredDataCommand.execute(now) → PurgeSummary` (una
+  cantidad por tipo), `ExpiredDataRepository.deleteBatch(target, cutoff, limit)` (Prisma, lotes de
+  500 por `ctid`) y `PrivacyPurgeSweep` (a los 5 min de arrancar y cada 24 h; loguea solo
+  cantidades; en test no arranca).
+- **Migración** `20261117120000_b7_datos_personales`: fuera `customers.document_type` y
+  `customers.document_number` (sin uso en código, seed ni tests).
+- **Logs:** `serializeRequest` deja la ruta sin la query y solo los nombres de sus parámetros
+  (`GET /admin/orders?q=juan@mail.com` → `"url":"/api/v1/admin/orders","query":["q"]`).
+- **Tests:** `retention.spec.ts`, `purge-expired-data.command.spec.ts` (Review Focus 4 con dobles),
+  `privacy-purge.sweep.spec.ts`, `logger.module.spec.ts` (Review Focus 5, con `pino-http` real) y
+  `test/e2e/privacy.e2e-spec.ts` (filas fechadas a mano en Postgres y columnas borradas).

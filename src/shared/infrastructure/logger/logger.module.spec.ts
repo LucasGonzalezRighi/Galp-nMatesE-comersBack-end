@@ -1,8 +1,11 @@
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { pino } from 'pino'
+import { pinoHttp } from 'pino-http'
 import { describe, expect, it } from 'vitest'
 
 import type { Env } from '../../../config/env'
-import { buildPinoHttpOptions } from './logger.module'
+import { buildPinoHttpOptions, serializeRequest } from './logger.module'
 
 const BASE: Env = {
   NODE_ENV: 'production',
@@ -73,5 +76,62 @@ describe('buildPinoHttpOptions', () => {
     expect(output).not.toContain('ot_secreto')
     expect(output).not.toContain('clave-idempotente-secreta')
     expect(output).not.toContain('sesion-secreta')
+  })
+})
+
+describe('serializeRequest', () => {
+  it('Review Focus 5: deja la ruta y los nombres de la query, sin sus valores', () => {
+    const serialized = serializeRequest({
+      id: 1,
+      method: 'GET',
+      url: '/api/v1/admin/orders?q=juan%40mail.com&status=paid&q=otro',
+      query: { q: 'juan@mail.com', status: 'paid' },
+      params: { number: 'GLP-10001' },
+      headers: { 'user-agent': 'vitest' },
+      remoteAddress: '127.0.0.1',
+      remotePort: 5000,
+    })
+
+    expect(serialized).toEqual({
+      id: 1,
+      method: 'GET',
+      url: '/api/v1/admin/orders',
+      query: ['q', 'status'],
+      headers: { 'user-agent': 'vitest' },
+      remoteAddress: '127.0.0.1',
+      remotePort: 5000,
+    })
+    expect(JSON.stringify(serialized)).not.toContain('juan')
+  })
+
+  it('sin query deja la ruta tal cual y una lista vacía', () => {
+    expect(serializeRequest({ method: 'POST', url: '/api/v1/orders' })).toMatchObject({
+      url: '/api/v1/orders',
+      query: [],
+    })
+  })
+
+  it('pino-http con estas opciones no escribe el valor de la búsqueda del admin', async () => {
+    const lines: string[] = []
+    const options = buildPinoHttpOptions({ ...BASE, LOG_LEVEL: 'info' })
+    const middleware = pinoHttp(options, { write: (line: string) => lines.push(line) })
+    const server = createServer((req, res) => {
+      middleware(req, res)
+      res.end('ok')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as AddressInfo
+      await fetch(
+        `http://127.0.0.1:${String(port)}/api/v1/admin/orders?q=juan@mail.com&page=2`,
+      ).then((response) => response.text())
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+    }
+
+    const output = lines.join('')
+    expect(output).toContain('"url":"/api/v1/admin/orders"')
+    expect(output).toContain('"query":["q","page"]')
+    expect(output).not.toContain('juan')
   })
 })
