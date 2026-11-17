@@ -11,8 +11,11 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
   [ADR 0003 · sesiones en Redis y CSRF por sesión](docs/adr/0003-sesiones-en-redis-y-csrf-por-sesion.md),
   [ADR 0004 · reservas de stock y vencimiento](docs/adr/0004-reservas-de-stock-y-vencimiento.md),
   [ADR 0005 · pagos con Mercado Pago](docs/adr/0005-pagos-con-mercado-pago.md),
-  [ADR 0006 · combos y aviso a la tienda](docs/adr/0006-combos-y-aviso-a-la-tienda.md) y
-  [ADR 0007 · dashboard completo](docs/adr/0007-dashboard-completo.md).
+  [ADR 0006 · combos y aviso a la tienda](docs/adr/0006-combos-y-aviso-a-la-tienda.md),
+  [ADR 0007 · dashboard completo](docs/adr/0007-dashboard-completo.md) y
+  [ADR 0008 · datos personales](docs/adr/0008-datos-personales.md).
+- **Lanzamiento legal** (lo que tienen que hacer Lucas, el dueño, el abogado y el contador antes de
+  abrir la tienda): [`docs/LANZAMIENTO-LEGAL.md`](docs/LANZAMIENTO-LEGAL.md).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -115,7 +118,7 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 - **Cliente de Prisma** en `src/generated/prisma` (no se versiona): lo genera `postinstall`, o
   `npm run db:generate` después de cambiar `prisma/schema.prisma`.
 - **Seed** (`npm run db:seed` o `npx prisma db seed`): 6 líneas, 27 productos (los 16 mates con
-  los cuatro cueros), 18 reseñas (10 destacadas), 7 contenidos, 5 combos (4 publicados), ajustes y
+  los cuatro cueros), 18 reseñas (10 destacadas), 9 contenidos (con los cuatro textos legales), 5 combos (4 publicados), ajustes y
   3 envíos, los mismos datos de las fixtures del front, y el admin semilla (ver "Cuenta y admin").
   Es idempotente: correrlo dos veces deja lo mismo.
   - Líneas, productos, reseñas y combos se pisan con los valores del diseño. Los productos se
@@ -200,9 +203,9 @@ E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada pieza en
    pedidos". Al terminar, cerrá `next start` y `npm run dev`, y `npm run db:down` si no vas a
    seguir.
 
-Desde B6 también funcionan contacto, arrepentimiento y reseñas nuevas (los mails que avisan llegan
-en B7; hoy el back loguea la intención). Lo que sí falla en modo `live` es de la tienda: después de
-que el back le avisa `categories` o `settings` (cualquier guardado de un producto, una línea o los
+Desde B6 también funcionan contacto, arrepentimiento y reseñas nuevas (desde B7 el contacto y el
+arrepentimiento mandan su mail; ver "Mails"). Lo que sí falla en modo `live` es de la tienda:
+después de que el back le avisa `categories` o `settings` (cualquier guardado de un producto, una línea o los
 ajustes), `/producto/[slug]` y `/tienda/[linea]` responden 500 hasta reiniciar `next start` (ver
 "Dashboard").
 
@@ -247,6 +250,11 @@ cookies `__Host-` y un token CSRF por sesión
   - Vale 60 minutos y una sola vez.
   - Al usarlo se cierran todas las sesiones del usuario.
 
+- **Eliminar la cuenta** (`DELETE /me`, desde B7): pide la contraseña actual y el CSRF, borra el
+  usuario, el cliente, las direcciones, los tokens y las reseñas pendientes, cierra todas las
+  sesiones y borra la cookie (204). Los pedidos quedan 10 años sin vínculo con la cuenta (ver
+  [ADR 0008](docs/adr/0008-datos-personales.md)) y sale el mail `account-deleted`. Una contraseña
+  equivocada da 422 `invalid_password` y cuenta para el bloqueo del inicio de sesión.
 - **Registro:** crea siempre una cuenta con su propio cliente. Si ese email ya había comprado como
   invitado, la cuenta **no** adopta esos pedidos ni sus datos (escribir un email no prueba que sea
   tuyo): siguen leyéndose con el link del pedido.
@@ -653,7 +661,7 @@ no cuentan para el límite de pedidos por IP (`@SkipThrottle`).
 | `GET /admin/orders`, `GET /admin/orders/{number}`, `POST …/{number}/status`        | `orders`    | Listado (filtros, búsqueda sin acentos, páginas de 20), detalle y cambio de estado: preparación, despachado, entregado o cancelado. |
 | `GET /admin/reviews`, `PATCH /admin/reviews/{id}`                                  | `reviews`   | Moderación: aprobar, ocultar y destacar en el inicio.                                                                               |
 | `GET /admin/messages`, `PATCH /admin/messages/{id}`                                | `support`   | Bandeja de contacto y arrepentimiento; leído o no.                                                                                  |
-| `GET/PUT /admin/content/…` (inicio, nosotros, preguntas, pie, pestañas, legales)   | `content`   | Los 7 contenidos (12 operaciones). Último guardado gana.                                                                            |
+| `GET/PUT /admin/content/…` (inicio, nosotros, preguntas, pie, pestañas, legales)   | `content`   | Los 9 contenidos (12 operaciones). Último guardado gana.                                                                            |
 | `GET/PUT /admin/settings`                                                          | `settings`  | Ajustes y envíos (el IVA se redondea a 2 decimales).                                                                                |
 | `POST /contact`, `POST /withdrawals`, `POST /products/{slug}/reviews`              | públicas    | Contacto, arrepentimiento (código `ARR-` + 6 dígitos) y reseña nueva (queda pendiente), con campo trampa (`website`).               |
 
@@ -736,7 +744,7 @@ agotados los intentos queda en fallidos con un `warn` sin datos personales.
 | `contact-received` | `contact.received`                                           | Email del mensaje     |
 | `account-created`  | `customer.registered`                                        | Email de la cuenta    |
 | `password-reset`   | `POST /auth/password/forgot` (directo a la cola, sin outbox) | Email de la cuenta    |
-| `account-deleted`  | Queda lista para `DELETE /me` (Task 3 de B7)                 | Email de la cuenta    |
+| `account-deleted`  | `DELETE /me` (directo a la cola, sin outbox)                 | Email de la cuenta    |
 
 Los eventos llevan solo ids: el mail lee los datos al salir. Un evento repetido no manda dos mails
 (`jobId` = id del evento + plantilla). El enlace de restablecer contraseña no se guarda en Postgres
@@ -760,6 +768,12 @@ arrancá el back con `MAIL_MODE=smtp`, `SMTP_HOST=localhost`, `SMTP_PORT=1025`, 
 `http://localhost:8025` (bajá el contenedor al terminar). Los tests no mandan mails: el adaptador
 SMTP se prueba con el transporte de prueba de `nodemailer` y los E2E usan un doble de `MailPort`
 (`createApp({ mailer })`).
+
+**Prueba en vivo (cierre de B7):** con el back compilado en el 3021, `MAIL_MODE=smtp` contra un
+servidor SMTP falso local (un script con `node:net` que guarda cada mensaje) y curl, el pedido, el
+pago simulado, el despacho, el arrepentimiento, el contacto, el registro, el olvido de contraseña
+y la baja de la cuenta mandaron los ocho mails esperados, cada uno solo a su destinatario, y el log
+no mostró ningún email ni el enlace de restablecer (ver la bitácora, B7).
 
 ## Scripts
 

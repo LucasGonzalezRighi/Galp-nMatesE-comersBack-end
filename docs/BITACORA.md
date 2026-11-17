@@ -1867,7 +1867,43 @@ final: `typecheck`, `lint` y `format:check` sin errores; `npm test` 118
 archivos y 1411 tests; `test:e2e` 27 archivos y 1 salteado, 782 tests y 4 salteados;
 `contract:check` 3 archivos, 454 tests y 1 salteado. Sin migraciones ni dependencias nuevas.
 
-## B7 · Datos personales: purga, columnas sin uso y logs (2026-11-17)
+## B7 · Mails, datos personales y contrato legal (2026-11-17)
+
+Plan: `docs/superpowers/plans/2026-11-17-b7-mails-datos.md`. Rulings LS-5, LS-6 y LS-10 de la ronda
+legal (LS-1, decisiones de Lucas, no se discute). Cuatro tareas: mails (Task 1), datos personales
+(Task 2), contrato nuevo del front (Task 3) y cierre (Task 4).
+
+### Mails (Task 1)
+
+- **Puerto único** `MailPort` (`src/shared/application/ports/mail.port.ts`) con dos adaptadores,
+  según `MAIL_MODE`: `LogMail` (por defecto; loguea solo la plantilla y `l***@dominio.com`) y
+  `SmtpMail` con `nodemailer` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`;
+  en producción `smtp` es obligatorio y falta una variable, la API no arranca). Puerto 465 con TLS
+  directo; cualquier otro, STARTTLS obligatorio salvo en `localhost`.
+- **Módulo `notifications`:** diez plantillas puras en español (texto + HTML simple, sin imágenes
+  remotas ni rastreo, sin newsletter), la cola BullMQ `mails` (5 intentos con backoff exponencial;
+  `jobId` = id del evento + plantilla, así un evento repetido no manda dos mails) y un handler del
+  outbox que solo encola. El mail lee los datos al salir: los eventos llevan solo ids.
+- **Eventos nuevos** en la misma transacción que la escritura: `withdrawal.requested`,
+  `contact.received` y `customer.registered`.
+- **Directos a la cola** (sin pasar por Postgres): `password-reset` (el enlace con el token) y
+  `account-deleted` (el email ya no existe cuando sale). Se borran al completarse y, si agotan los
+  intentos, a las 24 h.
+- `nodemailer` **10.3.1** exacta (la más nueva con 14 días publicada al fijarla).
+
+### Contrato legal del front (Task 3)
+
+- Documentos legales `terms`, `privacy`, `cookies` y `returns`, con los ocho marcadores de los datos
+  del vendedor (un `{{dato}}` desconocido da 422) y los textos de fábrica de las fixtures del front.
+- Ajustes: `consumerLinks` (Ley CABA 2244 y Ventanilla Federal Única) con los enlaces de fábrica, y
+  Data Fiscal acepta el código de ARCA y guarda solo el enlace. El pie ya no tiene
+  `consumerDefenseUrl`.
+- **`DELETE /me`:** con la contraseña actual borra usuario, cliente, direcciones, tokens y reseñas
+  pendientes, cierra las sesiones y manda `account-deleted`; los pedidos quedan sin vínculo (tabla
+  completa en el ADR 0008, punto 5). Contrato: 84 de 84 operaciones implementadas.
+- Migración `20261117130000_b7_contrato_legal` (columna `settings.consumer_links`).
+
+### Datos personales: purga, columnas sin uso y logs (Task 2)
 
 Decisión en [ADR 0008](adr/0008-datos-personales.md) (Ruling LS-5).
 
@@ -1887,3 +1923,63 @@ Decisión en [ADR 0008](adr/0008-datos-personales.md) (Ruling LS-5).
 - **Tests:** `retention.spec.ts`, `purge-expired-data.command.spec.ts` (Review Focus 4 con dobles),
   `privacy-purge.sweep.spec.ts`, `logger.module.spec.ts` (Review Focus 5, con `pino-http` real) y
   `test/e2e/privacy.e2e-spec.ts` (filas fechadas a mano en Postgres y columnas borradas).
+
+### Verificación (Task 4)
+
+Contra el contrato de la rama `feat/legal-accesibilidad` del front
+(`CONTRACT_PATH="C:/Users/lucas/.galpon-trabajo/frontend-legal/docs/api/openapi.yaml"`):
+`typecheck`, `lint` y `format:check` sin errores; `npm test` 128 archivos y 1481 tests;
+`test:e2e` 30 archivos y 1 salteado (el sandbox de Mercado Pago), 810 tests y 4 salteados;
+`contract:check` 3 archivos, 466 tests y 1 salteado (84 de 84 operaciones, 0 diferencias).
+
+**Prueba en vivo con un servidor de mails falso.** Back compilado (`node dist/main`) en el 3021 con
+`MAIL_MODE=smtp` contra un servidor SMTP falso local (un script con `node:net` en 127.0.0.1 que
+guarda cada mensaje; nada salió a internet), `MP_MODE=simulated`, y Postgres y Redis de un
+`docker compose -p galpon-livecheck` aparte (volúmenes propios, borrados al terminar: la base de
+desarrollo de Lucas no se tocó), migrado y sembrado. Con curl: pedido de invitado, pago con la
+tarjeta simulada `APRO`, preparando y despachado desde el admin, arrepentimiento, contacto,
+registro, olvidé mi contraseña y eliminar la cuenta. Llegaron los ocho mails esperados:
+
+| Mail               | Asunto                                    | Destinatario                 |
+| ------------------ | ----------------------------------------- | ---------------------------- |
+| `order-received`   | Recibimos tu pedido GLP-10001             | El del pedido                |
+| `payment-approved` | Aprobamos el pago de tu pedido GLP-10001  | El del pedido                |
+| `order-shipped`    | Despachamos tu pedido GLP-10001           | El del pedido                |
+| `withdrawal-code`  | Recibimos tu arrepentimiento (ARR-000001) | El de la solicitud           |
+| `contact-received` | Recibimos tu mensaje                      | El del mensaje               |
+| `password-reset`   | Cambiá tu contraseña de Galpón Mates      | El de la cuenta              |
+| `account-created`  | Tu cuenta en Galpón Mates está lista      | El de la cuenta              |
+| `account-deleted`  | Eliminamos tu cuenta de Galpón Mates      | El de la cuenta (ya borrada) |
+
+Cada mail tuvo un solo destinatario, el mismo en el sobre SMTP y en la cabecera; ninguno llevó
+imágenes; el texto trae el resumen, el total, el arrepentimiento de 10 días y los enlaces a
+`STORE_ORIGIN`; el log del back no mostró ningún email ni el token de restablecer. Un primer
+`POST /orders` con un nombre mal codificado por la terminal dio 422 y no gastó número (el pedido
+fue el `GLP-10001`). No apareció ningún bug del back. Al terminar se bajaron el back, el servidor
+falso y los contenedores.
+
+### Commits
+
+- `b4e1a5d` docs(plan): B7 con las tareas del contrato legal y el cierre
+- `13ac87e` feat(notifications): mails de pedidos, pagos, envíos, arrepentimiento, contacto y
+  cuenta por SMTP
+- `5563f5f` feat(privacy): purga diaria con plazos de conservación, columnas sin uso y logs sin
+  datos de más
+- `f117117`, `035feae` y `7d46b88` fix(notifications): menores de la revisión (jobs directos
+  fallidos, versión de `nodemailer`, nota del ADR)
+- `7cf27fa` feat(legal): documentos de cookies y devoluciones, enlaces de consumidor y eliminar la
+  cuenta
+- docs: bitácora de B7, lanzamiento legal y README (este cierre)
+
+### Lo que queda después de B7
+
+- **Lucas:** correr `npm run db:migrate` (dos migraciones de B7) y completar
+  [`docs/LANZAMIENTO-LEGAL.md`](LANZAMIENTO-LEGAL.md) con el dueño, el abogado y el contador
+  (datos del vendedor, cuenta SMTP y sus variables, `TRUST_PROXY`, Cloudinary, Registro Nacional de
+  Bases de Datos, revisión de los cuatro textos y lo demás).
+- **Seguridad pendiente:** la verificación del email de las cuentas (NV-20: necesita un cambio de
+  contrato con el front) y el formato del número de pedido (NV-15: `GLP-` y cinco dígitos).
+- **Menores aceptados de la revisión:** si Redis falla durante `DELETE /me`, la cuenta ya quedó
+  borrada pero la respuesta es 503 sin borrar la cookie ni mandar el aviso; el mail de la baja se
+  encola después de cerrar las sesiones.
+- **B8:** `audit_logs` del dashboard y la configuración de producción.
