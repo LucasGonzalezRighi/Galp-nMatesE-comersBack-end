@@ -25,6 +25,7 @@
     "db:generate": "prisma generate",
     "db:reset": "prisma migrate reset --force",
     "db:seed": "tsx prisma/seed.ts",
+    "admin:password": "tsx prisma/admin-password.ts",
     "prepare": "lefthook install",
     "postinstall": "prisma generate"
   },

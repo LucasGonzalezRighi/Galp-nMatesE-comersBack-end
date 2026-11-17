@@ -40,7 +40,7 @@ export interface SeedSummary {
 type Tx = Prisma.TransactionClient
 
 /** Parámetros de argon2id de las contraseñas (Ruling B-6: 19 MiB, 2 pasadas, 1 hilo). */
-const PASSWORD_HASH_OPTIONS = {
+export const PASSWORD_HASH_OPTIONS = {
   type: argon2id,
   memoryCost: 19_456,
   timeCost: 2,
