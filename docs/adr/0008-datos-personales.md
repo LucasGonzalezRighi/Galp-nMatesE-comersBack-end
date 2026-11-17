@@ -29,6 +29,10 @@ búsqueda del admin (`GET /admin/orders?q=juan@mail.com`) dejaba emails y nombre
    | Pedidos, pagos, devoluciones y solicitudes de arrepentimiento              | 10 años                   | no se purgan acá                            |
    | Reseñas aprobadas                                                          | mientras estén publicadas | no se purgan                                |
 
+   La purga de reseñas cuenta desde que se escribieron (`created_at`), no desde que se moderaron:
+   una reseña aprobada que después el admin oculta se purga a los 12 meses de escrita (si ya los
+   pasó, en la purga siguiente).
+
    Los 10 años son la obligación de conservar registros comerciales (CCyC art. 328); cuando
    lleguen los primeros vencimientos (2036) se suma ese paso.
 
