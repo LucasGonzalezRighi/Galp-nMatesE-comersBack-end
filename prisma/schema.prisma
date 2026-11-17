@@ -249,6 +249,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   editedContentBlocks ContentBlock[]
   editedSettings      Settings[]
+  auditLogs           AuditLog[]
 
   @@map("users")
 }
@@ -887,4 +888,32 @@ model ContactMessage {
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([kind, createdAt(sort: Desc)])
   @@map("contact_messages")
+}
+
+// ── Auditoría del dashboard (B8) ────────────────────────────────────────────────────────────
+
+/// Escritura exitosa del admin desde el dashboard: quién, qué, sobre qué entidad y qué cambió.
+/// La guarda el interceptor del módulo `audit` y se consulta por SQL (no tiene endpoint). Por
+/// diseño no guarda datos de clientes: de un pedido, una reseña o un mensaje solo van las columnas
+/// que cambiaron. Por eso no tiene purga.
+model AuditLog {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  /// Admin que hizo la escritura (no se puede borrar un usuario con auditoría).
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  /// `<entidad>.<verbo>`: `category.update`, `order.status`, `admin_user.password`…
+  action      String
+  /// Tipo de entidad: `category`, `product`, `order`, `content`…
+  entityType  String   @map("entity_type")
+  /// Id de la entidad: un uuid, un número de pedido (`GLP-10001`), una clave de contenido
+  /// (`home`)…; `null` si la escritura no es sobre una sola entidad (reordenar).
+  entityId    String?  @map("entity_id")
+  /// `{ input, before, after }`: lo que mandó el dashboard y, de la fila principal, las columnas
+  /// que cambiaron con su valor de antes y de después. Las claves que no aplican no van.
+  changes     Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { ConfigModule } from './config/config.module'
+import { AuditModule } from './modules/audit/audit.module'
 import { CatalogModule } from './modules/catalog/catalog.module'
 import { ContentModule } from './modules/content/content.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
@@ -42,6 +43,7 @@ import { SharedModule } from './shared/shared.module'
     StorefrontSyncModule,
     NotificationsModule,
     PrivacyModule,
+    AuditModule,
   ],
 })
 export class AppModule {}
