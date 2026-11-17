@@ -1,0 +1,40 @@
+# Ensayo en la compu: el mismo compose de producción, sin dominio ni HTTPS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# Deja el back en http://localhost:3021, la tienda en http://localhost:4410 y el dashboard en
+# http://localhost:5410 (solo desde esta máquina). Caddy no arranca: sin un dominio real no puede
+# sacar certificados. Usa el mismo `.env` (con `DOMAIN=localhost`); ver "Ensayo en tu compu" en
+# `backend/docs/DESPLIEGUE.md`.
+services:
+  caddy:
+    profiles:
+      - con-dominio
+
+  store:
+    ports:
+      - '127.0.0.1:4410:3000'
+    environment:
+      NEXT_PUBLIC_SITE_URL: http://localhost:4410
+
+  admin:
+    build:
+      args:
+        VITE_API_BASE_URL: http://localhost:3021
+        VITE_STORE_URL: http://localhost:4410
+    ports:
+      - '127.0.0.1:5410:80'
+
+  api:
+    ports:
+      - '127.0.0.1:3021:3001'
+    environment:
+      STORE_ORIGIN: http://localhost:4410
+      ADMIN_ORIGIN: http://localhost:5410
+      PUBLIC_API_ORIGIN: http://localhost:3021
+
+  tools:
+    environment:
+      STORE_ORIGIN: http://localhost:4410
+      ADMIN_ORIGIN: http://localhost:5410
+      PUBLIC_API_ORIGIN: http://localhost:3021

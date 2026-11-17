@@ -1,0 +1,241 @@
+# Galpón Mates en producción: un solo servidor con Docker.
+#
+#   Internet ─► caddy (80/443) ─► tudominio            ─► store (Next.js) ─► api
+#                              ─► admin.tudominio      ─► admin (archivos estáticos)
+#                              ─► api.tudominio        ─► api (NestJS) ─► postgres, redis
+#
+# Se usa desde esta carpeta (`backend/deploy`), con el repo del front clonado al lado del back
+# (`../../frontend`) y un archivo `.env` armado a partir de `.env.example`:
+#
+#   docker compose up -d --build
+#
+# El paso a paso completo está en `backend/docs/DESPLIEGUE.md`.
+name: galpon
+
+# Logs de cada contenedor: hasta 5 archivos de 10 MB (después se pisa el más viejo).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
+services:
+  # Proxy de entrada: el único que publica puertos. Saca y renueva solo los certificados HTTPS.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DOMAIN: ${DOMAIN:?Falta DOMAIN en el archivo .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Falta ACME_EMAIL en el archivo .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - store
+      - admin
+      - api
+    networks:
+      - galpon
+    logging: *logging
+
+  # Tienda (Next.js). Se compila dentro del contenedor la primera vez que arranca cada versión,
+  # cuando el back ya responde: `next build` lee el catálogo y deja fijas las variables de abajo.
+  store:
+    build:
+      context: ../../frontend
+      dockerfile: apps/store/Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      API_MODE: live
+      NEXT_PUBLIC_API_MODE: live
+      API_BASE_URL: http://api:3001
+      NEXT_PUBLIC_SITE_URL: ${STORE_ORIGIN:-https://${DOMAIN}}
+      REVALIDATE_SECRET: ${REVALIDATE_SECRET:?Falta REVALIDATE_SECRET en el archivo .env}
+      NEXT_PUBLIC_MP_PUBLIC_KEY: ${MP_PUBLIC_KEY:?Falta MP_PUBLIC_KEY en el archivo .env}
+      NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:?Falta CLOUDINARY_CLOUD_NAME en el archivo .env}
+      # Caddy escribe ahí la IP real de cada visitante; la tienda se la pasa al back.
+      TRUSTED_CLIENT_IP_HEADER: x-real-ip
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/robots.txt').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # La primera compilación tarda varios minutos: mientras tanto no cuenta como caída.
+      start_period: 15m
+    networks:
+      - galpon
+    logging: *logging
+
+  # Dashboard: se compila al construir la imagen y lo sirve un Caddy interno (archivos estáticos).
+  admin:
+    build:
+      context: ../../frontend
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_ORIGIN:-https://api.${DOMAIN}}
+        VITE_STORE_URL: ${STORE_ORIGIN:-https://${DOMAIN}}
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - galpon
+    logging: *logging
+
+  # Back (NestJS). Al arrancar aplica las migraciones pendientes y después levanta la API.
+  api:
+    build:
+      context: ..
+      target: runtime
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment: &api-environment
+      NODE_ENV: production
+      PORT: '3001'
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Proxies de confianza: solo la red interna de este compose (Caddy y la tienda).
+      TRUST_PROXY: 172.28.0.0/24
+      DATABASE_URL: postgresql://galpon:${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en el archivo .env}@postgres:5432/galpon
+      REDIS_URL: redis://redis:6379
+      STORE_ORIGIN: ${STORE_ORIGIN:-https://${DOMAIN}}
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-https://admin.${DOMAIN}}
+      PUBLIC_API_ORIGIN: ${PUBLIC_API_ORIGIN:-https://api.${DOMAIN}}
+      # El aviso a la tienda va por la red interna, sin salir a internet.
+      STORE_INTERNAL_ORIGIN: http://store:3000
+      STORE_REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      MP_MODE: live
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:?Falta MP_ACCESS_TOKEN en el archivo .env}
+      MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:?Falta MP_WEBHOOK_SECRET en el archivo .env}
+      MP_STATEMENT_DESCRIPTOR: ${MP_STATEMENT_DESCRIPTOR:-GALPON MATES}
+      MEDIA_MODE: cloudinary
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:?Falta CLOUDINARY_API_KEY en el archivo .env}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:?Falta CLOUDINARY_API_SECRET en el archivo .env}
+      MAIL_MODE: smtp
+      SMTP_HOST: ${SMTP_HOST:?Falta SMTP_HOST en el archivo .env}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:?Falta SMTP_USER en el archivo .env}
+      SMTP_PASS: ${SMTP_PASS:?Falta SMTP_PASS en el archivo .env}
+      MAIL_FROM: ${MAIL_FROM:?Falta MAIL_FROM en el archivo .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3001/api/v1/health').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
+    networks:
+      - galpon
+    logging: *logging
+
+  # Tareas a mano del back (no arranca solo). Por ejemplo, el seed:
+  #   docker compose --profile tools run --rm tools npm run db:seed
+  tools:
+    profiles:
+      - tools
+    build:
+      context: ..
+      target: tools
+    environment:
+      <<: *api-environment
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - galpon
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    shm_size: 128mb
+    environment:
+      POSTGRES_USER: galpon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: galpon
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U galpon -d galpon']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - galpon
+    logging: *logging
+
+  # Redis guarda las colas (vencimiento de pedidos, mails, avisos): escribe a disco y no desaloja.
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - galpon
+    logging: *logging
+
+  # Copia diaria de la base en `./backups` (ver `backup.sh`).
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    entrypoint: ['sh', '/backup.sh']
+    environment:
+      PGHOST: postgres
+      PGUSER: galpon
+      PGDATABASE: galpon
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - galpon
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  # Red interna con rango fijo: es la que el back acepta como proxy de confianza (`TRUST_PROXY`).
+  galpon:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

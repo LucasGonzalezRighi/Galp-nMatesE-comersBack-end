@@ -1,0 +1,40 @@
+# Proxy de entrada de Galpón Mates. Caddy saca y renueva solo los certificados HTTPS de los cuatro
+# nombres (hace falta que el DNS ya apunte al servidor y los puertos 80 y 443 estén abiertos).
+# `DOMAIN` y `ACME_EMAIL` salen del archivo `.env` (ver `docker-compose.yml`).
+#
+# Caddy descarta el `X-Forwarded-For` que mande el navegador y escribe la IP real del visitante:
+# por eso el back puede confiar en él para los límites por cliente.
+{
+	email {$ACME_EMAIL}
+}
+
+# Tienda.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# El aviso para regenerar páginas lo manda el back por la red interna: desde internet no existe.
+	@revalidar path /api/revalidate
+	respond @revalidar 404
+
+	reverse_proxy store:3000 {
+		# La tienda lee de acá la IP real y se la pasa al back (TRUSTED_CLIENT_IP_HEADER=x-real-ip).
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+# Dashboard (archivos estáticos; las cabeceras de seguridad las pone su propio contenedor).
+admin.{$DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+	reverse_proxy admin:80
+}
+
+# API: la usan el dashboard (desde el navegador) y Mercado Pago (el webhook de los pagos).
+api.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:3001
+}

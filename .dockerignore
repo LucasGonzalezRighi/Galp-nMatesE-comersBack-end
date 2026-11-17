@@ -1,0 +1,15 @@
+# Lo que no entra a la imagen del back. `deploy` queda afuera a propósito: ahí vive el `.env` con
+# los secretos de producción y las copias de la base.
+.git
+.github
+.superpowers
+node_modules
+dist
+coverage
+deploy
+docs
+test
+src/generated
+**/.env
+**/.env.*
+*.log

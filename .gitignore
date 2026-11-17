@@ -9,3 +9,5 @@ coverage/
 .superpowers/
 # Cliente de Prisma generado (`prisma generate`, lo corre `postinstall`)
 src/generated/
+# Copias diarias de la base de producción (`deploy/backup.sh`)
+deploy/backups/
