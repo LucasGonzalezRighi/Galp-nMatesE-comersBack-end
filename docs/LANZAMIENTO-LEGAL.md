@@ -51,10 +51,23 @@ Sin esto la tienda no debería salir a producción.
       producción son obligatorias). Revisar que la tienda muestre las fotos subidas desde el panel.
       _Por qué:_ las fotos que se suban desde el dashboard se guardan ahí; Cloudinary es además un
       proveedor en el exterior (ver la tarea de contratos, más abajo).
-- [ ] **Lucas · Correr las migraciones** (`npx prisma migrate deploy` en producción, `npm run
-db:migrate` en desarrollo) y el seed con `ADMIN_EMAIL` y `ADMIN_PASSWORD` propios.
-      _Por qué:_ B7 sumó dos migraciones (columnas sin uso fuera y enlaces de consumidor); el seed se
-      niega a crear el admin de demostración en producción.
+- [ ] **Lucas · Correr las migraciones** y el seed con `ADMIN_EMAIL` y `ADMIN_PASSWORD` propios. En
+      desarrollo, desde la carpeta `backend`:
+
+      ```bash
+      npm run db:migrate
+      ```
+
+      En producción:
+
+      ```bash
+      npx prisma migrate deploy
+      ```
+
+      _Por qué:_ los arreglos de seguridad y B7 sumaron migraciones (entre ellas, columnas sin uso
+      fuera y enlaces de consumidor); sin correrlas, el back da error cuando busca las columnas
+      nuevas. El seed se niega a crear el admin de demostración en producción.
+
 - [ ] **El abogado · Revisar los cuatro textos legales**: Términos y condiciones (`/terminos`),
       Política de privacidad (`/privacidad`), Política de cookies (`/cookies`) y Cambios, devoluciones
       y reembolsos (`/devoluciones`). Se editan desde el dashboard (Contenido).
@@ -62,7 +75,7 @@ db:migrate` en desarrollo) y el seed con `ADMIN_EMAIL` y `ADMIN_PASSWORD` propio
       25.326 art. 6 y la Res. AAIP 14/2018 piden la información de privacidad con la leyenda de la
       AAIP; la Res. 270/2020 y el CCyC 1111 piden términos claros y guardables; la LDC art. 37, el CCyC
       1117-1122 y la Disp. 377/2026 prohíben cláusulas abusivas. Puntos concretos para mirar:
-  - qué significa el sello "Compra verificada" de las reseñas (ver la sección 4);
+  - qué significa el sello "Compra verificada" de las reseñas (ver la sección 3);
   - edad mínima de 18 años para comprar y crear cuenta;
   - "en el estado en que lo recibiste" en el arrepentimiento, y la excepción del paquete de yerba
     abierto (si se redacta mal, puede ser una cláusula abusiva, Disp. 377/2026 inc. n);
@@ -232,8 +245,15 @@ qué norma las mira.
   confirmarlo). El registro ya no adopta pedidos de invitado, así que no da acceso a compras
   ajenas; falta el enlace de verificación (necesita un cambio de contrato con el front).
 - **Formato del número de pedido (NV-15).** El contrato fija `GLP-` y cinco dígitos: alcanza para
-  89.999 pedidos (unos 4 años a 50 por día). Antes de llegar al 80 % (`SELECT last_value FROM
-order_number_seq` mayor que 82000) hay que ampliar el formato en el contrato del front y del back.
+  89.999 pedidos (unos 4 años a 50 por día). Antes de llegar al 80 % hay que ampliar el formato en
+  el contrato del front y del back. Para saber por dónde va la numeración, esta consulta en la base:
+
+  ```sql
+  SELECT last_value FROM order_number_seq;
+  ```
+
+  Si da más de 82000, es momento de ampliarlo.
+
 - **Límites por cliente sin `TRUST_PROXY`.** Ver la tarea de la sección 1: sin el proxy, las cuotas y
   las lecturas públicas no tienen límite por cliente.
 
