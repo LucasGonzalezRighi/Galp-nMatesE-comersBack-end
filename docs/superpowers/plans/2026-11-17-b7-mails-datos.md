@@ -4,7 +4,7 @@
 
 **Goal:** que el back mande los mails que la tienda ya promete y que la ley exige (la confirmación del pedido, CCyC 1108), y que trate los datos personales con plazos de conservación, purga y logs sin datos de más.
 
-**Architecture:** un puerto único de envío (`MailPort`) con dos adaptadores (`log` y SMTP con `nodemailer`), elegido por `MAIL_MODE`. Un módulo `notifications` arma cada mail con plantillas puras y lo manda por una cola propia con reintentos; se dispara con los eventos del outbox que ya existen más tres nuevos. Un módulo `privacy` corre una purga diaria con plazos fijos. Las tareas que siguen el contrato nuevo del front (documentos legales `cookies` y `returns`, enlaces de consumidor, `DELETE /me`) y el cierre se detallan cuando el front commitee ese contrato.
+**Architecture:** un puerto único de envío (`MailPort`) con dos adaptadores (`log` y SMTP con `nodemailer`), elegido por `MAIL_MODE`. Un módulo `notifications` arma cada mail con plantillas puras y lo manda por una cola propia con reintentos; se dispara con los eventos del outbox que ya existen más tres nuevos. Un módulo `privacy` corre una purga diaria con plazos fijos. La Task 3 sigue el contrato nuevo del front (documentos legales `cookies` y `returns`, enlaces de consumidor, `DELETE /me`) y la Task 4 cierra.
 
 **Tech Stack:** lo de B1–B6 más `nodemailer` (versión exacta, única dependencia nueva).
 
@@ -65,10 +65,33 @@
 - [ ] **Step 3:** `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run test:e2e`, `npm run contract:check`.
 - [ ] **Step 4:** commit `feat(privacy): purga diaria con plazos de conservación, columnas sin uso y logs sin datos de más`.
 
-### Task 3: Seguir el contrato nuevo del front (se detalla cuando el front lo commitee)
+### Task 3: Seguir el contrato nuevo del front: documentos legales, enlaces de consumidor y eliminar la cuenta
 
-Documentos legales `cookies` y `returns`, enlaces de consumidor y datos del vendedor en ajustes, y `DELETE /me` (anonimiza al cliente, borra direcciones y sesiones, emite `customer.deleted` y manda `account-deleted`).
+El contrato ya está commiteado en el front (rama `feat/legal-accesibilidad`, commit `232c24d`, worktree `C:/Users/lucas/.galpon-trabajo/frontend-legal`). Desde esta tarea, el contrato y los E2E corren con `CONTRACT_PATH="C:/Users/lucas/.galpon-trabajo/frontend-legal/docs/api/openapi.yaml"`. La fuente es la sección "Legales, datos del vendedor y eliminar la cuenta: cambios que el back tiene que implementar" de `C:/Users/lucas/.galpon-trabajo/frontend-legal/docs/api/README.md` y las `description` del YAML; los casos son los de `validation-cases.json` de esa carpeta (`Admin · documento legal`, `Admin · enlaces de Defensa del Consumidor`, `Admin · Data Fiscal`, `Eliminar la cuenta`, los 26 de ajustes con `consumerLinks` y los 3 del pie sin el enlace).
 
-### Task 4: Cierre (se detalla después de la Task 3)
+**Files:**
+- Modify: `src/modules/content/**` (documentos `cookies` y `returns`: claves `legal-cookies` y `legal-returns`, etiquetas `content:legal-{document}`; validación de marcadores; `FooterContent` sin `consumerDefenseUrl`), `src/modules/settings/**` (`consumerLinks`, `dataFiscalUrl` con el código pegado), `src/modules/storefront-sync/**` solo si el patrón de etiquetas no admite las nuevas
+- Modify: `src/modules/identity/**` (`DELETE /me`), `src/modules/notifications/**` (conectar `account-deleted`)
+- Modify: `prisma/schema.prisma` + migración `b7_contrato_legal` (lo que haga falta para `consumerLinks` y para anonimizar), `scripts/import-fixtures.mjs`, `prisma/seed.ts`, `prisma/seed-data/**`
+- Modify: `test/contract/**` (operación `DELETE /me` y los mappings de los casos nuevos), E2E de contenido, ajustes y cuenta
 
-Seed al día con las fixtures del front, verificación global, prueba en vivo con un servidor SMTP falso local y `docs/LANZAMIENTO-LEGAL.md` (LS-10).
+**Interfaces:**
+- Consumes: de la Task 1, `MailPort`, la cola `mails` y la plantilla `account-deleted`; de la tanda de seguridad, `SessionPort.destroyAllForUser`, el bloqueo de login (`LoginAttemptsPort`) y `StorableText`.
+- Produces: `DeleteAccountCommand.execute(userId, { password }, context)`; `LEGAL_MARKERS` (las 8 claves, copia de `@galpon/domain`).
+
+- [ ] **Step 1:** tests que fallan. Contrato: `DELETE /me` en las operaciones implementadas y 0 diferencias con el contrato nuevo. Legales: `GET /content/legal/cookies` y `/returns` → 200 con el texto del seed; `/legal/otro` → 404 "No existe ese documento legal."; `PUT /admin/content/legal/terms` con `{{cuitt}}` → 422 `{ field: 'body', code: 'custom', message: 'El dato {{cuitt}} no existe. Revisá la lista de datos del vendedor.' }`, y con un marcador válido se guarda tal cual. Ajustes: `GET /settings` trae `consumerLinks` con los valores de fábrica; `PUT /admin/settings` sin `consumerLinks` → 422 "Requerido"; con el código de ARCA pegado en `dataFiscalUrl` guarda solo el `href`. Cuenta: contraseña equivocada → 422 `{ field: 'password', code: 'invalid_password', message: 'La contraseña no es correcta' }` y nada cambia; contraseña correcta → 204, cookie borrada, el login con ese email y esa contraseña ya no entra, las direcciones no existen, todas las sesiones del usuario quedan cerradas, `GET /orders/{number}` con el token del pedido sigue respondiendo 200 con los datos del comprobante, `GET /me/orders` de una cuenta nueva con el mismo email no trae esos pedidos, y sale un mail `account-deleted` al email que tenía la cuenta; 401 sin sesión y 403 sin token CSRF. Diez contraseñas equivocadas seguidas en `DELETE /me` cuentan para el mismo bloqueo que el login.
+- [ ] **Step 2:** implementar. La anonimización recorre **todas** las tablas con vínculo al cliente o al usuario o con su email (cliente, usuario, direcciones, sesiones, tokens de contraseña, reseñas, mensajes de contacto, solicitudes de arrepentimiento, pedidos) y decide una por una; lo que se conserva por los 10 años (pedidos y arrepentimientos, con los datos del comprobante) queda sin vínculo a la cuenta. La decisión por tabla se escribe en `docs/adr/0008-datos-personales.md`. El mail `account-deleted` se encola directo con el destinatario leído antes de anonimizar (como el de contraseña), y su job se borra al completarse.
+- [ ] **Step 3:** importador y seed: los cuatro textos legales y `consumerLinks` desde las fixtures del front (`FIXTURES_PATH="C:/Users/lucas/.galpon-trabajo/frontend-legal/packages/api-client/src/mock/fixtures/index.ts"`); una base ya sembrada suma `legal-cookies`, `legal-returns` y `consumerLinks` si faltan, sin pisar lo que el admin guardó.
+- [ ] **Step 4:** `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, y con el `CONTRACT_PATH` nuevo `npm run test:e2e` y `npm run contract:check` (84 operaciones implementadas, 0 diferencias).
+- [ ] **Step 5:** commit `feat(legal): documentos de cookies y devoluciones, enlaces de consumidor y eliminar la cuenta`.
+
+### Task 4: Cierre: verificación global, prueba con un servidor de mails falso y documentos
+
+**Files:**
+- Modify: `README.md`, `docs/BITACORA.md` (B7); Create: `docs/LANZAMIENTO-LEGAL.md`
+- Capturas y registros en `.superpowers/sdd/2026-11-04-legal-seguridad/captures/`
+
+- [ ] **Step 1:** verificación global con el `CONTRACT_PATH` nuevo: typecheck, lint, format, unitarios, E2E y contrato.
+- [ ] **Step 2:** prueba en vivo solo del back (los fronts están ocupados por otras corridas): back compilado en el puerto **3021** con `docker compose up -d`, el seed, `MAIL_MODE=smtp` apuntando a un servidor SMTP falso local (un script chico con `node:net` en el scratchpad, que guarde cada mensaje en un archivo; nada de internet), `MP_MODE=simulated`. Con `curl`: crear un pedido, pagarlo con el simulador, despacharlo desde el admin, pedir un arrepentimiento, mandar un contacto, registrar una cuenta, pedir restablecer la contraseña y eliminar la cuenta; guardar los ocho mails recibidos (asunto y texto) como evidencia y comprobar que ninguno va a un destinatario equivocado. Bajar todo al terminar.
+- [ ] **Step 3:** `docs/LANZAMIENTO-LEGAL.md` (LS-10): lo que el código no puede hacer y tiene que hacer Lucas, el dueño, el abogado o el contador (inscripción en el Registro Nacional de Bases de Datos, revisión de los cuatro textos, cálculo del precio neto, promoción de cuotas real en Mercado Pago, cesión escrita de las fotos, marca en el INPI, consentimiento del socio, contratos con proveedores en el exterior, cuenta SMTP y sus variables, `TRUST_PROXY` con un proxy delante de la tienda, Cloudinary), las afirmaciones y las fotos a confirmar por el dueño (tomá la lista de `C:/Users/lucas/.galpon-trabajo/frontend-legal/.superpowers/sdd/2026-11-09-legal-accesibilidad/task-2-report.md` y de `audit-datos-terceros-afirmaciones-imagenes.md`), los riesgos aceptados de LS-1 con su norma (botón de arrepentimiento solo en el pie: Disp. 954/2025; "Los más vendidos" y reseñas de ejemplo con sello: DNU 274/2019) y lo que queda pendiente de la auditoría de seguridad (verificación del email de las cuentas, formato del número de pedido).
+- [ ] **Step 4:** commit `docs: bitácora de B7, lanzamiento legal y README`.
