@@ -23,13 +23,15 @@ export const MAIL_JOB_OPTIONS = {
 } as const satisfies JobsOptions
 
 /**
- * Opciones del mail de restablecer contraseña: los mismos intentos, y el job se borra apenas sale
- * (lleva el enlace con el token, que no tiene que quedar guardado).
+ * Opciones de los mails directos (restablecer contraseña y cuenta eliminada): los mismos intentos;
+ * el job se borra apenas sale y, si agota los intentos, a las 24 horas (lleva el email y, en el de
+ * contraseña, el enlace con el token, que no tienen que quedar guardados en Redis).
  */
 export const DIRECT_MAIL_JOB_OPTIONS = {
   attempts: MAIL_ATTEMPTS,
   backoff: { type: 'exponential', delay: 5_000 },
   removeOnComplete: true,
+  removeOnFail: { age: 24 * 60 * 60 },
 } as const satisfies JobsOptions
 
 /** Job de un mail que dispara un evento del outbox: guarda ids, los datos se leen al mandar. */

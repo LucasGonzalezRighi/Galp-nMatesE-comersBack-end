@@ -104,13 +104,15 @@ describe('QueuedPasswordResetMailer', () => {
     const [name, data, opts] = add.mock.calls[0] as unknown as [
       string,
       { kind: string; mail: OutgoingMail },
-      { removeOnComplete: unknown; jobId: string },
+      { removeOnComplete: unknown; removeOnFail: unknown; jobId: string },
     ]
     expect(name).toBe('mail.send')
     expect(data.kind).toBe('direct')
     expect(data.mail).toMatchObject({ to: 'ana@mail.com', template: 'password-reset' })
     expect(data.mail.text).toContain(link)
     expect(opts.removeOnComplete).toBe(DIRECT_MAIL_JOB_OPTIONS.removeOnComplete)
+    // Un mail que agota sus intentos no deja el email y el enlace con el token en Redis más de un día.
+    expect(opts.removeOnFail).toEqual({ age: 24 * 60 * 60 })
     expect(opts.jobId).toMatch(/^password-reset-/)
   })
 })
