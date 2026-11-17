@@ -254,13 +254,24 @@ qué norma las mira.
 
   Si da más de 82000, es momento de ampliarlo.
 
+- **Páginas de productos que no existen (front, pista 13 de la auditoría).** Cada dirección con
+  forma válida que no corresponde a ningún producto (por ejemplo `/producto/algo-inventado`) deja
+  guardada en el disco de la tienda su página de "No encontramos ese producto" (unos 70 kB cada
+  una), así que alguien podría llenar el disco pidiendo miles. Las direcciones con forma inválida ya
+  no dejan nada. Para cerrarlo hay que elegir una de tres opciones, según el hosting: ponerle un
+  tope de tamaño a esa caché, no guardar esas páginas en disco
+  (`experimental.isrFlushToDisk: false`) o generar solo las fichas que existen al compilar
+  (`dynamicParams = false`; cada producto nuevo pediría volver a compilar la tienda).
+- **Actualizar Next.js (front).** La tienda usa Next 16.4.2, que tiene dos fallas conocidas
+  (GHSA-mfr8-8qww-v76h y GHSA-vc7v-qv4w-wrv8, sobre los "root params" con `'use cache'`). La tienda
+  no usa esa función, así que hoy no la afectan, pero `next build` lo avisa en cada compilación.
+  Están corregidas desde la versión 16.4.5.
 - **Límites por cliente sin `TRUST_PROXY`.** Ver la tarea de la sección 1: sin el proxy, las cuotas y
   las lecturas públicas no tienen límite por cliente.
 
 ## 5. Lo que ya hace el sistema (para no repetirlo)
 
-Lo de la tienda y el dashboard sale con la rama `feat/legal-accesibilidad` del front (en curso);
-lo del back ya está en `main`.
+Lo de la tienda y el dashboard ya está en `main` del front; lo del back, en `main` del back.
 
 - Cuatro textos legales editables desde el dashboard, con los datos del vendedor como marcadores,
   "Última actualización" y botón para imprimir o guardar como PDF.

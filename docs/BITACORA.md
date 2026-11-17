@@ -1971,6 +1971,18 @@ falso y los contenedores.
   cuenta
 - docs: bitácora de B7, lanzamiento legal y README (este cierre)
 
+### Cierre con el front en `main` (2026-11-17)
+
+La rama `feat/legal-accesibilidad` del front ya está unida a su `main` (`c2a11fe`), junto con los
+arreglos de seguridad del front. Desde ahí no hace falta `CONTRACT_PATH`: `npm run contract:check`
+lee `../frontend` y da 3 archivos, 466 tests y 1 salteado, con 0 de 84 operaciones pendientes, y
+`node scripts/import-fixtures.mjs` contra `../frontend` no cambia el seed.
+
+Después del cierre de la Task 4 se sumaron `ef4c877` (el aviso de la baja se encola antes de cerrar
+las sesiones, con su test) y `50088e2` (los comandos de `LANZAMIENTO-LEGAL.md` en bloques de
+código). Con ellos, `npm test` da 128 archivos y 1482 tests y
+`test/e2e/account-deletion.e2e-spec.ts`, 4 de 4.
+
 ### Lo que queda después de B7
 
 - **Lucas:** correr `npm run db:migrate` (dos migraciones de B7) y completar
@@ -1979,7 +1991,7 @@ falso y los contenedores.
   Bases de Datos, revisión de los cuatro textos y lo demás).
 - **Seguridad pendiente:** la verificación del email de las cuentas (NV-20: necesita un cambio de
   contrato con el front) y el formato del número de pedido (NV-15: `GLP-` y cinco dígitos).
-- **Menores aceptados de la revisión:** si Redis falla durante `DELETE /me`, la cuenta ya quedó
-  borrada pero la respuesta es 503 sin borrar la cookie ni mandar el aviso; el mail de la baja se
-  encola después de cerrar las sesiones.
+- **Menor aceptado de la revisión:** si Redis falla durante `DELETE /me`, la cuenta ya quedó borrada
+  pero la respuesta es 503 sin borrar la cookie. El aviso por mail ya no se pierde: desde `ef4c877`
+  se encola apenas se borra la cuenta, antes de cerrar las sesiones.
 - **B8:** `audit_logs` del dashboard y la configuración de producción.
