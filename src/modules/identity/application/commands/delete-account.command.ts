@@ -27,8 +27,9 @@ export interface DeleteAccountContext {
 /**
  * Eliminar la cuenta del cliente (`DELETE /me`, LS-5): confirma la contraseña (cada intento cuenta
  * para el bloqueo del inicio de sesión, por email e IP y por email solo), borra la cuenta con
- * {@link AccountDeletionRepository} (los pedidos quedan sin vínculo), cierra todas las sesiones del
- * usuario y encola el mail `account-deleted` al email que tenía la cuenta, leído antes de borrarla.
+ * {@link AccountDeletionRepository} (los pedidos quedan sin vínculo), encola el mail
+ * `account-deleted` al email que tenía la cuenta (leído antes de borrarla) y cierra todas las
+ * sesiones del usuario.
  */
 export class DeleteAccountCommand {
   /**
@@ -59,7 +60,8 @@ export class DeleteAccountCommand {
    * @throws {StaleSessionError} Si el usuario ya no existe, no es cliente o está deshabilitado.
    * @throws {LoginLockedError} Si el email está bloqueado por intentos, o si este fallo lo bloquea.
    * @throws {Error} En español, si la cuenta no tiene cliente (dato inconsistente).
-   * @throws {DomainError} 503 si el almacén de sesiones no responde (la cuenta ya se borró).
+   * @throws {DomainError} 503 si el almacén de sesiones no responde (la cuenta ya se borró y el
+   *   aviso por mail ya quedó encolado).
    */
   async execute(
     userId: string,
@@ -85,9 +87,11 @@ export class DeleteAccountCommand {
     if (customer === null) throw new Error(`La cuenta ${user.id} no tiene un cliente asociado`)
 
     await this.accounts.deleteAccount({ userId: user.id, customerId: customer.id })
+    // El aviso va apenas la cuenta se borró: si después falla el almacén de sesiones, el mail ya
+    // quedó encolado y no depende de que el cliente reintente (ya no podría: la cuenta no existe).
+    await this.mailer.sendAccountDeleted({ to: user.email, firstName: customer.firstName })
     await this.attempts.clear(key)
     await this.sessions.destroyAllForUser(user.id)
-    await this.mailer.sendAccountDeleted({ to: user.email, firstName: customer.firstName })
     return ok(undefined)
   }
 }

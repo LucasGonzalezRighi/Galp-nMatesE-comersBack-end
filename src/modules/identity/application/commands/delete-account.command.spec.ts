@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FixedSecrets, InMemorySessionStore } from '../../../../../test/support/session'
 import {
@@ -96,6 +96,17 @@ describe('DeleteAccountCommand', () => {
     expect(accounts.deleted).toEqual([{ userId: 'usr-1', customerId: 'cus-1' }])
     expect(await sessions.get(first.id)).toBeNull()
     expect(await sessions.get(second.id)).toBeNull()
+    expect(mailer.accountDeletions).toEqual([{ to: 'ana@mail.com', firstName: 'Ana' }])
+  })
+
+  it('si el almacén de sesiones falla después de borrar la cuenta, el aviso por mail ya salió', async () => {
+    vi.spyOn(sessions, 'destroyAllForUser').mockRejectedValue(new Error('Redis no responde'))
+
+    await expect(
+      command.execute('usr-1', { password: PASSWORD }, { clientIp: IP }),
+    ).rejects.toThrow('Redis no responde')
+
+    expect(accounts.deleted).toEqual([{ userId: 'usr-1', customerId: 'cus-1' }])
     expect(mailer.accountDeletions).toEqual([{ to: 'ana@mail.com', firstName: 'Ana' }])
   })
 
