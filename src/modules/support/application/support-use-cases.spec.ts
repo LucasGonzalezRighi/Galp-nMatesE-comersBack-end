@@ -196,7 +196,7 @@ describe('RequestWithdrawalCommand', () => {
     expect(log.lines).toEqual([])
     await expect(command.execute(WITHDRAWAL)).resolves.toEqual({ code: 'ARR-000001' })
     expect(log.lines).toEqual([
-      'Arrepentimiento ARR-000001 en la bandeja: el comprobante por mail llega en B7.',
+      'Arrepentimiento ARR-000001 en la bandeja: el comprobante sale por mail.',
     ])
   })
 

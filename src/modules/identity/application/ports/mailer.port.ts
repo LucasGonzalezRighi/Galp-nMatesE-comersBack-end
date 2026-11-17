@@ -8,7 +8,7 @@ export interface PasswordResetMail {
   link: string
 }
 
-/** Envío de mails de la cuenta (el proveedor real llega en B7; hasta entonces, un adaptador de log). */
+/** Envío de mails de la cuenta (en la app, la cola `mails` de `notifications`, B7). */
 export interface MailerPort {
   /**
    * Manda el mail con el enlace para cambiar la contraseña.

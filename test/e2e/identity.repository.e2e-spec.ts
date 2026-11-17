@@ -40,7 +40,7 @@ import { newId } from '../../src/shared/domain/id'
 import { PrismaService } from '../../src/shared/infrastructure/prisma/prisma.service'
 import { createApp } from '../support/app'
 import { startContainers, type TestContainers } from '../support/containers'
-import { RecordingMailer } from '../support/identity'
+import { RecordingMailPort } from '../support/mail'
 
 /** Una dirección válida de la libreta. */
 const HOME: AddressInput = {
@@ -57,7 +57,7 @@ const HOME: AddressInput = {
 describe('adaptadores de identidad (Postgres + Redis)', () => {
   let containers: TestContainers | undefined
   let app: INestApplication<Server> | undefined
-  const mailer = new RecordingMailer()
+  const mailer = new RecordingMailPort()
   const previousEnv = { DATABASE_URL: process.env.DATABASE_URL, REDIS_URL: process.env.REDIS_URL }
 
   beforeAll(async () => {
@@ -316,11 +316,12 @@ describe('adaptadores de identidad (Postgres + Redis)', () => {
 
       await get(RequestPasswordResetCommand).execute(' Olvido@Mail.com ')
 
-      const mail = mailer.passwordResets.at(-1)
+      const mail = await mailer.waitFor('password-reset', 'olvido@mail.com')
+      const link = RecordingMailPort.resetLink(mail)
       const origin = get<Env>(ENV).STORE_ORIGIN.replace(/\/+$/, '')
-      expect(mail?.to).toBe('olvido@mail.com')
-      const token = new URL(mail?.link ?? 'http://x').searchParams.get('token') ?? ''
-      expect(mail?.link).toBe(`${origin}/cuenta/restablecer?token=${token}`)
+      expect(mail.to).toBe('olvido@mail.com')
+      const token = new URL(link || 'http://x').searchParams.get('token') ?? ''
+      expect(link).toBe(`${origin}/cuenta/restablecer?token=${token}`)
       expect(token).toMatch(/^rt_[0-9a-f]{64}$/)
       const rows = await prisma().passwordResetToken.findMany({
         where: { user: { email: 'olvido@mail.com' } },

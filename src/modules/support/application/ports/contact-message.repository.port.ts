@@ -39,7 +39,8 @@ export interface ContactMessageRepository {
   peekWithdrawalNumber(): Promise<number>
 
   /**
-   * Guarda un mensaje nuevo, sin leer.
+   * Guarda un mensaje nuevo, sin leer, y en la misma transacción su evento del outbox
+   * (`supportMessageEvent`: `withdrawal.requested` o `contact.received`, que mandan el mail).
    *
    * @param message - Mensaje ya revisado.
    */

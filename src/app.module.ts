@@ -6,6 +6,7 @@ import { ContentModule } from './modules/content/content.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { HealthModule } from './modules/health/health.module'
 import { IdentityModule } from './modules/identity/identity.module'
+import { NotificationsModule } from './modules/notifications/notifications.module'
 import { OrdersModule } from './modules/orders/orders.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { ReviewsModule } from './modules/reviews/reviews.module'
@@ -38,6 +39,7 @@ import { SharedModule } from './shared/shared.module'
     SupportModule,
     DashboardModule,
     StorefrontSyncModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

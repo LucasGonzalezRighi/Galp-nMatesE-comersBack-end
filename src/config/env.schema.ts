@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { MAIL_PRODUCTION_LOG_MESSAGE, MAIL_SMTP_MISSING_MESSAGE } from './mail'
 import { MEDIA_CLOUDINARY_MISSING_MESSAGE, MEDIA_PRODUCTION_SIMULATED_MESSAGE } from './media'
 
 /** Configuración de la API, ya validada y con los valores por defecto aplicados. */
@@ -71,6 +72,22 @@ export interface Env {
   CLOUDINARY_API_KEY?: string | undefined
   /** API secret de Cloudinary (firma las subidas). Obligatorio con `cloudinary`; nunca se loguea. */
   CLOUDINARY_API_SECRET?: string | undefined
+  /**
+   * Envío de mails (por defecto `log`, LS-6): `log` no manda nada y deja en el log la plantilla y
+   * el destinatario enmascarado (no se admite en `production`); `smtp` manda por el servidor SMTP
+   * de `SMTP_HOST`.
+   */
+  MAIL_MODE: 'log' | 'smtp'
+  /** Servidor SMTP. Obligatorio con `smtp`. */
+  SMTP_HOST?: string | undefined
+  /** Puerto del servidor SMTP (465 abre TLS directo; 587, STARTTLS). Obligatorio con `smtp`. */
+  SMTP_PORT?: number | undefined
+  /** Usuario del servidor SMTP. Obligatorio con `smtp`. */
+  SMTP_USER?: string | undefined
+  /** Contraseña del servidor SMTP. Obligatoria con `smtp`; nunca se loguea. */
+  SMTP_PASS?: string | undefined
+  /** Remitente de los mails (`Galpón Mates <hola@dominio.com>`). Obligatorio con `smtp`. */
+  MAIL_FROM?: string | undefined
 }
 
 const HTTP_PROTOCOL = /^https?$/
@@ -131,7 +148,8 @@ function isBareOrigin(value: string): boolean {
  * como texto y se convierte a número. `NODE_ENV` no tiene valor por defecto. Las reglas entre
  * variables (`MP_MODE=live` exige sus tres credenciales; `production` exige `live` y
  * `STORE_REVALIDATE_SECRET`) se revisan solo si cada variable es válida por sí sola; lo mismo
- * `MEDIA_MODE=cloudinary` con sus tres credenciales y `production` con `cloudinary`. Al final,
+ * `MEDIA_MODE=cloudinary` con sus tres credenciales y `production` con `cloudinary`, y
+ * `MAIL_MODE=smtp` con sus cinco variables y `production` con `smtp`. Al final,
  * `HOST` toma su valor por defecto según el entorno ({@link defaultHost}).
  */
 export const envSchema = z
@@ -155,6 +173,12 @@ export const envSchema = z
     CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
     CLOUDINARY_API_KEY: z.string().min(1).optional(),
     CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+    MAIL_MODE: z.enum(['log', 'smtp']).default('log'),
+    SMTP_HOST: z.string().trim().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    SMTP_USER: z.string().min(1).optional(),
+    SMTP_PASS: z.string().min(1).optional(),
+    MAIL_FROM: z.string().trim().min(3).optional(),
   })
   .superRefine((env, ctx) => {
     // Reglas entre variables: sin `path`, `parseEnv` muestra el mensaje tal cual.
@@ -177,6 +201,20 @@ export const envSchema = z
     }
     if (env.NODE_ENV === 'production' && !cloudinary) {
       ctx.addIssue({ code: 'custom', message: MEDIA_PRODUCTION_SIMULATED_MESSAGE, path: [] })
+    }
+    const smtp = env.MAIL_MODE === 'smtp'
+    if (
+      smtp &&
+      (!env.SMTP_HOST ||
+        env.SMTP_PORT === undefined ||
+        !env.SMTP_USER ||
+        !env.SMTP_PASS ||
+        !env.MAIL_FROM)
+    ) {
+      ctx.addIssue({ code: 'custom', message: MAIL_SMTP_MISSING_MESSAGE, path: [] })
+    }
+    if (env.NODE_ENV === 'production' && !smtp) {
+      ctx.addIssue({ code: 'custom', message: MAIL_PRODUCTION_LOG_MESSAGE, path: [] })
     }
   })
   .transform(({ HOST, ...env }) => ({
@@ -208,4 +246,10 @@ export const ENV_HINTS: Record<keyof Env, string> = {
   CLOUDINARY_CLOUD_NAME: 'el nombre de la nube de Cloudinary (no vacío)',
   CLOUDINARY_API_KEY: 'la API key de Cloudinary (no vacía)',
   CLOUDINARY_API_SECRET: 'el API secret de Cloudinary (no vacío)',
+  MAIL_MODE: 'log o smtp',
+  SMTP_HOST: 'el servidor SMTP (por ejemplo smtp.ejemplo.com)',
+  SMTP_PORT: 'un número entero entre 1 y 65535 (465 o 587)',
+  SMTP_USER: 'el usuario del servidor SMTP (no vacío)',
+  SMTP_PASS: 'la contraseña del servidor SMTP (no vacía)',
+  MAIL_FROM: 'el remitente (por ejemplo Galpón Mates <hola@dominio.com>)',
 }

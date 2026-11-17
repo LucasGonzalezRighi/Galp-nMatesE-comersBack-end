@@ -18,7 +18,7 @@ import {
   refreshCsrf as httpRefreshCsrf,
   setCookies,
 } from '../support/http'
-import { RecordingMailer } from '../support/identity'
+import { RecordingMailPort } from '../support/mail'
 
 /** Contraseña de la cuenta de prueba y la que elige al recuperarla. */
 const PASSWORD = 'mate-con-yerba-2026'
@@ -46,7 +46,7 @@ const CUSTOMER_COOKIE =
 describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)', () => {
   let containers: TestContainers | undefined
   let app: INestApplication<Server> | undefined
-  const mailer = new RecordingMailer()
+  const mailer = new RecordingMailPort()
   const previousEnv = { DATABASE_URL: process.env.DATABASE_URL, REDIS_URL: process.env.REDIS_URL }
 
   /** Navegador de la cuenta principal (registro → libreta → logout). */
@@ -301,21 +301,21 @@ describe('autenticación de la tienda y del dashboard (HTTP + Postgres + Redis)'
 
     it('forgot → 202 siempre; con el email conocido manda el link de la tienda', async () => {
       await refreshCsrf(jar)
-      const sentBefore = mailer.passwordResets.length
+      const sentBefore = mailer.of('password-reset').length
 
       const unknown = await call(jar, 'post', '/auth/password/forgot', {
         body: { email: 'nadie@mail.com' },
       })
       expect(unknown.status).toBe(202)
-      expect(mailer.passwordResets).toHaveLength(sentBefore)
+      expect(mailer.of('password-reset')).toHaveLength(sentBefore)
 
       const known = await call(jar, 'post', '/auth/password/forgot', {
         body: { email: ' Ana@mail.com' },
       })
       expect(known.status).toBe(202)
       expect(known.text).toBe('')
-      expect(mailer.passwordResets).toHaveLength(sentBefore + 1)
-      link = mailer.passwordResets.at(-1)?.link ?? ''
+      link = RecordingMailPort.resetLink(await mailer.waitFor('password-reset', 'ana@mail.com'))
+      expect(mailer.of('password-reset')).toHaveLength(sentBefore + 1)
       expect(link.startsWith('http://localhost:3000/cuenta/restablecer?token=rt_')).toBe(true)
     })
 

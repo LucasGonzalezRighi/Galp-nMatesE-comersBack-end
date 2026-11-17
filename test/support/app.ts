@@ -6,19 +6,19 @@ import type { Server } from 'node:http'
 import { AppModule } from '../../src/app.module'
 import { APP_OPTIONS, setupApp } from '../../src/app.setup'
 import {
-  MAILER_PORT,
-  type MailerPort,
-} from '../../src/modules/identity/application/ports/mailer.port'
-import {
   PAYMENT_GATEWAY_PORT,
   type PaymentGatewayPort,
 } from '../../src/modules/payments/application/ports/payment-gateway.port'
+import { MAIL_PORT, type MailPort } from '../../src/shared/application/ports/mail.port'
 import { type Clock, CLOCK } from '../../src/shared/domain/clock'
 
 /** Adaptadores que un E2E puede reemplazar al armar la app. */
 export interface AppOverrides {
-  /** Mailer en lugar del de log (por ejemplo, un `RecordingMailer` para leer el link). */
-  mailer?: MailerPort
+  /**
+   * Envío de mails en lugar del que elige `MAIL_MODE` (por ejemplo, un `RecordingMailPort` de
+   * `test/support/mail.ts` para leer los mails, o para simular un SMTP caído).
+   */
+  mailer?: MailPort
   /** Reloj en lugar del `SystemClock` (por ejemplo, un `FixedClock` para vencer reservas). */
   clock?: Clock
   /**
@@ -38,7 +38,7 @@ export interface AppOverrides {
 export async function createApp(overrides: AppOverrides = {}): Promise<INestApplication<Server>> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
   if (overrides.mailer !== undefined) {
-    builder.overrideProvider(MAILER_PORT).useValue(overrides.mailer)
+    builder.overrideProvider(MAIL_PORT).useValue(overrides.mailer)
   }
   if (overrides.clock !== undefined) {
     builder.overrideProvider(CLOCK).useValue(overrides.clock)

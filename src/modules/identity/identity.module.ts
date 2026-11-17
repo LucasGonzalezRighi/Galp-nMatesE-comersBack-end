@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common'
 
 import { ENV, type Env } from '../../config/env'
+import { NotificationsModule } from '../notifications/notifications.module'
+import { QueuedPasswordResetMailer } from '../notifications/infrastructure/queued-password-reset.mailer'
 import { SECRETS_PORT, type SecretsPort } from '../../shared/application/ports/secrets.port'
 import { SESSION_PORT, type SessionPort } from '../../shared/application/ports/session.port'
 import { type Clock, CLOCK } from '../../shared/domain/clock'
@@ -40,7 +42,6 @@ import { GetAdminSessionQuery } from './application/queries/get-admin-session.qu
 import { GetMeQuery } from './application/queries/get-me.query'
 import { ListMyAddressesQuery } from './application/queries/list-my-addresses.query'
 import { Argon2PasswordHasher } from './infrastructure/argon2-password.hasher'
-import { LogMailer } from './infrastructure/log-mailer.adapter'
 import { PrismaAddressRepository } from './infrastructure/prisma-address.repository'
 import { PrismaCustomerRepository } from './infrastructure/prisma-customer.repository'
 import { PrismaPasswordResetRepository } from './infrastructure/prisma-password-reset.repository'
@@ -53,15 +54,16 @@ import { MeController } from './interface/me.controller'
 /**
  * Identidad: cuentas de clientes y admins, sesiones, recuperación de contraseña y libreta de
  * direcciones. Los repositorios son de Prisma, las contraseñas van con argon2id, los fallos de
- * inicio de sesión se cuentan en Redis (falla abierta) y el mail de recuperación sale por el log
- * hasta B7. Las sesiones y los secretos vienen de `RedisModule` (global) y el reloj de
- * `SharedModule`.
+ * inicio de sesión se cuentan en Redis (falla abierta) y el mail de recuperación sale por la cola
+ * `mails` de `NotificationsModule` (B7). Las sesiones y los secretos vienen de `RedisModule`
+ * (global) y el reloj de `SharedModule`.
  *
  * Los casos de uso no conocen Nest: se cablean acá con `useFactory`. Las rutas son las de
  * `/auth`, `/me` y `/admin/auth` del contrato. Exporta {@link GetMeQuery} y `CUSTOMER_REPOSITORY`
  * (los usa `orders` en B4 para el dueño del pedido).
  */
 @Module({
+  imports: [NotificationsModule],
   controllers: [AuthController, MeController, AdminAuthController],
   providers: [
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
@@ -69,11 +71,7 @@ import { MeController } from './interface/me.controller'
     { provide: ADDRESS_REPOSITORY, useClass: PrismaAddressRepository },
     { provide: PASSWORD_RESET_REPOSITORY, useClass: PrismaPasswordResetRepository },
     { provide: PASSWORD_HASHER, useValue: new Argon2PasswordHasher() },
-    {
-      provide: MAILER_PORT,
-      useFactory: (env: Env) => new LogMailer(env.NODE_ENV),
-      inject: [ENV],
-    },
+    { provide: MAILER_PORT, useExisting: QueuedPasswordResetMailer },
     {
       provide: LOGIN_ATTEMPTS_PORT,
       useFactory: (redis: RedisService) => new RedisLoginAttempts(redis.client),

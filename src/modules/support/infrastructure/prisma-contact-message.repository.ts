@@ -1,12 +1,16 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 
 import type {
   ContactMessage as ContactMessageRow,
   ContactReason as DbContactReason,
   Prisma,
 } from '../../../generated/prisma/client'
+import { CLOCK, type Clock } from '../../../shared/domain/clock'
+import { createDomainEvent } from '../../../shared/domain/domain-event'
+import { OutboxRepository } from '../../../shared/infrastructure/outbox/outbox.repository'
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
 import type { ContactMessage, ContactReason, NewContactMessage } from '../domain/contact-message'
+import { supportMessageEvent } from '../domain/support-events'
 import type {
   ContactMessageFilter,
   ContactMessageRepository,
@@ -60,8 +64,16 @@ function whereOf(filter: ContactMessageFilter): Prisma.ContactMessageWhereInput 
 /** Bandeja del dashboard con Prisma (Postgres). */
 @Injectable()
 export class PrismaContactMessageRepository implements ContactMessageRepository {
-  /** @param prisma - Cliente de Prisma de la app. */
-  constructor(private readonly prisma: PrismaService) {}
+  /**
+   * @param prisma - Cliente de Prisma de la app.
+   * @param outbox - Outbox, para el evento de cada mensaje nuevo.
+   * @param clock - Reloj (la fecha del evento).
+   */
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outbox: OutboxRepository,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   /**
    * {@inheritDoc ContactMessageRepository.nextWithdrawalNumber}
@@ -97,19 +109,28 @@ export class PrismaContactMessageRepository implements ContactMessageRepository 
     return Number(value)
   }
 
-  /** {@inheritDoc ContactMessageRepository.create} */
+  /**
+   * {@inheritDoc ContactMessageRepository.create}
+   *
+   * El mensaje y su evento (`withdrawal.requested` o `contact.received`, solo con el id) van en la
+   * misma transacción.
+   */
   async create(message: NewContactMessage): Promise<void> {
-    await this.prisma.contactMessage.create({
-      data: {
-        kind: message.kind,
-        name: message.name,
-        email: message.email,
-        orderNumber: message.orderNumber,
-        reason: message.reason === null ? null : REASON_TO_DB[message.reason],
-        message: message.message,
-        code: message.code,
-      },
-      select: { id: true },
+    await this.prisma.$transaction(async (tx) => {
+      const { id } = await tx.contactMessage.create({
+        data: {
+          kind: message.kind,
+          name: message.name,
+          email: message.email,
+          orderNumber: message.orderNumber,
+          reason: message.reason === null ? null : REASON_TO_DB[message.reason],
+          message: message.message,
+          code: message.code,
+        },
+        select: { id: true },
+      })
+      const event = supportMessageEvent({ id, kind: message.kind })
+      await this.outbox.append(tx, createDomainEvent(event, this.clock.now()))
     })
   }
 

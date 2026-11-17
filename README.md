@@ -175,8 +175,8 @@ E2E con Testcontainers y esta misma prueba (ver "Verificación" de cada pieza en
 
 1. Acá, con Docker Desktop abierto: `npm run db:up`, `npm run db:migrate`, `npm run db:seed` y
    `STORE_ORIGIN=http://localhost:4300 npm run dev`. `STORE_ORIGIN` tiene que ser el origen de la
-   tienda compilada: ahí vuelve el comprador después del simulador de Mercado Pago, y ahí apunta
-   el link de recuperación de contraseña del log.
+   tienda compilada: ahí vuelve el comprador después del simulador de Mercado Pago, y ahí apuntan
+   los enlaces de los mails (ver "Mails").
 
 2. Desde `../frontend`, con el back andando (el build lee el catálogo y falla con
    `Failed to collect page data` si no lo encuentra), compilar y servir la tienda en otro puerto,
@@ -239,18 +239,13 @@ cookies `__Host-` y un token CSRF por sesión
     (`POST /admin/auth/password`).
   - Un nuevo seed no la restablece. Si la olvidás, `npm run db:reset && npm run db:seed` (borra la
     base de desarrollo).
-- **Recuperación de contraseña:** `POST /auth/password/forgot` responde siempre 202. Hasta B7 no
-  hay proveedor de mail: fuera de producción, el back escribe el link en el log, en una línea con
-  `"context":"LogMailer"` y el texto "Mail de recuperación de contraseña (solo log, sin proveedor)":
-
-  ```text
-  "link":"http://localhost:3000/cuenta/restablecer?token=rt_…"
-  ```
+- **Recuperación de contraseña:** `POST /auth/password/forgot` responde siempre 202 y, si el email
+  es de una cuenta activa, manda el mail `password-reset` (ver "Mails"; con `MAIL_MODE=log` el
+  enlace no se loguea: para verlo en desarrollo, usá Mailpit).
 
   - El link sale de `STORE_ORIGIN`.
   - Vale 60 minutos y una sola vez.
   - Al usarlo se cierran todas las sesiones del usuario.
-  - En producción el link no se loguea.
 
 - **Registro:** crea siempre una cuenta con su propio cliente. Si ese email ya había comprado como
   invitado, la cuenta **no** adopta esos pedidos ni sus datos (escribir un email no prueba que sea
@@ -722,6 +717,50 @@ Cloudinary, pero guarda las que el producto ya tiene. Las variables (detalle en 
 | `CLOUDINARY_API_KEY`    | (sin valor) | API key de Cloudinary. Obligatoria con `cloudinary`.                                                       |
 | `CLOUDINARY_API_SECRET` | (sin valor) | API secret de Cloudinary (firma las subidas). Obligatorio con `cloudinary`; nunca se loguea.               |
 
+## Mails
+
+Desde B7 (LS-6) el back manda los mails que la tienda promete y que la ley exige (la confirmación
+del pedido, CCyC 1108), en español, en texto plano y HTML simple, sin imágenes remotas ni rastreo y
+sin newsletter. Cada mail sale por la cola BullMQ `mails` (job `mail.send`, 5 intentos con backoff
+exponencial): si el servidor de mails está caído la compra responde igual y el mail se reintenta;
+agotados los intentos queda en fallidos con un `warn` sin datos personales.
+
+| Mail               | Lo dispara                                                   | Va a                  |
+| ------------------ | ------------------------------------------------------------ | --------------------- |
+| `order-received`   | `order.created` (resumen, total, reserva, arrepentimiento)   | Email del pedido      |
+| `payment-approved` | `order.paid`                                                 | Email del pedido      |
+| `order-shipped`    | `order.shipped` (empresa y seguimiento)                      | Email del pedido      |
+| `order-delivered`  | `order.delivered`                                            | Email del pedido      |
+| `order-cancelled`  | `order.cancelled` y `order.expired` (el motivo en una línea) | Email del pedido      |
+| `withdrawal-code`  | `withdrawal.requested` (el código `ARR-…`)                   | Email de la solicitud |
+| `contact-received` | `contact.received`                                           | Email del mensaje     |
+| `account-created`  | `customer.registered`                                        | Email de la cuenta    |
+| `password-reset`   | `POST /auth/password/forgot` (directo a la cola, sin outbox) | Email de la cuenta    |
+| `account-deleted`  | Queda lista para `DELETE /me` (Task 3 de B7)                 | Email de la cuenta    |
+
+Los eventos llevan solo ids: el mail lee los datos al salir. Un evento repetido no manda dos mails
+(`jobId` = id del evento + plantilla). El enlace de restablecer contraseña no se guarda en Postgres
+y su job se borra apenas sale. Los enlaces usan `STORE_ORIGIN`; el pie lleva el email de contacto y
+los datos del vendedor de los ajustes. Los mails de contacto y de arrepentimiento no repiten el
+nombre ni el texto que se escribió (el formulario no verifica el email).
+
+| Variable    | Por defecto | Notas                                                                                              |
+| ----------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `MAIL_MODE` | `log`       | `log` (no manda nada; loguea la plantilla y `l***@dominio.com`) o `smtp`. En `production`, `smtp`. |
+| `SMTP_HOST` | (sin valor) | Servidor SMTP de cualquier proveedor. Obligatorio con `smtp`.                                      |
+| `SMTP_PORT` | (sin valor) | 465 (TLS directo) o 587 (STARTTLS obligatorio, salvo en `localhost`). Obligatorio con `smtp`.      |
+| `SMTP_USER` | (sin valor) | Usuario. Obligatorio con `smtp`.                                                                   |
+| `SMTP_PASS` | (sin valor) | Contraseña. Obligatoria con `smtp`; nunca se loguea.                                               |
+| `MAIL_FROM` | (sin valor) | Remitente, por ejemplo `Galpón Mates <hola@dominio.com>`. Obligatorio con `smtp`.                  |
+
+**Probarlo en desarrollo sin mandar mails de verdad:** levantá Mailpit
+(`docker run --rm -p 1025:1025 -p 8025:8025 -e MP_SMTP_AUTH_ACCEPT_ANY=1 -e MP_SMTP_AUTH_ALLOW_INSECURE=1 axllent/mailpit`),
+arrancá el back con `MAIL_MODE=smtp`, `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_USER=dev`,
+`SMTP_PASS=dev` y `MAIL_FROM="Galpón Mates <hola@galpon.test>"`, y mirá los mails en
+`http://localhost:8025` (bajá el contenedor al terminar). Los tests no mandan mails: el adaptador
+SMTP se prueba con el transporte de prueba de `nodemailer` y los E2E usan un doble de `MailPort`
+(`createApp({ mailer })`).
+
 ## Scripts
 
 | Script                   | Qué hace                                                                          |
@@ -828,6 +867,8 @@ docs/                     BITACORA.md, adr/ y superpowers/ (spec y planes)
   metadata (el compilador por defecto de Vite no lo hace).
 - **`@nest-lab/throttler-storage-redis` 1.2.0** declara Nest ≤ 11 como peer; `overrides` en
   `package.json` lo apunta al Nest 12 instalado.
+- **`nodemailer` 10.6.0** trae sus tipos (sin `@types/nodemailer`) y se importa con
+  `import { createTransport } from 'nodemailer'` (el paquete publica CJS y ESM).
 - **Node:** `@nestjs/cli` trae `@angular-devkit` 22, que pide Node ≥ 22.22.3 y avisa `EBADENGINE`
   con versiones anteriores de Node 22; el build y el watch funcionan igual, pero conviene
   actualizar Node.

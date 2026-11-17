@@ -17,6 +17,7 @@ const BASE: Env = {
   MP_MODE: 'simulated',
   MP_STATEMENT_DESCRIPTOR: 'GALPON MATES',
   MEDIA_MODE: 'simulated',
+  MAIL_MODE: 'log',
 }
 
 function settingsWith(env: Env, installmentsMax = 6) {

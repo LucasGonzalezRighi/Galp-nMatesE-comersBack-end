@@ -21,8 +21,8 @@ export interface ContactInput {
 
 /**
  * Deja el mensaje del formulario de contacto en la bandeja del dashboard. Con el campo trampa
- * lleno no guarda nada y responde igual (el bot no se entera). El mail a la tienda llega en B7:
- * por ahora queda la intención en el log, sin datos personales.
+ * lleno no guarda nada y responde igual (el bot no se entera). El acuse por mail lo manda
+ * `notifications` con el evento `contact.received` que guarda el repositorio.
  */
 export class SendContactMessageCommand {
   /**
@@ -53,6 +53,6 @@ export class SendContactMessageCommand {
         code: null,
       }),
     )
-    this.mailLog.log('Mensaje de contacto nuevo en la bandeja: el aviso por mail llega en B7.')
+    this.mailLog.log('Mensaje de contacto nuevo en la bandeja: el acuse sale por mail.')
   }
 }

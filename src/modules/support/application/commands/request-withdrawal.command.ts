@@ -27,7 +27,7 @@ export interface WithdrawalInput {
  * más de `withdrawal_code_seq`) y la deja en la bandeja como mensaje `withdrawal`. Con el campo
  * trampa lleno responde el código que seguiría, sin consumirlo ni guardar nada (como el mock: el
  * próximo real puede llevar el mismo número), así los bots no agotan la secuencia. El comprobante
- * por mail llega en B7: por ahora queda la intención en el log, sin datos personales.
+ * por mail lo manda `notifications` con el evento `withdrawal.requested` que guarda el repositorio.
  */
 export class RequestWithdrawalCommand {
   /**
@@ -69,7 +69,7 @@ export class RequestWithdrawalCommand {
         code,
       }),
     )
-    this.mailLog.log(`Arrepentimiento ${code} en la bandeja: el comprobante por mail llega en B7.`)
+    this.mailLog.log(`Arrepentimiento ${code} en la bandeja: el comprobante sale por mail.`)
     return { code }
   }
 }

@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 
 import type { Prisma } from '../../../generated/prisma/client'
+import { CLOCK, type Clock } from '../../../shared/domain/clock'
+import { createDomainEvent } from '../../../shared/domain/domain-event'
+import { OutboxRepository } from '../../../shared/infrastructure/outbox/outbox.repository'
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service'
 import type {
   CustomerPatch,
@@ -9,6 +12,7 @@ import type {
 } from '../application/ports/customer.repository.port'
 import type { NewUser } from '../application/ports/user.repository.port'
 import type { Customer } from '../domain/customer.entity'
+import { customerRegisteredEvent } from '../domain/identity-events'
 import { toCustomer, translateEmailTaken } from './identity.mapper'
 
 /**
@@ -18,8 +22,16 @@ import { toCustomer, translateEmailTaken } from './identity.mapper'
  */
 @Injectable()
 export class PrismaCustomerRepository implements CustomerRepository {
-  /** @param prisma - Cliente de Prisma de la app. */
-  constructor(private readonly prisma: PrismaService) {}
+  /**
+   * @param prisma - Cliente de Prisma de la app.
+   * @param outbox - Outbox, para el evento `customer.registered` del alta.
+   * @param clock - Reloj (la fecha del evento).
+   */
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outbox: OutboxRepository,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   /** {@inheritDoc CustomerRepository.findByUserId} */
   async findByUserId(userId: string): Promise<Customer | null> {
@@ -50,11 +62,21 @@ export class PrismaCustomerRepository implements CustomerRepository {
   /**
    * {@inheritDoc CustomerRepository.createWithUser}
    *
-   * Es un solo `INSERT` anidado (cliente con su usuario): Prisma lo corre en una transacción.
+   * Cliente con su usuario (un `INSERT` anidado) y el evento `customer.registered` en la misma
+   * transacción.
    */
   async createWithUser(user: NewUser, customer: Omit<NewCustomer, 'userId'>): Promise<Customer> {
     const row = await translateEmailTaken(() =>
-      this.prisma.customer.create({ data: { ...customer, user: { create: { ...user } } } }),
+      this.prisma.$transaction(async (tx) => {
+        const created = await tx.customer.create({
+          data: { ...customer, user: { create: { ...user } } },
+        })
+        await this.outbox.append(
+          tx,
+          createDomainEvent(customerRegisteredEvent(created.id), this.clock.now()),
+        )
+        return created
+      }),
     )
     return toCustomer(row)
   }

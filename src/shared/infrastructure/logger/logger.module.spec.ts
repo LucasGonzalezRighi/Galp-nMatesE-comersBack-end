@@ -17,6 +17,7 @@ const BASE: Env = {
   MP_MODE: 'live',
   MP_STATEMENT_DESCRIPTOR: 'GALPON MATES',
   MEDIA_MODE: 'cloudinary',
+  MAIL_MODE: 'smtp',
 }
 
 describe('buildPinoHttpOptions', () => {

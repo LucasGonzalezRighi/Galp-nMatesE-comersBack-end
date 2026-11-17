@@ -16,8 +16,9 @@ import { ContactController } from './interface/contact.controller'
 /**
  * Bandeja del dashboard (Ruling B-76): el formulario de contacto (`POST /contact`), el botón de
  * arrepentimiento (`POST /withdrawals`, con su código `ARR-` + 6 dígitos) y la bandeja del admin
- * (`GET /admin/messages` y `PATCH /admin/messages/{id}`). Los mails llegan en B7: por ahora los
- * casos de uso dejan la intención en el log (un `Logger` de Nest), sin datos personales.
+ * (`GET /admin/messages` y `PATCH /admin/messages/{id}`). Cada mensaje nuevo guarda en la misma
+ * transacción su evento (`withdrawal.requested` o `contact.received`) y `notifications` manda el
+ * mail; los casos de uso dejan una línea en el log (un `Logger` de Nest), sin datos personales.
  */
 @Module({
   controllers: [ContactController, AdminMessagesController],

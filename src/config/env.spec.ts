@@ -32,6 +32,21 @@ const MEDIA_MISSING =
   'Con MEDIA_MODE=cloudinary hacen falta CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET.'
 const MEDIA_PRODUCTION_SIMULATED = 'En producción MEDIA_MODE tiene que ser cloudinary.'
 
+/** Mails por SMTP: las cinco variables que exige `MAIL_MODE=smtp` (de mentira). */
+const SMTP = {
+  MAIL_MODE: 'smtp',
+  SMTP_HOST: 'smtp.galpon.test',
+  SMTP_PORT: '587',
+  SMTP_USER: 'tienda',
+  SMTP_PASS: 'clave-del-smtp',
+  MAIL_FROM: 'Galpón Mates <hola@galpon.test>',
+}
+
+const SMTP_MISSING =
+  'Con MAIL_MODE=smtp hacen falta SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS y MAIL_FROM.'
+const MAIL_PRODUCTION_LOG =
+  'En producción MAIL_MODE tiene que ser smtp (los mails del pedido son obligatorios).'
+
 /** Secreto de revalidación de la tienda (32 caracteres, de mentira). */
 const STORE_SECRET = 'x'.repeat(32)
 const STORE_SECRET_PRODUCTION =
@@ -61,6 +76,7 @@ describe('parseEnv', () => {
       ...REQUIRED,
       ...LIVE,
       ...CLOUDINARY,
+      ...SMTP,
       NODE_ENV: 'production',
       STORE_REVALIDATE_SECRET: STORE_SECRET,
     }
@@ -145,6 +161,7 @@ describe('parseEnv', () => {
       MP_MODE: 'simulated',
       MP_STATEMENT_DESCRIPTOR: 'GALPON MATES',
       MEDIA_MODE: 'simulated',
+      MAIL_MODE: 'log',
     })
   })
 
@@ -153,6 +170,7 @@ describe('parseEnv', () => {
       ...REQUIRED,
       ...LIVE,
       ...CLOUDINARY,
+      ...SMTP,
       NODE_ENV: 'production',
       STORE_REVALIDATE_SECRET: STORE_SECRET,
       PORT: '4000',
@@ -190,6 +208,46 @@ describe('parseEnv', () => {
     const message = errorOf({ ...REQUIRED, DATABASE_URL: 'mysql://root:secreto@localhost/galpon' })
     expect(message).toContain('DATABASE_URL')
     expect(message).not.toContain('secreto')
+  })
+
+  describe('Mails (LS-6)', () => {
+    it('sin variables de mails queda en modo log y sin servidor', () => {
+      const env = parseEnv(REQUIRED)
+      expect(env.MAIL_MODE).toBe('log')
+      expect(env.SMTP_HOST).toBeUndefined()
+      expect(env.MAIL_FROM).toBeUndefined()
+    })
+
+    it('con MAIL_MODE=smtp y las cinco variables las devuelve, con el puerto como número', () => {
+      expect(parseEnv({ ...REQUIRED, ...SMTP })).toMatchObject({ ...SMTP, SMTP_PORT: 587 })
+    })
+
+    it('con MAIL_MODE=smtp sin SMTP_HOST (u otra variable) lanza el mensaje exacto una sola vez', () => {
+      const message = errorOf({ ...REQUIRED, ...SMTP, SMTP_HOST: undefined, SMTP_PASS: undefined })
+      expect(message).toContain(`- ${SMTP_MISSING}`)
+      expect(message.split(SMTP_MISSING)).toHaveLength(2)
+      expect(errorOf({ ...REQUIRED, ...SMTP, MAIL_FROM: undefined })).toContain(SMTP_MISSING)
+    })
+
+    it('en producción con MAIL_MODE=log (o sin MAIL_MODE) lanza el mensaje exacto', () => {
+      const production = {
+        ...REQUIRED,
+        ...LIVE,
+        ...CLOUDINARY,
+        NODE_ENV: 'production',
+        STORE_REVALIDATE_SECRET: STORE_SECRET,
+      }
+      expect(errorOf(production)).toContain(`- ${MAIL_PRODUCTION_LOG}`)
+      expect(errorOf({ ...production, MAIL_MODE: 'log' })).toContain(MAIL_PRODUCTION_LOG)
+      expect(parseEnv({ ...production, ...SMTP }).MAIL_MODE).toBe('smtp')
+    })
+
+    it('rechaza un MAIL_MODE desconocido o un puerto inválido, sin mostrar la contraseña', () => {
+      expect(errorOf({ ...REQUIRED, MAIL_MODE: 'sendgrid' })).toContain('MAIL_MODE')
+      const message = errorOf({ ...REQUIRED, ...SMTP, SMTP_PORT: '99999' })
+      expect(message).toContain('SMTP_PORT')
+      expect(message).not.toContain(SMTP.SMTP_PASS)
+    })
   })
 
   describe('Fotos (Cloudinary)', () => {
