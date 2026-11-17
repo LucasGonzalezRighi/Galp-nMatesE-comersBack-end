@@ -1,9 +1,33 @@
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { Pool } from 'pg'
+import { Pool, type PoolConfig } from 'pg'
 
 import { ENV, type Env } from '../../../config/env'
 import { PrismaClient } from '../../../generated/prisma/client'
+
+/**
+ * Cuánto espera un pedido por una conexión del pool antes de fallar: si la base no responde o el
+ * pool está agotado, el pedido termina en error en lugar de quedar colgado.
+ */
+export const DB_CONNECTION_TIMEOUT_MS = 10_000
+
+/** Tope de cada consulta en Postgres (`statement_timeout`): una consulta trabada no retiene su conexión. */
+export const DB_STATEMENT_TIMEOUT_MS = 30_000
+
+/**
+ * Opciones del `pg.Pool` de la app.
+ *
+ * @param databaseUrl - `DATABASE_URL`, ya validada.
+ * @returns La conexión con sus dos topes ({@link DB_CONNECTION_TIMEOUT_MS} y
+ *   {@link DB_STATEMENT_TIMEOUT_MS}).
+ */
+export function buildPoolConfig(databaseUrl: string): PoolConfig {
+  return {
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
+    statement_timeout: DB_STATEMENT_TIMEOUT_MS,
+  }
+}
 
 /**
  * Cliente de Prisma 7 de la app, con el driver adapter de `pg` sobre un `pg.Pool` propio.
@@ -17,12 +41,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private readonly pool: Pool
 
   /**
-   * Crea el pool con `DATABASE_URL`, ya validada por `ConfigModule` al arrancar.
+   * Crea el pool con `DATABASE_URL`, ya validada por `ConfigModule` al arrancar, y los topes de
+   * {@link buildPoolConfig}.
    *
    * @param env - Variables de entorno validadas (token `ENV`).
    */
   constructor(@Inject(ENV) env: Env) {
-    const pool = new Pool({ connectionString: env.DATABASE_URL })
+    const pool = new Pool(buildPoolConfig(env.DATABASE_URL))
     super({ adapter: new PrismaPg(pool) })
     this.pool = pool
   }

@@ -52,6 +52,14 @@ const STORE_SECRET = 'x'.repeat(32)
 const STORE_SECRET_PRODUCTION =
   'En producción hace falta STORE_REVALIDATE_SECRET (el mismo REVALIDATE_SECRET de la tienda).'
 
+/** Orígenes públicos de la tienda y del dashboard (de mentira): en producción son obligatorios. */
+const PUBLIC_ORIGINS = {
+  STORE_ORIGIN: 'https://galpon.test',
+  ADMIN_ORIGIN: 'https://admin.galpon.test',
+}
+const ORIGINS_PRODUCTION =
+  'En producción hacen falta STORE_ORIGIN y ADMIN_ORIGIN (los orígenes públicos de la tienda y del dashboard).'
+
 /** Devuelve el mensaje del error que lanza `parseEnv`, o falla si no lanza. */
 function errorOf(source: Record<string, string | undefined>): string {
   try {
@@ -77,6 +85,7 @@ describe('parseEnv', () => {
       ...LIVE,
       ...CLOUDINARY,
       ...SMTP,
+      ...PUBLIC_ORIGINS,
       NODE_ENV: 'production',
       STORE_REVALIDATE_SECRET: STORE_SECRET,
     }
@@ -171,6 +180,7 @@ describe('parseEnv', () => {
       ...LIVE,
       ...CLOUDINARY,
       ...SMTP,
+      ...PUBLIC_ORIGINS,
       NODE_ENV: 'production',
       STORE_REVALIDATE_SECRET: STORE_SECRET,
       PORT: '4000',
@@ -204,6 +214,53 @@ describe('parseEnv', () => {
     })
   })
 
+  describe('Orígenes de la tienda y del dashboard (B8)', () => {
+    /** Producción completa salvo los orígenes públicos. */
+    const PRODUCTION_WITHOUT_ORIGINS = {
+      ...REQUIRED,
+      ...LIVE,
+      ...CLOUDINARY,
+      ...SMTP,
+      NODE_ENV: 'production',
+      STORE_REVALIDATE_SECRET: STORE_SECRET,
+    }
+
+    it('en producción sin STORE_ORIGIN o sin ADMIN_ORIGIN lanza el mensaje exacto una sola vez', () => {
+      const message = errorOf(PRODUCTION_WITHOUT_ORIGINS)
+      expect(message).toContain(`- ${ORIGINS_PRODUCTION}`)
+      expect(message.split(ORIGINS_PRODUCTION)).toHaveLength(2)
+      expect(
+        errorOf({ ...PRODUCTION_WITHOUT_ORIGINS, STORE_ORIGIN: PUBLIC_ORIGINS.STORE_ORIGIN }),
+      ).toContain(ORIGINS_PRODUCTION)
+      expect(
+        errorOf({ ...PRODUCTION_WITHOUT_ORIGINS, ADMIN_ORIGIN: PUBLIC_ORIGINS.ADMIN_ORIGIN }),
+      ).toContain(ORIGINS_PRODUCTION)
+    })
+
+    it('en producción con los dos orígenes los devuelve, sin los de localhost', () => {
+      const env = parseEnv({ ...PRODUCTION_WITHOUT_ORIGINS, ...PUBLIC_ORIGINS })
+      expect(env.STORE_ORIGIN).toBe('https://galpon.test')
+      expect(env.ADMIN_ORIGIN).toBe('https://admin.galpon.test')
+    })
+
+    it('fuera de producción siguen valiendo los de localhost', () => {
+      expect(parseEnv({ ...REQUIRED, NODE_ENV: 'test' })).toMatchObject({
+        STORE_ORIGIN: 'http://localhost:3000',
+        ADMIN_ORIGIN: 'http://localhost:5173',
+      })
+    })
+
+    it('STORE_INTERNAL_ORIGIN es opcional y tiene que ser una URL http(s)', () => {
+      expect(parseEnv(REQUIRED).STORE_INTERNAL_ORIGIN).toBeUndefined()
+      expect(
+        parseEnv({ ...REQUIRED, STORE_INTERNAL_ORIGIN: 'http://store:3000' }).STORE_INTERNAL_ORIGIN,
+      ).toBe('http://store:3000')
+      expect(errorOf({ ...REQUIRED, STORE_INTERNAL_ORIGIN: 'store:3000' })).toContain(
+        '- STORE_INTERNAL_ORIGIN: tiene un valor inválido; se espera una URL http o https',
+      )
+    })
+  })
+
   it('rechaza una DATABASE_URL que no es de Postgres sin mostrar su valor', () => {
     const message = errorOf({ ...REQUIRED, DATABASE_URL: 'mysql://root:secreto@localhost/galpon' })
     expect(message).toContain('DATABASE_URL')
@@ -234,6 +291,7 @@ describe('parseEnv', () => {
         ...REQUIRED,
         ...LIVE,
         ...CLOUDINARY,
+        ...PUBLIC_ORIGINS,
         NODE_ENV: 'production',
         STORE_REVALIDATE_SECRET: STORE_SECRET,
       }

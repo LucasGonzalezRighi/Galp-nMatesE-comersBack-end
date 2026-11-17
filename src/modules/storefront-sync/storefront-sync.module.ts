@@ -13,6 +13,8 @@ import { StorefrontOutboxHandler } from './infrastructure/storefront.outbox-hand
  * (hoy `combo.changed` → etiqueta `combos`), {@link StorefrontOutboxHandler} encola un job en
  * `storefront-revalidate` y {@link StorefrontRevalidateProcessor} hace
  * `POST ${STORE_ORIGIN}/api/revalidate` con `x-revalidate-secret` (`STORE_REVALIDATE_SECRET`).
+ * Con `STORE_INTERNAL_ORIGIN` el pedido va a ese origen (la red interna del despliegue) en lugar
+ * del público.
  * La escritura que originó el evento nunca espera a la tienda. La cola usa
  * `enableOfflineQueue: false`, como las demás.
  */
@@ -31,7 +33,7 @@ import { StorefrontOutboxHandler } from './infrastructure/storefront.outbox-hand
       provide: STOREFRONT_PORT,
       useFactory: (env: Env) =>
         new HttpStorefrontAdapter({
-          storeOrigin: env.STORE_ORIGIN,
+          storeOrigin: env.STORE_INTERNAL_ORIGIN ?? env.STORE_ORIGIN,
           secret: env.STORE_REVALIDATE_SECRET,
         }),
       inject: [ENV],

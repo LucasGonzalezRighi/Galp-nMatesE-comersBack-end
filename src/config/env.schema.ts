@@ -31,10 +31,24 @@ export interface Env {
   DATABASE_URL: string
   /** Conexión a Redis: `redis://host:6379` (o `rediss://` con TLS). */
   REDIS_URL: string
-  /** Origen del admin, el único con CORS y credenciales (por defecto `http://localhost:5173`). */
+  /**
+   * Origen público del admin, el único con CORS y credenciales. Fuera de producción vale por
+   * defecto `http://localhost:5173`; en `production` es obligatorio y explícito (B8): olvidarlo
+   * habilitaría CORS con credenciales para `localhost`.
+   */
   ADMIN_ORIGIN: string
-  /** Origen de la tienda (por defecto `http://localhost:3000`). */
+  /**
+   * Origen público de la tienda: arma los enlaces de los mails y la vuelta del pago. Fuera de
+   * producción vale por defecto `http://localhost:3000`; en `production` es obligatorio y
+   * explícito (B8).
+   */
   STORE_ORIGIN: string
+  /**
+   * Origen por el que el back le habla a la tienda para el aviso de revalidación
+   * (`POST /api/revalidate`), cuando conviene no salir por el origen público: en el compose de
+   * producción, `http://store:3000` (la red interna de Docker). Si falta, se usa `STORE_ORIGIN`.
+   */
+  STORE_INTERNAL_ORIGIN?: string | undefined
   /**
    * Secreto de `POST ${STORE_ORIGIN}/api/revalidate` (cabecera `x-revalidate-secret`): el mismo
    * `REVALIDATE_SECRET` de la tienda, de 32 caracteres o más. Obligatorio en `production`; sin él
@@ -99,6 +113,16 @@ export const MP_LIVE_MISSING_MESSAGE =
 /** Mensaje de `parseEnv` cuando `NODE_ENV=production` y `MP_MODE` no es `live`. */
 export const MP_PRODUCTION_SIMULATED_MESSAGE = 'En producción MP_MODE tiene que ser live.'
 
+/** Mensaje de `parseEnv` cuando `NODE_ENV=production` y falta `STORE_ORIGIN` o `ADMIN_ORIGIN`. */
+export const ORIGINS_PRODUCTION_MESSAGE =
+  'En producción hacen falta STORE_ORIGIN y ADMIN_ORIGIN (los orígenes públicos de la tienda y del dashboard).'
+
+/** `ADMIN_ORIGIN` por defecto fuera de producción: el dashboard con `vite`. */
+export const DEFAULT_ADMIN_ORIGIN = 'http://localhost:5173'
+
+/** `STORE_ORIGIN` por defecto fuera de producción: la tienda con `next`. */
+export const DEFAULT_STORE_ORIGIN = 'http://localhost:3000'
+
 /** Mensaje de `parseEnv` cuando `NODE_ENV=production` y falta `STORE_REVALIDATE_SECRET`. */
 export const STORE_REVALIDATE_PRODUCTION_MESSAGE =
   'En producción hace falta STORE_REVALIDATE_SECRET (el mismo REVALIDATE_SECRET de la tienda).'
@@ -149,8 +173,9 @@ function isBareOrigin(value: string): boolean {
  * variables (`MP_MODE=live` exige sus tres credenciales; `production` exige `live` y
  * `STORE_REVALIDATE_SECRET`) se revisan solo si cada variable es válida por sí sola; lo mismo
  * `MEDIA_MODE=cloudinary` con sus tres credenciales y `production` con `cloudinary`, y
- * `MAIL_MODE=smtp` con sus cinco variables y `production` con `smtp`. Al final,
- * `HOST` toma su valor por defecto según el entorno ({@link defaultHost}).
+ * `MAIL_MODE=smtp` con sus cinco variables y `production` con `smtp`. `production` exige además
+ * `STORE_ORIGIN` y `ADMIN_ORIGIN` explícitas. Al final, `HOST` toma su valor por defecto según el
+ * entorno ({@link defaultHost}) y, fuera de producción, los dos orígenes toman los de `localhost`.
  */
 export const envSchema = z
   .object({
@@ -160,8 +185,9 @@ export const envSchema = z
     TRUST_PROXY: z.string().optional().transform(splitTrustProxy).pipe(z.array(trustedProxySchema)),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }),
-    ADMIN_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).default('http://localhost:5173'),
-    STORE_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).default('http://localhost:3000'),
+    ADMIN_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).optional(),
+    STORE_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).optional(),
+    STORE_INTERNAL_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).optional(),
     STORE_REVALIDATE_SECRET: z.string().min(32).optional(),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     MP_MODE: z.enum(['simulated', 'live']).default('simulated'),
@@ -188,6 +214,12 @@ export const envSchema = z
     }
     if (env.NODE_ENV === 'production' && !live) {
       ctx.addIssue({ code: 'custom', message: MP_PRODUCTION_SIMULATED_MESSAGE, path: [] })
+    }
+    if (
+      env.NODE_ENV === 'production' &&
+      (env.STORE_ORIGIN === undefined || env.ADMIN_ORIGIN === undefined)
+    ) {
+      ctx.addIssue({ code: 'custom', message: ORIGINS_PRODUCTION_MESSAGE, path: [] })
     }
     if (env.NODE_ENV === 'production' && env.STORE_REVALIDATE_SECRET === undefined) {
       ctx.addIssue({ code: 'custom', message: STORE_REVALIDATE_PRODUCTION_MESSAGE, path: [] })
@@ -217,9 +249,11 @@ export const envSchema = z
       ctx.addIssue({ code: 'custom', message: MAIL_PRODUCTION_LOG_MESSAGE, path: [] })
     }
   })
-  .transform(({ HOST, ...env }) => ({
+  .transform(({ HOST, ADMIN_ORIGIN, STORE_ORIGIN, ...env }) => ({
     ...env,
     HOST: HOST ?? defaultHost(env.NODE_ENV),
+    ADMIN_ORIGIN: ADMIN_ORIGIN ?? DEFAULT_ADMIN_ORIGIN,
+    STORE_ORIGIN: STORE_ORIGIN ?? DEFAULT_STORE_ORIGIN,
   })) satisfies z.ZodType<Env>
 
 /** Qué se espera en cada variable, para el mensaje de error de `parseEnv`. */
@@ -234,6 +268,7 @@ export const ENV_HINTS: Record<keyof Env, string> = {
   REDIS_URL: 'una URL de Redis (redis://host:6379)',
   ADMIN_ORIGIN: 'una URL http o https (por ejemplo http://localhost:5173)',
   STORE_ORIGIN: 'una URL http o https (por ejemplo http://localhost:3000)',
+  STORE_INTERNAL_ORIGIN: 'una URL http o https (por ejemplo http://store:3000)',
   STORE_REVALIDATE_SECRET: 'el mismo REVALIDATE_SECRET de la tienda, de 32 caracteres o más',
   LOG_LEVEL: 'debug, info, warn o error',
   MP_MODE: 'simulated o live',
