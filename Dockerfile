@@ -17,13 +17,16 @@ RUN apt-get update \
 WORKDIR /app
 
 FROM base AS tools
-COPY package.json package-lock.json prisma.config.ts ./
+COPY package.json package-lock.json prisma.config.ts tsconfig.json tsconfig.build.json ./
 COPY prisma ./prisma
 # `prepare` instala los hooks de git (lefthook) y en la imagen no hay repositorio: se quita.
-# `postinstall` sí corre: genera el cliente de Prisma en `src/generated/prisma`.
+# `postinstall` sí corre: genera el cliente de Prisma en `src/generated/prisma`. Necesita el
+# `tsconfig.json` al lado: de ahí saca la extensión de sus imports (`.js`); sin él los escribe con
+# `.ts` y el back compilado no arranca.
 RUN npm pkg delete scripts.prepare && npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build
+# Después de compilar se carga el cliente de Prisma compilado: si no abre, la imagen no se construye.
+RUN npm run build && node -e "require('./dist/generated/prisma/client.js')"
 
 # Las mismas dependencias sin las de desarrollo, para copiarlas a la imagen final.
 FROM tools AS prune
