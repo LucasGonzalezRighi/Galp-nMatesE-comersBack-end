@@ -16,6 +16,10 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
   [ADR 0008 · datos personales](docs/adr/0008-datos-personales.md).
 - **Lanzamiento legal** (lo que tienen que hacer Lucas, el dueño, el abogado y el contador antes de
   abrir la tienda): [`docs/LANZAMIENTO-LEGAL.md`](docs/LANZAMIENTO-LEGAL.md).
+- **Despliegue** (publicar la tienda y el dashboard en Vercel y el back en Render, paso a paso):
+  [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md), con [`render.yaml`](render.yaml). El camino
+  alternativo, un servidor propio con Docker, está en
+  [`docs/DESPLIEGUE-SERVIDOR-PROPIO.md`](docs/DESPLIEGUE-SERVIDOR-PROPIO.md) y [`deploy/`](deploy).
 - **Contrato (fuente de verdad):** vive en el repo del front, `../frontend/docs/api/openapi.yaml`.
   El back lo implementa; no se edita desde acá.
 
@@ -60,6 +64,34 @@ día; los pedidos que origina un proxy de confianza (el servidor de la tienda, s
   navegador, cualquiera puede inventarse una IP y saltear los límites.
 - Ejemplo: tienda en `10.0.0.5` y el back detrás de un proxy en `10.0.0.2`:
   `TRUST_PROXY=10.0.0.5,10.0.0.2`.
+- En el despliegue con Docker (`deploy/docker-compose.yml`, el camino alternativo) ya queda
+  resuelto: Caddy, el proxy de entrada, pisa `X-Forwarded-For` con la IP real y la escribe en
+  `X-Real-IP`; la tienda la toma de ahí (`TRUSTED_CLIENT_IP_HEADER=x-real-ip`) y `TRUST_PROXY` es
+  la red interna del compose (`172.28.0.0/24`), donde solo están Caddy y la tienda delante del back.
+
+**Secreto compartido (`TRUSTED_PROXY_SECRET`, apagado por defecto):** la alternativa a `TRUST_PROXY`
+cuando no hay IPs fijas que listar. Es el caso del camino elegido: la tienda y el dashboard en
+Vercel (sus IPs de salida cambian) y el back en Render (que no documenta su cadena de
+`X-Forwarded-For`). Con el secreto (32 caracteres o más, el mismo `API_PROXY_SECRET` de la tienda y
+del dashboard), `trustedProxyMiddleware` (`src/shared/infrastructure/http/trusted-proxy.ts`) decide
+en cada pedido quién es el cliente:
+
+| El pedido trae                                                         | Cliente para los límites                                    |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| El secreto y `x-galpon-client-ip` (la tienda, por un visitante)        | Esa IP (`req.ip` pasa a ser esa).                           |
+| El secreto y `x-galpon-client-ip-from: x-forwarded-for` (el dashboard) | La primera IP de `X-Forwarded-For` (la que escribe Vercel). |
+| El secreto solo (el servidor de la tienda armando sus páginas)         | Ninguno: no se cuenta en los límites por cliente.           |
+| Sin el secreto, o con uno equivocado (alguien que saltea Vercel)       | La IP con la que llega: todos esos comparten un cupo.       |
+
+- El secreto se compara en tiempo constante, las tres cabeceras se borran del pedido antes de los
+  controladores y el secreto nunca se loguea.
+- Con `x-galpon-client-ip-from`, `x-galpon-client-ip` se ignora: el reenvío del dashboard no tiene
+  código y no puede garantizar que borra lo que mande el visitante; la tienda sí las borra
+  (`proxy.ts`) y nunca manda `-from`.
+- Con el secreto se activan los mismos límites que con `TRUST_PROXY` (lecturas públicas, pagos y
+  cupo de reseñas). Están pensados como alternativas: no hace falta definir los dos.
+- Probado de punta a punta en `test/e2e/trusted-proxy.e2e-spec.ts` y, con la tienda compilada y la
+  imagen de producción, en la bitácora (B8).
 
 **Cuerpos de los pedidos:** JSON de hasta 100 kB y sin comprimir (`Content-Encoding: gzip` da 415).
 Los formularios (`application/x-www-form-urlencoded`) solo se aceptan con el simulador de pagos
@@ -74,9 +106,14 @@ credenciales (las cookies de sesión del admin). La tienda no lo necesita: su se
 y reescribe `/api/v1/*` hacia él, así que el navegador siempre habla con la tienda. Un pedido desde
 otro origen no recibe cabeceras CORS y el navegador lo bloquea.
 
+**Orígenes en producción:** con `NODE_ENV=production`, `STORE_ORIGIN` y `ADMIN_ORIGIN` son
+obligatorias y explícitas (los valores de `localhost` solo valen en desarrollo y en test): olvidar
+`ADMIN_ORIGIN` habilitaría CORS con credenciales para `localhost`.
+
 **Aviso a la tienda:** cada guardado del dashboard (y cada pedido creado, pagado, vencido o
-cancelado) le pide a la tienda (en `STORE_ORIGIN`) que regenere sus etiquetas, con el secreto
-`STORE_REVALIDATE_SECRET`. La variable y el mecanismo están en "Combos y aviso a la tienda"; las
+cancelado) le pide a la tienda (en `STORE_ORIGIN`, o en `STORE_INTERNAL_ORIGIN` si está definida:
+el compose de producción usa `http://store:3000`, la red interna) que regenere sus etiquetas, con
+el secreto `STORE_REVALIDATE_SECRET`. La variable y el mecanismo están en "Combos y aviso a la tienda"; las
 etiquetas de cada escritura, en "Dashboard".
 
 ## Puesta en marcha
@@ -110,6 +147,55 @@ de nuevo).
 Los E2E no usan esos contenedores: cada archivo levanta los suyos con Testcontainers (puertos
 aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 
+### Producción: Vercel y Render (el camino elegido)
+
+El back va en **Render** y la tienda y el dashboard en **Vercel**. La guía paso a paso es
+[`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md).
+
+- [`render.yaml`](render.yaml): el Blueprint de Render. Crea el servicio web `galpon-mates-api`
+  (desde el `Dockerfile`), Postgres 17 (`galpon-mates-db`) y Render Key Value
+  (`galpon-mates-redis`, sin desalojo y sin acceso desde internet), los tres en la región Virginia.
+  Arranca en los planes gratis (para probar); las tres líneas marcadas con `PLAN` pasan a los
+  pagos. Es válido contra el esquema oficial de Render.
+- [`Dockerfile`](Dockerfile): la etapa `runtime` es la imagen que corre en Render. Lleva `dist`,
+  las dependencias de producción y el seed y `admin:password` compilados (`dist-scripts`, con
+  `npm run build:scripts`); corre como el usuario `node`. Al arrancar hace
+  `npx prisma migrate deploy`, con `SEED_IF_EMPTY=true` corre el seed con `--if-empty` (siembra
+  solo una base sin productos ni admin; con datos no toca nada) y después `node dist/main`. Así no
+  hace falta consola ni comando previo al despliegue, que el plan gratis de Render no tiene.
+- El servicio escucha en `PORT` (10000 en Render) y en `0.0.0.0`; la ruta de salud es
+  `/api/v1/health`.
+- La IP real de cada cliente llega con `TRUSTED_PROXY_SECRET` (ver "Proxies de confianza").
+  `TRUST_PROXY` queda sin definir.
+- En la consola de Render (plan pago): `npm run admin:password:prod` y, solo sobre una base vacía,
+  `npm run db:seed:prod`.
+- El pool de Postgres tiene `connectionTimeoutMillis` de 10 s y `statement_timeout` de 30 s
+  (`buildPoolConfig`). Swagger UI no se monta en producción.
+
+### Producción: camino alternativo con Docker en un servidor propio
+
+No es el camino elegido. Es otro compose, [`deploy/docker-compose.yml`](deploy/docker-compose.yml):
+un solo servidor con Caddy (HTTPS automático), la tienda, el dashboard, este back, Postgres, Redis y
+una copia diaria de la base. Su guía es
+[`docs/DESPLIEGUE-SERVIDOR-PROPIO.md`](docs/DESPLIEGUE-SERVIDOR-PROPIO.md).
+
+- [`Dockerfile`](Dockerfile): el servicio `api` usa la etapa `runtime` (la misma de Render). La
+  etapa `tools` (servicio `tools`, con el perfil `tools`) trae el proyecto entero para las tareas a
+  mano: `npm run db:seed` y `npm run admin:password`.
+- [`deploy/.env.example`](deploy/.env.example): las variables que carga Lucas (dominio, secretos,
+  Mercado Pago, Cloudinary y SMTP). Los orígenes, `TRUST_PROXY`, `DATABASE_URL` y `REDIS_URL` los
+  arma el compose.
+- [`deploy/Caddyfile`](deploy/Caddyfile): `DOMAIN` (tienda), `www.DOMAIN` (redirige),
+  `admin.DOMAIN` y `api.DOMAIN`. `/api/revalidate` de la tienda no se expone a internet: el back
+  le avisa por la red interna.
+- [`deploy/backup.sh`](deploy/backup.sh): `pg_dump` diario en `deploy/backups/` (no se versiona),
+  14 días.
+- [`deploy/docker-compose.local.yml`](deploy/docker-compose.local.yml): el mismo compose para un
+  ensayo en la compu, sin dominio ni HTTPS (back en el 3021, tienda en el 4410 y dashboard en el
+  5410).
+- Postgres y Redis no publican puertos. Redis corre con `appendonly yes` y
+  `maxmemory-policy noeviction`: guarda las colas (vencimiento de pedidos, mails, avisos).
+
 ## Base de datos y seed
 
 - **Migraciones** en `prisma/migrations/`: `npm run db:migrate` en desarrollo y
@@ -131,6 +217,17 @@ aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
   - Los combos se guardan con un UUID v5 de su clave del mock: un seed nuevo les devuelve el
     nombre, el precio, el estado, la posición y las piezas de las fixtures. Los combos creados desde
     el dashboard no los toca.
+- **En producción el seed se corre una sola vez** (con `ADMIN_EMAIL` y `ADMIN_PASSWORD` propios):
+  una corrida posterior devolvería las líneas, los productos, las reseñas y los combos del diseño a
+  sus valores iniciales.
+- **`--if-empty`** (`npm run db:seed -- --if-empty`, o `SEED_IF_EMPTY=true` en la imagen de
+  producción): siembra solo si la base no tiene productos ni un admin; si tiene, avisa en una línea
+  y termina bien sin tocar nada ni pedir las credenciales del admin. Es lo que usa Render en cada
+  arranque.
+- **`npm run admin:password`** (`prisma/admin-password.ts`): con `ADMIN_EMAIL` y `ADMIN_PASSWORD`
+  en el entorno crea ese admin o, si ya existe, le cambia la contraseña y lo reactiva, sin tocar
+  nada más. Es la forma de recuperar el acceso al dashboard en producción. No convierte en admin a
+  una cuenta de cliente; las sesiones abiertas del admin siguen hasta vencer.
 - Los datos salen de `prisma/seed-data/`, que se regenera desde las fixtures del front con
   `node scripts/import-fixtures.mjs` (ver [`prisma/seed-data/README.md`](prisma/seed-data/README.md)).
 
@@ -707,6 +804,44 @@ desde el mismo commit del front. Si el 3001 está ocupado (en la compu de Lucas 
 `VITE_API_BASE_URL` en ese puerto. Al terminar, `npm run db:seed` devuelve los productos al diseño
 (los contenidos y los ajustes guardados quedan).
 
+### Auditoría del dashboard (`audit_logs`)
+
+Desde B8 cada escritura **exitosa** del admin (alta, edición, borrado, orden, estado de un pedido,
+ajustes, contenidos y cambio de contraseña) deja una fila en `audit_logs`: quién, qué, sobre qué y
+qué cambió. No tiene pantalla ni operación en el contrato: se consulta por SQL.
+
+- **Cómo se anota:** un interceptor global del módulo `audit` actúa en todo `POST`, `PUT`, `PATCH`
+  o `DELETE` de `/admin/*` con sesión de admin, sin decorar los controladores: una escritura nueva
+  queda auditada sola (con un registro genérico), y `admin-write-routes.spec.ts` falla hasta que se
+  la describa en `ADMIN_WRITE_DESCRIPTORS` o se la excluya a propósito.
+- **`action`** es `<entidad>.<verbo>`: `category.create|update|delete|reorder`,
+  `combo.create|update|delete|reorder`, `product.create|update|archive`, `content.update`,
+  `order.status`, `review.update`, `settings.update`, `contact_message.update` y
+  `admin_user.password`. `entity_type` es la entidad y `entity_id` su id (el número del pedido, la
+  clave del contenido, `1` en los ajustes; `null` al reordenar).
+- **`changes`** (jsonb): `input` (el cuerpo que mandó el dashboard; si pesa más de 32 kB, solo
+  `{ "truncated": true, "bytes": N }`), y `before` y `after` con **solo las columnas que cambiaron**
+  de la fila principal (en un alta, `after` es la fila entera; en un borrado, `before`).
+- **Sin datos de clientes:** de pedidos, reseñas y mensajes nunca se guarda la fila entera, solo
+  las columnas que cambian (el estado). El cambio de contraseña se anota con `changes` vacío.
+- **No se anotan** el ingreso, la salida ni la firma de fotos (no cambian datos).
+- **Si la auditoría falla,** la escritura no se revierte ni cambia la respuesta: queda un error en
+  el log ("No se pudo guardar la auditoría de …") con la acción y la entidad, sin el cuerpo. Una
+  escritura que termina en 4xx o 5xx no deja fila.
+- No tiene purga: no guarda datos personales de clientes. Un usuario con filas de auditoría no se
+  puede borrar (`ON DELETE RESTRICT`); solo los admins las tienen.
+
+```sql
+-- Los últimos 50 cambios, con el email del admin
+SELECT a.created_at, u.email, a.action, a.entity_type, a.entity_id, a.changes
+  FROM audit_logs a JOIN users u ON u.id = a.actor_user_id
+ ORDER BY a.created_at DESC LIMIT 50;
+
+-- Historial de un pedido (o de un producto: entity_type = 'product' y su id)
+SELECT created_at, action, changes->'before' AS antes, changes->'after' AS despues
+  FROM audit_logs WHERE entity_type = 'order' AND entity_id = 'GLP-10001' ORDER BY created_at;
+```
+
 ## Fotos (Cloudinary)
 
 Desde B6 las fotos del dashboard (productos, líneas y socios de Nosotros) se guardan sin llamar a la
@@ -777,24 +912,28 @@ no mostró ningún email ni el enlace de restablecer (ver la bitácora, B7).
 
 ## Scripts
 
-| Script                   | Qué hace                                                                          |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `npm run dev`            | Levanta la API en modo watch (`nest start --watch`), cargando `.env`.             |
-| `npm run build`          | Compila a `dist/` con `tsconfig.build.json`.                                      |
-| `npm start`              | Corre la versión compilada (`node dist/main`).                                    |
-| `npm run typecheck`      | `tsc --noEmit` sobre `src/`, `test/`, `prisma/` y las configs.                    |
-| `npm run lint`           | Verifica las versiones fijadas y corre ESLint (incluye las fronteras de capas).   |
-| `npm run format`         | Formatea todo con Prettier.                                                       |
-| `npm run format:check`   | Revisa el formato sin escribir.                                                   |
-| `npm test`               | Unitarios (`src/**/*.spec.ts`) y el test de fronteras (`test/lint/`), sin Docker. |
-| `npm run test:e2e`       | E2E (`test/**/*.e2e-spec.ts`, Testcontainers) y contrato (`test/contract/`).      |
-| `npm run contract:check` | Solo el test de contrato, mostrando las operaciones pendientes.                   |
-| `npm run db:up`          | `docker compose up -d --wait` (Postgres y Redis de desarrollo).                   |
-| `npm run db:down`        | `docker compose down` (conserva los volúmenes).                                   |
-| `npm run db:migrate`     | `prisma migrate dev`: aplica (y, si cambió el esquema, crea) migraciones.         |
-| `npm run db:generate`    | Regenera el cliente de Prisma.                                                    |
-| `npm run db:reset`       | Borra la base de desarrollo y vuelve a migrar (sin seed).                         |
-| `npm run db:seed`        | Carga los datos del diseño (idempotente).                                         |
+| Script                        | Qué hace                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| `npm run dev`                 | Levanta la API en modo watch (`nest start --watch`), cargando `.env`.             |
+| `npm run build`               | Compila a `dist/` con `tsconfig.build.json`.                                      |
+| `npm start`                   | Corre la versión compilada (`node dist/main`).                                    |
+| `npm run typecheck`           | `tsc --noEmit` sobre `src/`, `test/`, `prisma/` y las configs.                    |
+| `npm run lint`                | Verifica las versiones fijadas y corre ESLint (incluye las fronteras de capas).   |
+| `npm run format`              | Formatea todo con Prettier.                                                       |
+| `npm run format:check`        | Revisa el formato sin escribir.                                                   |
+| `npm test`                    | Unitarios (`src/**/*.spec.ts`) y el test de fronteras (`test/lint/`), sin Docker. |
+| `npm run test:e2e`            | E2E (`test/**/*.e2e-spec.ts`, Testcontainers) y contrato (`test/contract/`).      |
+| `npm run contract:check`      | Solo el test de contrato, mostrando las operaciones pendientes.                   |
+| `npm run db:up`               | `docker compose up -d --wait` (Postgres y Redis de desarrollo).                   |
+| `npm run db:down`             | `docker compose down` (conserva los volúmenes).                                   |
+| `npm run db:migrate`          | `prisma migrate dev`: aplica (y, si cambió el esquema, crea) migraciones.         |
+| `npm run db:generate`         | Regenera el cliente de Prisma.                                                    |
+| `npm run db:reset`            | Borra la base de desarrollo y vuelve a migrar (sin seed).                         |
+| `npm run db:seed`             | Carga los datos del diseño (idempotente).                                         |
+| `npm run admin:password`      | Crea el admin de `ADMIN_EMAIL` o le cambia la contraseña, sin tocar el catálogo.  |
+| `npm run build:scripts`       | Compila el seed y `admin:password` a `dist-scripts/` (para la imagen, sin `tsx`). |
+| `npm run db:seed:prod`        | El seed ya compilado (`node dist-scripts/…`): dentro de la imagen de producción.  |
+| `npm run admin:password:prod` | `admin:password` ya compilado: dentro de la imagen de producción.                 |
 
 ## Tests
 
@@ -868,7 +1007,11 @@ src/
 prisma/                   schema.prisma, migraciones, seed.ts y seed-data/
 test/                     e2e/, contract/, lint/ y support/
 scripts/                  versiones fijadas, import de fixtures, diff de contrato
-docs/                     BITACORA.md, adr/ y superpowers/ (spec y planes)
+render.yaml               producción en Render: el back, Postgres y Key Value (Blueprint)
+Dockerfile                la imagen del back (Render y el camino alternativo con Docker)
+deploy/                   camino alternativo, servidor propio: compose, Caddyfile, .env.example, copia
+docs/                     BITACORA.md, DESPLIEGUE.md (Vercel y Render), DESPLIEGUE-SERVIDOR-PROPIO.md,
+                          LANZAMIENTO-LEGAL.md, adr/ y superpowers/
 ```
 
 ## Notas de versiones

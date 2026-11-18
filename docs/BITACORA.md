@@ -1995,3 +1995,159 @@ código). Con ellos, `npm test` da 128 archivos y 1482 tests y
   pero la respuesta es 503 sin borrar la cookie. El aviso por mail ya no se pierde: desde `ef4c877`
   se encola apenas se borra la cuenta, antes de cerrar las sesiones.
 - **B8:** `audit_logs` del dashboard y la configuración de producción.
+
+## B8 · Producción (2026-11-17)
+
+Plan: [`superpowers/plans/2026-11-17-b8-produccion.md`](superpowers/plans/2026-11-17-b8-produccion.md).
+Guía para Lucas: [`DESPLIEGUE.md`](DESPLIEGUE.md) (Vercel y Render). Con esta pieza quedan hechas
+las ocho del diseño (§11).
+
+### Lo que decidió Lucas
+
+Hubo un cambio el mismo día. Primero se planeó y se construyó un VPS con Docker (Caddy, Postgres y
+Redis en el mismo servidor). Después Lucas escribió que **el front va a Vercel y el back a
+Render**, y esa es la decisión que vale: el dashboard también en Vercel, Postgres y Redis en
+Render, primero en los planes gratis para probar y sin dominio propio por ahora. Lo del VPS quedó
+hecho y probado como **camino alternativo** ([`DESPLIEGUE-SERVIDOR-PROPIO.md`](DESPLIEGUE-SERVIDOR-PROPIO.md)
+y `deploy/`).
+
+### Qué se hizo
+
+- **`audit_logs` del dashboard** (módulo `audit`, migración `20261117223806_b8_audit_logs`): un
+  interceptor global anota cada escritura exitosa de `/admin/*` (quién, `action`, entidad y
+  `changes` con lo que se mandó y solo las columnas que cambiaron). Sin cambio de contrato. El
+  detalle está en "Auditoría del dashboard" del README.
+- **Configuración de producción:** `STORE_ORIGIN` y `ADMIN_ORIGIN` obligatorias con
+  `NODE_ENV=production`; `STORE_INTERNAL_ORIGIN` (el aviso a la tienda por una red interna); el pool
+  de Postgres con `connectionTimeoutMillis` (10 s) y `statement_timeout` (30 s).
+- **La IP real con un secreto compartido** (`TRUSTED_PROXY_SECRET`,
+  `src/shared/infrastructure/http/trusted-proxy.ts`): un pedido que trae el secreto en
+  `x-galpon-proxy-secret` viene de los proyectos de Vercel, y la IP del cliente es la de
+  `x-galpon-client-ip` (la tienda) o, con `x-galpon-client-ip-from: x-forwarded-for`, la primera de
+  `X-Forwarded-For` (el dashboard). Sin el secreto, el pedido cuenta por la IP con la que llega.
+- **Seed sin consola:** `prisma/seed.ts --if-empty` siembra solo una base sin productos ni admin.
+  La imagen lleva el seed y `admin:password` compilados (`dist-scripts`) y, con
+  `SEED_IF_EMPTY=true`, corre el seed así en cada arranque, después de las migraciones.
+- **`npm run admin:password`:** crea el admin o le cambia la contraseña sin tocar el catálogo. En
+  producción el seed se corre una sola vez (una segunda corrida pisa líneas, productos, reseñas y
+  combos del diseño), así que hacía falta otra forma de recuperar el acceso.
+- **Render:** `render.yaml` (Blueprint) con el back desde el `Dockerfile`, Postgres 17 y Key Value,
+  en la región Virginia.
+- **Camino alternativo con Docker** (`deploy/`): compose con `caddy`, `store`, `admin`, `api`,
+  `postgres`, `redis` y `backup`; `Caddyfile`; `.env.example`; copia diaria con `pg_dump`; y un
+  compose para ensayar en la compu.
+- **Front** (sus commits, en su repo): el secreto en el proxy y en las lecturas del servidor de la
+  tienda, `apps/admin/vercel.json` (cabeceras, SPA y reenvío de `/api/v1/admin/*` al back), el tope
+  de la caché de páginas en disco (pista 13, solo fuera de Vercel) y las imágenes de Docker.
+
+### Decisiones y desvíos
+
+- **B-90 · `TRUST_PROXY` no alcanza en Vercel y Render.** Confía por dirección IP, y las de salida
+  de Vercel no son fijas; Render además no documenta su cadena de `X-Forwarded-For`. Por eso el
+  secreto compartido. Los dos mecanismos conviven y están pensados como alternativas. Un pedido sin
+  secreto cuenta por la IP del socket: quien saltea la tienda comparte un solo cupo y no les saca
+  lugar a los visitantes.
+- **B-91 · `x-galpon-client-ip-from` gana sobre `x-galpon-client-ip`.** El reenvío del dashboard en
+  Vercel no tiene código (es una regla de `vercel.json`): agrega el secreto, pero no se puede
+  confiar en que borre una cabecera que mande el visitante. Con `-from` la IP sale siempre de lo
+  que escribe Vercel.
+- **B-92 · El dashboard habla con el back por su propio origen.** Un dashboard en `vercel.app` y un
+  back en `onrender.com` son sitios distintos y la cookie `__Host-` con `SameSite=Lax` no viaja. El
+  proyecto del dashboard reenvía `/api/v1/admin/*` desde Vercel. No se aflojó la cookie
+  (`SameSite=None` abriría la puerta a CSRF y los navegadores bloquean cookies de terceros).
+- **B-93 · Migraciones y seed al arrancar, sin comando previo al despliegue.** El plan gratis de
+  Render no tiene consola, ni trabajos sueltos, ni comando previo. Con el arranque de la imagen
+  alcanza para los dos planes. El seed automático solo corre con la base vacía.
+- **B-94 · En el camino alternativo, la tienda se compila al arrancar su contenedor**, no al
+  construir la imagen: `next build` lee el catálogo del back y deja fijos el rewrite, la CSP y las
+  `NEXT_PUBLIC_*`. Ahí el aviso a la tienda va por la red interna
+  (`STORE_INTERNAL_ORIGIN=http://store:3000`) y Caddy responde 404 a `/api/revalidate` desde
+  internet.
+- **B-95 · Swagger sigue sin montarse en producción.** El diseño (§7) decía "protegido por sesión
+  de admin"; no montarlo es más estricto y no se necesita en el servidor.
+- **B-96 · La auditoría va en un interceptor**, no en cada comando: los comandos no reciben al
+  actor y así no se acopla ningún módulo. No es atómica con la escritura (se guarda después, antes
+  de responder): si falla, queda el error en el log y la escritura no se revierte. `changes` no
+  copia datos de clientes (de pedidos, reseñas y mensajes, solo las columnas que cambian), por eso
+  `audit_logs` no entra en la purga del ADR 0008.
+- **Un error que apareció al probar la imagen:** `prisma generate` corría sin el `tsconfig.json` al
+  lado y escribía los imports del cliente con `.ts`; el back compilado no arrancaba
+  (`Cannot find module './internal/class.ts'`). El `Dockerfile` copia los `tsconfig` antes de
+  instalar y carga el cliente compilado al construir (`72c6efc`).
+
+### Verificación
+
+**Simulación del camino de Render y Vercel en esta máquina** (la imagen de producción con las
+variables de `render.yaml`, credenciales falsas, en el 3021; la tienda compilada en vivo con Next
+16.4.5 en el 4410):
+
+- Con un tope de 512 MB de memoria (el plan pago más chico de Render) arrancó, sembró y atendió
+  usando unos 160 MB.
+- La imagen se construye y corre como el usuario `node`. En el primer arranque aplicó las 15
+  migraciones y sembró ("Seed listo: 6 categorías, 27 productos…"); al reiniciar, "No pending
+  migrations" y "Seed salteado (--if-empty)". Escucha en `PORT=10000`.
+- La tienda compiló en vivo contra ese back al primer intento y ninguna de sus lecturas dio 429.
+- Por la tienda, el ingreso llegó a 429 en el intento 21 para un cliente (`X-Real-IP`) y otro
+  siguió pasando; el primero no salió del 429 inventando `X-Forwarded-For`, `x-galpon-client-ip`,
+  `x-galpon-client-ip-from` ni el secreto.
+- Directo al back y sin secreto, 21 pedidos con 21 IP inventadas compartieron un cupo (429 en el 21) y el cliente que entra por la tienda no se vio afectado.
+- Como llega desde el dashboard (secreto, `-from` y la IP a la izquierda de `X-Forwarded-For`): el
+  admin sembrado entró, un visitante con contraseña mala llegó a 429 en el intento 21 y otro siguió
+  entrando.
+- En los logs del back no aparece ni la cabecera ni el valor del secreto.
+- `render.yaml` valida contra el esquema oficial de Render
+  (`https://render.com/schema/render.yaml.json`).
+
+**Ensayo del compose del camino alternativo** (modo producción, back en el 3021, tienda en el 4410
+y dashboard en el 5410; después se desarmó con `down -v`): los seis contenedores `healthy`; seed
+con el perfil `tools`; la tienda compiló dentro de su contenedor (27 s) y no recompiló al
+reiniciar; el dashboard con su CSP; un `PATCH` de una línea dejó su fila en `audit_logs` y el log
+dijo "La tienda regeneró categories, products"; límites por IP real con `X-Real-IP`; la copia
+diaria se hizo y se restauró; `npm run admin:password` cambió la contraseña; `caddy validate`
+aceptó el `Caddyfile`.
+
+**Suites** del back, sobre `d28733b` más la documentación: `typecheck`, `lint` y `format:check`
+en verde; `npm test`, 135 archivos y 1661 tests; `npm run test:e2e`, 33 archivos (1 salteado) y
+834 tests (4 salteados); `npm run contract:check`, 466 tests (1 salteado) y 0 de 84 operaciones
+pendientes. En el front, sobre Next 16.4.5: `typecheck`, `lint`, `format:check` y
+`api:check` en verde; `npm test`, 337 archivos y 4713 tests; E2E con 2 procesos, 501 pasan, 119 salteadas a propósito y 0 fallan (una corrida anterior tuvo
+una falla inestable en la captura del diálogo de sesión vencida, `e2e/admin/visual.spec.ts:82`,
+que repetida sola pasó 10 de 10).
+`npm audit --omit=dev` del back: 0 vulnerabilidades.
+
+### Lo que no se pudo comprobar sin las cuentas reales
+
+- Que el Blueprint se cree sin errores en la cuenta de Lucas y con la dirección esperada.
+- Que Vercel compile los dos proyectos desde el monorepo.
+- El reenvío de `apps/admin/vercel.json` (está escrito según la documentación de Vercel, pero solo
+  se prueba desplegado) y que la IP real llegue al back a través de Vercel.
+- Mercado Pago, el SMTP y Cloudinary con credenciales reales.
+- En el camino alternativo: el certificado HTTPS de Caddy y el DNS.
+
+### Commits
+
+- `f4aadbd` feat(audit): `audit_logs` de las escrituras del dashboard
+- `f00d5ea` feat(config): orígenes explícitos en producción, aviso interno a la tienda y topes del
+  pool
+- `bc0323a` feat(seed): `npm run admin:password`
+- `e3e5847` feat(deploy): imagen del back y compose de producción
+- `72c6efc` fix(deploy): el cliente de Prisma se genera con el `tsconfig` al lado
+- `519ec34` feat(http): IP del cliente autenticada con un secreto compartido
+- `d28733b` feat(seed): siembra con `--if-empty` al arrancar y scripts compilados para la imagen
+- feat(deploy): `render.yaml`; docs: plan, las dos guías, lanzamiento legal, README y esta
+  bitácora (este cierre)
+- En el front: el tope de la caché de páginas, las imágenes de Docker, el secreto del proxy,
+  `apps/admin/vercel.json` y su documentación, sobre Next 16.4.5.
+
+### Lo que queda después de B8
+
+- **Lucas:** seguir [`DESPLIEGUE.md`](DESPLIEGUE.md) (cuentas, Render, los dos proyectos de Vercel,
+  Mercado Pago y su webhook, SMTP y Cloudinary) y completar
+  [`LANZAMIENTO-LEGAL.md`](LANZAMIENTO-LEGAL.md). En su compu: `npm install` en `frontend` (cambió
+  Next) y `npm run db:migrate` en `backend` (suma la migración de `audit_logs`).
+- **Fuera de B8, anotado:** que el interceptor de idempotencia espere al pedido en curso en vez de
+  responder 409, y los límites por sesión (cambian el comportamiento del checkout: van en una pieza
+  propia); la verificación del email (NV-20) y el formato del número de pedido (NV-15), que piden
+  cambio de contrato; una forma de cambiar la contraseña del admin sin consola (hoy pide el plan
+  pago de Render); y un caché compartido de la tienda, solo si algún día hay más de un servidor
+  propio.

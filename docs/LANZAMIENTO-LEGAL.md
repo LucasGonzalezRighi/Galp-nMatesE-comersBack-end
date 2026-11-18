@@ -22,7 +22,9 @@ Abreviaturas: **LDC** = Ley de Defensa del Consumidor 24.240; **CCyC** = Código
 
 ## 1. Antes de abrir: lo imprescindible
 
-Sin esto la tienda no debería salir a producción.
+Sin esto la tienda no debería salir a producción. La parte técnica (el servidor, el dominio, las
+variables y cómo levantar todo) está paso a paso en [`DESPLIEGUE.md`](DESPLIEGUE.md): el front en
+Vercel y el back en Render.
 
 - [ ] **Lucas · Cargar los datos del vendedor en el dashboard** (Ajustes): razón social, CUIT,
       domicilio legal, condición frente al IVA, email, teléfono (opcional), área responsable, horario
@@ -33,22 +35,27 @@ Sin esto la tienda no debería salir a producción.
       logo de Data Fiscal. Los cuatro textos legales y el pie de la tienda toman estos datos de ahí:
       si faltan, la tienda en producción los deja vacíos.
 - [ ] **Lucas · Cuenta de mails (SMTP) y sus variables.** Contratar un servicio de envío de mails
-      (cualquiera que dé SMTP) y definir en el servidor del back `MAIL_MODE=smtp`, `SMTP_HOST`,
-      `SMTP_PORT` (465 o 587), `SMTP_USER`, `SMTP_PASS` y `MAIL_FROM` (por ejemplo
-      `Galpón Mates <hola@tudominio.com.ar>`). Sin ellas el back no arranca en producción.
+      (cualquiera que dé SMTP) y cargar en Render (paso 3 de `DESPLIEGUE.md`) `SMTP_HOST`,
+      `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` y `MAIL_FROM` (por ejemplo
+      `Galpón Mates <hola@tudominio.com.ar>`). Sin ellas el back no arranca en producción. En el plan
+      gratis de Render los mails solo salen por el puerto 2525.
       _Por qué:_ el CCyC art. 1108 obliga a confirmar el pedido por vía electrónica y sin demora; la
       tienda además promete el mail del pedido, del pago, del despacho y el código del arrepentimiento
       (Disp. 954/2025 art. 5). Conviene configurar SPF y DKIM del dominio para que no caigan en spam.
-- [ ] **Lucas · `TRUST_PROXY` con un proxy delante de la tienda.** En producción, poner delante de
-      la tienda un proxy (o el del hosting) que escriba la IP real del cliente en `X-Forwarded-For`, y
-      definir `TRUST_PROXY` en el back con la IP o red de ese proxy (ver "Proxies de confianza" en el
-      README).
+- [ ] **Lucas · Comprobar que el back ve la IP real de cada visitante.** En Vercel y Render el
+      back no puede confiar en quien lo llama por su dirección (las de Vercel no son fijas), así que
+      la tienda le manda la IP real junto con un secreto compartido: `TRUSTED_PROXY_SECRET` en Render
+      tiene que ser igual a `API_PROXY_SECRET` en los dos proyectos de Vercel, y la tienda lleva
+      `TRUSTED_CLIENT_IP_HEADER=x-real-ip`. Lo que falta es probarlo una vez en producción: es el
+      último punto del paso 7 de `DESPLIEGUE.md` (un cliente bloqueado por exceso de intentos no
+      tiene que bloquear a otro).
       _Por qué:_ sin eso, los límites por cliente de las lecturas públicas, de los pagos y de las
-      cuotas no cuentan (todo llega desde la IP del servidor de la tienda). Es parte de cuidar los
-      datos y el servicio (Ley 25.326 art. 9, seguridad).
-- [ ] **Lucas · Cloudinary.** Crear la cuenta y definir `MEDIA_MODE=cloudinary`,
-      `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` y `CLOUDINARY_API_SECRET` en el back (en
-      producción son obligatorias). Revisar que la tienda muestre las fotos subidas desde el panel.
+      cuotas no cuentan (todo llega desde una sola IP). Es parte de cuidar los datos y el servicio
+      (Ley 25.326 art. 9, seguridad).
+- [ ] **Lucas · Cloudinary.** Crear la cuenta y cargar en Render `CLOUDINARY_CLOUD_NAME`,
+      `CLOUDINARY_API_KEY` y `CLOUDINARY_API_SECRET` (en producción son obligatorias), y el nombre de
+      la nube también en Vercel (`NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`). Revisar que la tienda muestre
+      las fotos subidas desde el panel.
       _Por qué:_ las fotos que se suban desde el dashboard se guardan ahí; Cloudinary es además un
       proveedor en el exterior (ver la tarea de contratos, más abajo).
 - [ ] **Lucas · Correr las migraciones** y el seed con `ADMIN_EMAIL` y `ADMIN_PASSWORD` propios. En
@@ -58,15 +65,14 @@ Sin esto la tienda no debería salir a producción.
       npm run db:migrate
       ```
 
-      En producción:
+      En producción no hay que correr nada a mano: el back hace `npx prisma migrate deploy` cada
+      vez que arranca y, la primera vez, con la base vacía, carga el catálogo y crea el admin con el
+      `ADMIN_EMAIL` y el `ADMIN_PASSWORD` que se cargaron en Render (paso 3 de `DESPLIEGUE.md`). Con
+      datos en la base no vuelve a sembrar.
 
-      ```bash
-      npx prisma migrate deploy
-      ```
-
-      _Por qué:_ los arreglos de seguridad y B7 sumaron migraciones (entre ellas, columnas sin uso
-      fuera y enlaces de consumidor); sin correrlas, el back da error cuando busca las columnas
-      nuevas. El seed se niega a crear el admin de demostración en producción.
+      _Por qué:_ los arreglos de seguridad, B7 y B8 sumaron migraciones (entre ellas, columnas sin
+      uso fuera, enlaces de consumidor y `audit_logs`); sin correrlas, el back da error cuando busca
+      las columnas nuevas. El seed se niega a crear el admin de demostración en producción.
 
 - [ ] **El abogado · Revisar los cuatro textos legales**: Términos y condiciones (`/terminos`),
       Política de privacidad (`/privacidad`), Política de cookies (`/cookies`) y Cambios, devoluciones
@@ -98,7 +104,9 @@ Sin esto la tienda no debería salir a producción.
 - [ ] **Contratos con proveedores en el exterior.** Relevar quién guarda o procesa datos de los
       clientes y desde qué país: hosting de la tienda y del back, base de datos, Redis, el servicio de
       mails (SMTP), Cloudinary, Mercado Pago y el correo de atención (hoy un Gmail). Guardar el
-      contrato o las cláusulas de cada uno y nombrarlos en la Política de privacidad.
+      contrato o las cláusulas de cada uno y nombrarlos en la Política de privacidad. Con el camino
+      elegido son **Vercel** (la tienda y el dashboard) y **Render** (el back, la base y el Redis, en
+      su región de Virginia), los dos de Estados Unidos.
       _Por qué:_ la Ley 25.326 arts. 12 y 25, la Disp. 60/2016 y la Res. AAIP 198/2023 piden garantías
       cuando los datos van a otro país o los trata un tercero por cuenta del negocio.
 - [ ] **Cesión escrita de lo que hizo Lucas** al dueño: el código, las imágenes de IA del inicio
@@ -109,6 +117,10 @@ Sin esto la tienda no debería salir a producción.
       en el hosting y escribirlo en la Política de privacidad.
       _Por qué:_ la Ley 25.326 art. 4 inc. 7 pide conservar los datos solo el tiempo necesario. La
       política ya dice que se guardan por seguridad; falta el plazo del hosting.
+      _Dato técnico (B8):_ según la documentación de cada uno al 2026-11-17, **Render** guarda los
+      logs del back 7 días (plan de cuenta Hobby; 14 en Pro) y **Vercel** guarda los de la tienda
+      1 hora en el plan Hobby y 1 día en el Pro. Confirmarlo en sus páginas antes de escribirlo en la
+      política: cambian con el plan.
 
 ### El dueño
 
@@ -254,20 +266,31 @@ qué norma las mira.
 
   Si da más de 82000, es momento de ampliarlo.
 
-- **Páginas de productos que no existen (front, pista 13 de la auditoría).** Cada dirección con
-  forma válida que no corresponde a ningún producto (por ejemplo `/producto/algo-inventado`) deja
-  guardada en el disco de la tienda su página de "No encontramos ese producto" (unos 70 kB cada
-  una), así que alguien podría llenar el disco pidiendo miles. Las direcciones con forma inválida ya
-  no dejan nada. Para cerrarlo hay que elegir una de tres opciones, según el hosting: ponerle un
-  tope de tamaño a esa caché, no guardar esas páginas en disco
-  (`experimental.isrFlushToDisk: false`) o generar solo las fichas que existen al compilar
-  (`dynamicParams = false`; cada producto nuevo pediría volver a compilar la tienda).
-- **Actualizar Next.js (front).** La tienda usa Next 16.4.2, que tiene dos fallas conocidas
-  (GHSA-mfr8-8qww-v76h y GHSA-vc7v-qv4w-wrv8, sobre los "root params" con `'use cache'`). La tienda
-  no usa esa función, así que hoy no la afectan, pero `next build` lo avisa en cada compilación.
-  Están corregidas desde la versión 16.4.5.
-- **Límites por cliente sin `TRUST_PROXY`.** Ver la tarea de la sección 1: sin el proxy, las cuotas y
-  las lecturas públicas no tienen límite por cliente.
+- **Páginas de productos que no existen (front, pista 13 de la auditoría): cerrada en B8.** Cada
+  dirección con forma válida que no corresponde a ningún producto (por ejemplo
+  `/producto/algo-inventado`) deja guardada en el disco de la tienda su página de "No encontramos
+  ese producto" (unos 70 kB cada una). Ahora esa carpeta tiene un **tope de 256 MB**
+  (`ROUTE_CACHE_MAX_MB`): la tienda la mide cada minuto y, si lo pasa, borra las páginas guardadas
+  más viejas, que se vuelven a generar solas cuando alguien las pide. Se eligió el tope porque las
+  otras dos opciones no sirven en un VPS: sin caché en disco (`experimental.isrFlushToDisk: false`)
+  el optimizador de imágenes reprocesa cada foto en cada visita, y generar solo las fichas que
+  existen al compilar (`dynamicParams = false`) obliga a recompilar la tienda por cada producto
+  nuevo. **En Vercel ese disco no existe:** las páginas generadas van a la caché de la plataforma,
+  que no tiene límite de espacio, así que el tope no corre ahí (queda para el servidor propio). Lo
+  que queda en Vercel es un costo: cada dirección inventada es una escritura en esa caché, y Vercel
+  cobra las escrituras por encima de lo incluido en el plan. Si alguien abusa, se frena con una
+  regla de límite de pedidos en el firewall de Vercel.
+- **Actualizar Next.js (front): hecho.** La tienda pasó de Next 16.4.2 a 16.4.5 (commit `4904d79`
+  del front), la versión que corrige siete avisos de seguridad: GHSA-mfr8-8qww-v76h,
+  GHSA-vc7v-qv4w-wrv8, GHSA-vvgp-ww4w-46vf, GHSA-rhh4-g77r-r9qj, GHSA-pc58-hwjq-p385,
+  GHSA-7qx7-33qx-rqx2 y GHSA-f3mh-rxg3-f5g2. `next build` ya compila sin el aviso. Después de bajar
+  ese cambio hay que correr `npm install` en la carpeta `frontend`.
+- **Límites por cliente.** En Vercel y Render dependen del secreto compartido entre la tienda y el
+  back (ver la tarea de la sección 1: falta comprobarlo en producción). Quien le pegue directo a la
+  dirección de Render, salteando la tienda, cuenta junto con todos los que hagan lo mismo: no puede
+  dejar sin lugar a los visitantes de la tienda. Queda un caso más flojo: el ingreso al dashboard
+  cuenta por la IP que informa Vercel y, si eso fallara, lo protege el bloqueo por intentos de la
+  cuenta.
 
 ## 5. Lo que ya hace el sistema (para no repetirlo)
 
@@ -287,3 +310,10 @@ Lo de la tienda y el dashboard ya está en `main` del front; lo del back, en `ma
 - Eliminar la cuenta desde la tienda (`DELETE /me`), con los pedidos guardados sin vínculo a la
   cuenta por la obligación de conservar los comprobantes.
 - Logs sin la búsqueda ni emails enteros.
+- Registro de quién cambió qué en el dashboard (`audit_logs`, B8): cada escritura del panel guarda
+  el usuario, la acción y el antes y el después de lo que cambió, sin copiar datos de clientes. Se
+  consulta por SQL (sección 9 de `DESPLIEGUE.md`).
+- Despliegue en Vercel y Render (B8): la base y el Redis sin acceso desde internet, migraciones al
+  arrancar, catálogo y admin cargados solos la primera vez, y un comando para recuperar la
+  contraseña del admin sin tocar el catálogo (`npm run admin:password`). El camino alternativo, un
+  servidor propio con Docker, está en `DESPLIEGUE-SERVIDOR-PROPIO.md`.
