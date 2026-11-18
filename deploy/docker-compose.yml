@@ -9,7 +9,7 @@
 #
 #   docker compose up -d --build
 #
-# El paso a paso completo está en `backend/docs/DESPLIEGUE.md`.
+# El paso a paso completo está en `backend/docs/DESPLIEGUE-SERVIDOR-PROPIO.md`.
 name: galpon
 
 # Logs de cada contenedor: hasta 5 archivos de 10 MB (después se pisa el más viejo).

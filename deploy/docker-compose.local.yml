@@ -5,7 +5,7 @@
 # Deja el back en http://localhost:3021, la tienda en http://localhost:4410 y el dashboard en
 # http://localhost:5410 (solo desde esta máquina). Caddy no arranca: sin un dominio real no puede
 # sacar certificados. Usa el mismo `.env` (con `DOMAIN=localhost`); ver "Ensayo en tu compu" en
-# `backend/docs/DESPLIEGUE.md`.
+# `backend/docs/DESPLIEGUE-SERVIDOR-PROPIO.md`.
 services:
   caddy:
     profiles:

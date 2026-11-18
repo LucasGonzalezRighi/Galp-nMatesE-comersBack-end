@@ -5,7 +5,7 @@
 # `backend/deploy/backups` del servidor) y borra las copias de más de BACKUP_KEEP_DAYS días.
 # La conexión sale de PGHOST, PGUSER, PGDATABASE y PGPASSWORD.
 #
-# Para restaurar una copia, ver "Copias de la base" en backend/docs/DESPLIEGUE.md.
+# Para restaurar una copia, ver "Copias de la base" en backend/docs/DESPLIEGUE-SERVIDOR-PROPIO.md.
 set -eu
 
 keep_days="${BACKUP_KEEP_DAYS:-14}"

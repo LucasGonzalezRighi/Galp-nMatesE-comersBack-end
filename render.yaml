@@ -1,0 +1,118 @@
+# Galpón Mates en Render: el back, su base de datos y su Redis, definidos en un solo archivo
+# (un "Blueprint"). En el panel de Render: New > Blueprint > elegir este repo. El paso a paso está
+# en docs/DESPLIEGUE.md.
+#
+# PLANES. Así como está, crea todo en el plan GRATIS, que sirve para probar y nada más: el back se
+# duerme a los 15 minutos sin visitas (no vencen pedidos ni salen mails mientras duerme), la base
+# gratis se borra a los 30 días y el Redis gratis pierde las colas si se reinicia. Para salir a
+# vender, cambiá las tres líneas marcadas con "PLAN" por el valor pago que dice al lado y subí el
+# cambio: Render lo aplica solo.
+services:
+  # El back (NestJS), desde el Dockerfile de este repo. Al arrancar aplica las migraciones
+  # (`npx prisma migrate deploy`) y, si la base está vacía, carga el catálogo inicial y crea el
+  # admin del dashboard (SEED_IF_EMPTY, ADMIN_EMAIL y ADMIN_PASSWORD).
+  - type: web
+    name: galpon-mates-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free # PLAN: para vender, starter
+    region: virginia
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: '10000'
+      - key: LOG_LEVEL
+        value: info
+
+      # Conexiones: las completa Render con la base y el Redis de más abajo (red privada).
+      - key: DATABASE_URL
+        fromDatabase:
+          name: galpon-mates-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: galpon-mates-redis
+          property: connectionString
+
+      # Direcciones públicas, sin barra final. Render las pide al crear el Blueprint.
+      # STORE_ORIGIN: la tienda en Vercel. ADMIN_ORIGIN: el dashboard en Vercel.
+      # PUBLIC_API_ORIGIN: este servicio (https://galpon-mates-api.onrender.com).
+      - key: STORE_ORIGIN
+        sync: false
+      - key: ADMIN_ORIGIN
+        sync: false
+      - key: PUBLIC_API_ORIGIN
+        sync: false
+
+      # Secretos compartidos con la tienda: los inventa Render. Después se copian a Vercel
+      # (REVALIDATE_SECRET y API_PROXY_SECRET).
+      - key: STORE_REVALIDATE_SECRET
+        generateValue: true
+      - key: TRUSTED_PROXY_SECRET
+        generateValue: true
+
+      # Mercado Pago.
+      - key: MP_MODE
+        value: live
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_WEBHOOK_SECRET
+        sync: false
+      - key: MP_STATEMENT_DESCRIPTOR
+        value: GALPON MATES
+
+      # Fotos (Cloudinary).
+      - key: MEDIA_MODE
+        value: cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # Mails (SMTP).
+      - key: MAIL_MODE
+        value: smtp
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+      # Primera carga: con la base vacía, siembra el catálogo y crea este admin. Con datos, no
+      # toca nada.
+      - key: SEED_IF_EMPTY
+        value: 'true'
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+  # Redis (Render Key Value): colas, sesiones y límites. Sin acceso desde internet y sin desalojo
+  # (una cola no puede perder trabajos por falta de memoria).
+  - type: keyvalue
+    name: galpon-mates-redis
+    plan: free # PLAN: para vender, starter (guarda las colas en disco)
+    region: virginia
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+databases:
+  # Postgres 17, la misma versión con la que corren las pruebas.
+  - name: galpon-mates-db
+    plan: free # PLAN: para vender, basic-256mb (copias automáticas; la gratis se borra a los 30 días)
+    region: virginia
+    postgresMajorVersion: '17'
+    databaseName: galpon
+    user: galpon
