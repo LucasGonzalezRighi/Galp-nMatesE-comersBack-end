@@ -34,7 +34,7 @@ describe('buildPinoHttpOptions', () => {
     expect(buildPinoHttpOptions({ ...BASE, NODE_ENV: 'test' }).level).toBe('silent')
   })
 
-  it('enmascara cookies, Authorization, Referer, el token CSRF, el token del pedido y la Idempotency-Key', () => {
+  it('enmascara cookies, Authorization, Referer, el token CSRF, el token del pedido, la Idempotency-Key y el secreto del proxy', () => {
     expect(buildPinoHttpOptions(BASE).redact).toEqual([
       'req.headers.cookie',
       'req.headers.authorization',
@@ -42,11 +42,12 @@ describe('buildPinoHttpOptions', () => {
       'req.headers["x-csrf-token"]',
       'req.headers["x-order-token"]',
       'req.headers["idempotency-key"]',
+      'req.headers["x-galpon-proxy-secret"]',
       'res.headers["set-cookie"]',
     ])
   })
 
-  it('no deja en el log el token de recuperación del Referer, el token CSRF, el del pedido ni la Idempotency-Key', () => {
+  it('no deja en el log el token de recuperación del Referer, el token CSRF, el del pedido, la Idempotency-Key ni el secreto del proxy', () => {
     const lines: string[] = []
     const logger = pino(
       { level: 'info', redact: buildPinoHttpOptions(BASE).redact ?? [] },
@@ -62,6 +63,8 @@ describe('buildPinoHttpOptions', () => {
             'x-order-token': 'ot_secreto',
             // NV-01: con la clave y la URL, quien lee los logs repetía la preferencia sin token.
             'idempotency-key': 'clave-idempotente-secreta',
+            // Defensa en profundidad: el middleware ya la borra antes de que el logger la vea.
+            'x-galpon-proxy-secret': 'secreto-del-proxy-de-la-tienda',
             cookie: '__Host-galpon_session=sesion-secreta',
           },
         },
@@ -75,6 +78,7 @@ describe('buildPinoHttpOptions', () => {
     expect(output).not.toContain('csrf-secreto')
     expect(output).not.toContain('ot_secreto')
     expect(output).not.toContain('clave-idempotente-secreta')
+    expect(output).not.toContain('secreto-del-proxy-de-la-tienda')
     expect(output).not.toContain('sesion-secreta')
   })
 })

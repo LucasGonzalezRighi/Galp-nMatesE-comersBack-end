@@ -27,6 +27,15 @@ export interface Env {
    * cliente en `X-Forwarded-For` (si no, cualquiera puede inventarse una).
    */
   TRUST_PROXY: readonly string[]
+  /**
+   * Secreto compartido con la tienda y el dashboard cuando no hay IPs fijas que listar en
+   * `TRUST_PROXY` (ellos en Vercel, el back en Render): el mismo `API_PROXY_SECRET` de la tienda,
+   * de 32 caracteres o más. Un pedido que lo trae en `x-galpon-proxy-secret` viene de nuestros
+   * proyectos, y la IP del cliente es la que mandan (`x-galpon-client-ip`, o la primera de
+   * `X-Forwarded-For` con `x-galpon-client-ip-from: x-forwarded-for`); uno que no lo trae se cuenta
+   * por la IP con la que llega. Sin él (por defecto) nada cambia. Nunca se loguea.
+   */
+  TRUSTED_PROXY_SECRET?: string | undefined
   /** Conexión a Postgres: `postgresql://usuario:clave@host:5432/base`. */
   DATABASE_URL: string
   /** Conexión a Redis: `redis://host:6379` (o `rediss://` con TLS). */
@@ -183,6 +192,7 @@ export const envSchema = z
     HOST: z.union([z.ipv4(), z.ipv6(), z.literal('localhost')]).optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     TRUST_PROXY: z.string().optional().transform(splitTrustProxy).pipe(z.array(trustedProxySchema)),
+    TRUSTED_PROXY_SECRET: z.string().min(32).optional(),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }),
     ADMIN_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).optional(),
@@ -264,6 +274,7 @@ export const ENV_HINTS: Record<keyof Env, string> = {
   PORT: 'un número entero entre 1 y 65535',
   TRUST_PROXY:
     'IPs o redes CIDR separadas por comas (por ejemplo 10.0.0.5,10.1.0.0/16), o loopback, linklocal o uniquelocal; vacía para apagarla',
+  TRUSTED_PROXY_SECRET: 'el mismo API_PROXY_SECRET de la tienda, de 32 caracteres o más',
   DATABASE_URL: 'una URL de Postgres (postgresql://usuario:clave@host:5432/base)',
   REDIS_URL: 'una URL de Redis (redis://host:6379)',
   ADMIN_ORIGIN: 'una URL http o https (por ejemplo http://localhost:5173)',

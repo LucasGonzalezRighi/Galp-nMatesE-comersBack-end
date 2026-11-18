@@ -11,7 +11,9 @@ import { ENV, type Env } from '../../../config/env'
  * la URL con el token de recuperación; `X-CSRF-Token` es el secreto ligado a la sesión,
  * `X-Order-Token` abre un pedido sin sesión e `Idempotency-Key` también: la repetición idempotente
  * devuelve la respuesta guardada antes de mirar el token, así que con la clave y la URL del log se
- * leía la preferencia de pago de otro (auditoría NV-01).
+ * leía la preferencia de pago de otro (auditoría NV-01). `X-Galpon-Proxy-Secret` es el secreto
+ * compartido con la tienda (`TRUSTED_PROXY_SECRET`): `trustedProxyMiddleware` ya la borra del pedido
+ * antes de que el logger lo vea, y acá se tapa igual por si algún día cambia el orden.
  */
 const REDACTED_PATHS = [
   'req.headers.cookie',
@@ -20,6 +22,7 @@ const REDACTED_PATHS = [
   'req.headers["x-csrf-token"]',
   'req.headers["x-order-token"]',
   'req.headers["idempotency-key"]',
+  'req.headers["x-galpon-proxy-secret"]',
   'res.headers["set-cookie"]',
 ]
 
@@ -95,9 +98,10 @@ function isInstalled(packageName: string): boolean {
 
 /**
  * Arma las opciones de `pino-http` para el entorno: nivel `LOG_LEVEL` (en `test`, `silent`),
- * cookies, `Authorization`, `Referer`, `X-CSRF-Token`, `X-Order-Token` e `Idempotency-Key`
- * enmascarados, la ruta sin los valores de la query ({@link serializeRequest}), y salida legible con
- * `pino-pretty` solo en desarrollo y si está instalado (si no, JSON, como en producción).
+ * cookies, `Authorization`, `Referer`, `X-CSRF-Token`, `X-Order-Token`, `Idempotency-Key` y
+ * `X-Galpon-Proxy-Secret` enmascarados, la ruta sin los valores de la query
+ * ({@link serializeRequest}), y salida legible con `pino-pretty` solo en desarrollo y si está
+ * instalado (si no, JSON, como en producción).
  *
  * @param env - La configuración validada.
  * @returns Las opciones para `LoggerModule` de `nestjs-pino`.

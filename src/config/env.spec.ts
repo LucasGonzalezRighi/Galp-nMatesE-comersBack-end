@@ -152,6 +152,47 @@ describe('parseEnv', () => {
     })
   })
 
+  describe('TRUSTED_PROXY_SECRET (IP del cliente por secreto compartido)', () => {
+    /** Producción completa, sin el secreto del proxy. */
+    const PRODUCTION = {
+      ...REQUIRED,
+      ...LIVE,
+      ...CLOUDINARY,
+      ...SMTP,
+      ...PUBLIC_ORIGINS,
+      NODE_ENV: 'production',
+      STORE_REVALIDATE_SECRET: STORE_SECRET,
+    }
+
+    it('es opcional, también en producción', () => {
+      expect(parseEnv(REQUIRED).TRUSTED_PROXY_SECRET).toBeUndefined()
+      expect(parseEnv(PRODUCTION).TRUSTED_PROXY_SECRET).toBeUndefined()
+    })
+
+    it('con 32 caracteres o más la devuelve tal cual', () => {
+      const secret = 'p'.repeat(32)
+      expect(parseEnv({ ...REQUIRED, TRUSTED_PROXY_SECRET: secret }).TRUSTED_PROXY_SECRET).toBe(
+        secret,
+      )
+      expect(
+        parseEnv({ ...PRODUCTION, TRUSTED_PROXY_SECRET: `${secret}-y-algo-más` })
+          .TRUSTED_PROXY_SECRET,
+      ).toBe(`${secret}-y-algo-más`)
+    })
+
+    it('con menos de 32 caracteres (o vacía) lanza un error con la pista, sin mostrar el valor', () => {
+      const short = 'q'.repeat(31)
+      const message = errorOf({ ...REQUIRED, TRUSTED_PROXY_SECRET: short })
+      expect(message).toContain(
+        '- TRUSTED_PROXY_SECRET: tiene un valor inválido; se espera el mismo API_PROXY_SECRET de la tienda, de 32 caracteres o más',
+      )
+      expect(message).not.toContain(short)
+      expect(errorOf({ ...REQUIRED, TRUSTED_PROXY_SECRET: '' })).toContain(
+        '- TRUSTED_PROXY_SECRET: tiene un valor inválido',
+      )
+    })
+  })
+
   it('con un PORT que no es número lanza un error que nombra PORT', () => {
     expect(errorOf({ ...REQUIRED, PORT: 'abc' })).toContain('PORT')
   })

@@ -10,7 +10,8 @@ import { skipWithoutKnownClientIp } from './client-rate-limit'
 
 /**
  * Límite por defecto de las rutas públicas: 120 pedidos por minuto por IP (`req.ip`: la del
- * cliente con `TRUST_PROXY`; sin él, la del socket, que detrás de la tienda es la de su servidor).
+ * cliente con `TRUST_PROXY`, o la que autentica `TRUSTED_PROXY_SECRET`; sin ninguno de los dos, la
+ * del socket, que detrás de la tienda es la de su servidor).
  */
 export const PUBLIC_RATE_LIMIT = { ttl: 60_000, limit: 120 } as const
 
@@ -24,7 +25,8 @@ export const RATE_LIMIT_MESSAGE = 'Demasiados pedidos seguidos: esperá un minut
  * formularios, pedidos) ajustan su límite con `@Throttle` y las que no deben limitarse usan
  * `@SkipThrottle`. Las lecturas públicas (`@PublicRead()`, NV-18) y las rutas de pago (NV-16)
  * llevan su propio límite (`@ClientRateLimit()`), que solo cuenta cuando se conoce la IP real del
- * cliente (`skipIf`): sin `TRUST_PROXY`, o cuando pide el servidor de la tienda, no se limitan.
+ * cliente (`skipIf`): sin `TRUST_PROXY` ni `TRUSTED_PROXY_SECRET`, o cuando pide el servidor de la
+ * tienda, no se limitan.
  */
 @Module({
   imports: [

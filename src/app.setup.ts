@@ -9,6 +9,7 @@ import { ENV, type Env } from './config/env'
 import { isSimulatorEnabled } from './modules/payments/interface/simulated-mercadopago.controller'
 import { applyTrustProxy } from './shared/infrastructure/http/client-ip'
 import { ProblemFilter } from './shared/infrastructure/http/problem.filter'
+import { trustedProxyMiddleware } from './shared/infrastructure/http/trusted-proxy'
 import { createValidationPipe } from './shared/infrastructure/http/validation.pipe'
 
 /** Prefijo global de todas las rutas de la API, como en `servers` del contrato (`/api/v1`). */
@@ -75,7 +76,9 @@ export function setupBodyParsers(
 /**
  * Aplica la configuración que comparten `main.ts` y los E2E (`test/support/app.ts`), para no
  * duplicarla: logger pino para los logs de Nest, prefijo `/api/v1`, `trust proxy` según
- * `TRUST_PROXY` (NV-25: los límites por IP cuentan la IP real del cliente), body parsers acotados
+ * `TRUST_PROXY` (NV-25: los límites por IP cuentan la IP real del cliente), la IP del cliente
+ * autenticada con `TRUSTED_PROXY_SECRET` (`trustedProxyMiddleware`: va antes que todo lo demás,
+ * así sus cabeceras nunca llegan a los controladores ni a los logs), body parsers acotados
  * ({@link setupBodyParsers}), cookies parseadas en `req.cookies` (`cookie-parser`, para los guards
  * de sesión), cabeceras de seguridad con `helmet`, CORS solo para el admin (`buildCorsOptions`),
  * errores `application/problem+json` (`ProblemFilter`), validación global de DTOs (422 con
@@ -89,6 +92,7 @@ export function setupApp(app: NestExpressApplication): void {
   app.useLogger(app.get(Logger))
   app.setGlobalPrefix(API_PREFIX)
   applyTrustProxy(app, env.TRUST_PROXY)
+  app.use(trustedProxyMiddleware(env.TRUSTED_PROXY_SECRET))
   setupBodyParsers(app, env)
   app.use(cookieParser())
   app.use(helmet())

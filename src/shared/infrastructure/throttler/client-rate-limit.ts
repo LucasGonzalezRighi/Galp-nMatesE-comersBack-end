@@ -21,9 +21,10 @@ const reflector = new Reflector()
  * Limita una ruta (o un controlador) por la IP real del cliente, y solo cuando se conoce
  * ({@link skipWithoutKnownClientIp}): sin `TRUST_PROXY` todo llega con la IP del servidor de la
  * tienda y un límite por IP frenaría a toda la tienda; con `TRUST_PROXY`, los pedidos que origina
- * un proxy de confianza (el servidor de la tienda sin `X-Forwarded-For`) tampoco se cuentan. Lo
- * usan las lecturas públicas (`@PublicRead()`, NV-18) y las rutas de pago (NV-16). En el método
- * pisa el límite de la clase.
+ * un proxy de confianza (el servidor de la tienda sin `X-Forwarded-For`) tampoco se cuentan. Con
+ * `TRUSTED_PROXY_SECRET` vale lo mismo: se cuenta al visitante que reenvían la tienda o el
+ * dashboard y al que llega directo, y no al servidor de la tienda. Lo usan las lecturas públicas
+ * (`@PublicRead()`, NV-18) y las rutas de pago (NV-16). En el método pisa el límite de la clase.
  *
  * @param rate - Pedidos por ventana para cada cliente (y para cada ruta).
  * @returns El decorador.

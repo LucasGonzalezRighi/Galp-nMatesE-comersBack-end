@@ -1,5 +1,7 @@
 import { isIPv4, isIPv6 } from 'node:net'
 
+import { proxyOriginOf } from './trusted-proxy'
+
 /** La parte de la app de Express que se usa para `trust proxy`. */
 export interface TrustProxyApp {
   /** `app.set` de Express. */
@@ -8,7 +10,10 @@ export interface TrustProxyApp {
 
 /** La parte del pedido de Express que dice quién lo mandó. */
 export interface ClientIpRequest {
-  /** `req.ip`: con `trust proxy`, la del cliente según `X-Forwarded-For`; sin él, la del socket. */
+  /**
+   * `req.ip`: la del visitante si la autenticó el secreto compartido (`trustedProxyMiddleware`);
+   * si no, con `trust proxy`, la del cliente según `X-Forwarded-For`, y sin él, la del socket.
+   */
   ip?: string | undefined
   /** La app de Express del pedido (`req.app`), para leer `trust proxy`. */
   app: { get(setting: string): unknown }
@@ -38,19 +43,29 @@ export function applyTrustProxy(app: TrustProxyApp, trustProxy: readonly string[
 }
 
 /**
- * IP real del cliente, cuando se puede saber: `req.ip` si `trust proxy` está configurado y esa IP
- * no es la de un proxy de confianza.
+ * IP real del cliente, cuando se puede saber. Hay dos mecanismos independientes:
  *
- * Devuelve `null` sin `TRUST_PROXY` (todo lo que pasa por la tienda llega con la IP de su
- * servidor) y cuando el pedido lo originó un proxy de confianza: el servidor de la tienda leyendo
- * para armar sus páginas, o un pedido que la tienda reenvió sin `X-Forwarded-For`.
+ * - Con `TRUSTED_PROXY_SECRET` (el pedido pasó por `trustedProxyMiddleware`), manda el origen que
+ *   resolvió el secreto compartido: la IP del visitante que reenvió la tienda o el dashboard;
+ *   `null` si el pedido lo originó uno de nuestros proyectos sin visitante (el servidor de la
+ *   tienda armando sus páginas); y `req.ip` si llegó directo, sin el secreto: quien saltea Vercel
+ *   se cuenta por la IP con la que llega y comparte un solo contador.
+ * - Sin ese secreto, `TRUST_PROXY`: `req.ip` si `trust proxy` está configurado y esa IP no es la de
+ *   un proxy de confianza. Devuelve `null` sin `TRUST_PROXY` (todo lo que pasa por la tienda llega
+ *   con la IP de su servidor) y cuando el pedido lo originó un proxy de confianza: el servidor de
+ *   la tienda leyendo para armar sus páginas, o un pedido que la tienda reenvió sin
+ *   `X-Forwarded-For`.
  *
  * @param req - Pedido de Express.
  * @returns La IP del cliente, o `null` si no se conoce.
  */
 export function knownClientIp(req: ClientIpRequest): string | null {
+  const origin = proxyOriginOf(req)
+  if (origin?.kind === 'client') return origin.ip
+  if (origin?.kind === 'trusted') return null
   const ip = req.ip
   if (ip === undefined || ip === '') return null
+  if (origin?.kind === 'direct') return ip
   const trust = req.app.get('trust proxy fn')
   if (!isTrustProxyOn(req.app.get('trust proxy')) || !isTrustFn(trust)) return null
   return trust(ip, 0) ? null : ip
