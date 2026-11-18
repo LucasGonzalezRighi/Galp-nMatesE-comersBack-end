@@ -25,8 +25,10 @@ const DOMAIN_EXTERNALS = ['uuid']
 
 module.exports = defineConfig(
   // `src/generated/**`: cliente de Prisma 7 (generator `prisma-client`, `output = "../src/generated/prisma"`).
+  // `dist-scripts/**`: el seed y `admin:password` compilados (`npm run build:scripts`).
   globalIgnores([
     'dist/**',
+    'dist-scripts/**',
     'coverage/**',
     'node_modules/**',
     'src/generated/**',

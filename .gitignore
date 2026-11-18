@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# El seed y `admin:password` compilados para la imagen de producción (`npm run build:scripts`)
+dist-scripts/
 coverage/
 .env
 .env.*

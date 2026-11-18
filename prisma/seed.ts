@@ -5,6 +5,11 @@
 // las reseñas y los combos que siembra). Las excepciones: los contenidos, los ajustes, los envíos y
 // el admin semilla solo se crean si faltan (nunca se pisa lo guardado desde el panel), y el stock
 // (`on_hand`) nunca baja por debajo de lo reservado por pedidos vivos (lo avisa y lo deja).
+//
+// Con `--if-empty` siembra solo una base vacía (sin productos ni admin) y si no, no toca nada: así
+// corre en cada arranque de la imagen de producción (`SEED_IF_EMPTY=true`), donde no hay consola
+// para sembrar a mano. Ahí se usa compilado: `node dist-scripts/prisma/seed.js --if-empty`
+// (`npm run build:scripts`).
 import { createHash } from 'node:crypto'
 
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -55,6 +60,9 @@ const COMBO_NAMESPACE = 'b7446644-ef56-4a17-9184-e0751e818650'
 
 /** Tiempo máximo de la transacción del seed: son unos 200 `upsert` en serie. */
 const TRANSACTION_TIMEOUT_MS = 120_000
+
+/** Argumento de la línea de comandos que siembra solo si la base está vacía. */
+export const IF_EMPTY_FLAG = '--if-empty'
 
 /**
  * UUID v5 (SHA-1, RFC 9562) de un nombre dentro de un namespace: siempre el mismo para el mismo
@@ -403,8 +411,50 @@ export async function seed(
 }
 
 /**
+ * Indica si la base está vacía para el seed de `--if-empty`: sin ningún producto y sin ningún
+ * usuario admin. Con cualquiera de los dos ya hay algo que cuidar: el catálogo que se edita desde
+ * el dashboard o un admin creado con `npm run admin:password`.
+ *
+ * @param prisma - Cliente de Prisma conectado a una base ya migrada.
+ * @returns `true` si no hay productos ni admins.
+ */
+export async function isDatabaseEmpty(prisma: PrismaClient): Promise<boolean> {
+  const [products, admins] = await Promise.all([
+    prisma.product.count(),
+    prisma.user.count({ where: { role: 'admin' } }),
+  ])
+  return products === 0 && admins === 0
+}
+
+/**
+ * El seed de `--if-empty`: siembra como {@link seed} solo si la base está vacía
+ * ({@link isDatabaseEmpty}); si no, no toca nada. Las credenciales del admin se deciden recién
+ * cuando hay que sembrar: con la base ya sembrada pueden faltar (`ADMIN_EMAIL` y `ADMIN_PASSWORD`
+ * se sacan del entorno después del primer arranque).
+ *
+ * @param prisma - Cliente de Prisma conectado a una base ya migrada.
+ * @param env - Las variables de entorno; por defecto, `process.env`.
+ * @returns Cuántas filas de cada tipo dejó sembradas, o `null` si la base no estaba vacía.
+ * @throws {Error} Si la base está vacía y el seed falla o las credenciales del admin no se pueden
+ *   decidir (por ejemplo, en producción sin `ADMIN_PASSWORD`).
+ * @example
+ * await seedIfEmpty(prisma) // base vacía: { categories: 6, products: 27, … }
+ * await seedIfEmpty(prisma) // null: ya estaba sembrada
+ */
+export async function seedIfEmpty(
+  prisma: PrismaClient,
+  env: Record<string, string | undefined> = process.env,
+): Promise<SeedSummary | null> {
+  if (!(await isDatabaseEmpty(prisma))) return null
+  return seed(prisma, seedAdminCredentials(env))
+}
+
+/**
  * Entrada de `npm run db:seed` / `prisma db seed`: siembra la base de `DATABASE_URL` (del entorno
  * o de `.env`) y cierra la conexión. Decide las credenciales del admin antes de conectarse.
+ *
+ * Con {@link IF_EMPTY_FLAG} (`--if-empty`) usa {@link seedIfEmpty}: si la base no está vacía avisa
+ * en una línea que no hizo nada y termina bien, sin mirar las credenciales del admin.
  *
  * @throws {Error} Si falta `DATABASE_URL`, si las credenciales del admin no se pueden decidir o si
  *   el seed falla.
@@ -419,15 +469,24 @@ async function main(): Promise<void> {
   if (connectionString === undefined || connectionString === '') {
     throw new Error('Falta DATABASE_URL: definila en el entorno o en .env para correr el seed')
   }
-  const admin = seedAdminCredentials(process.env)
+  const ifEmpty = process.argv.slice(2).includes(IF_EMPTY_FLAG)
+  // Con `--if-empty` las credenciales se deciden después, y solo si hay que sembrar.
+  const admin = ifEmpty ? null : seedAdminCredentials(process.env)
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
   try {
-    const summary = await seed(prisma, admin)
+    const summary = admin === null ? await seedIfEmpty(prisma) : await seed(prisma, admin)
+    if (summary === null) {
+      process.stdout.write(
+        'Seed salteado (--if-empty): la base ya tiene productos o un admin y no se tocó nada.\n',
+      )
+      return
+    }
+    const { email } = admin ?? seedAdminCredentials(process.env)
     process.stdout.write(
       `Seed listo: ${String(summary.categories)} categorías, ${String(summary.products)} productos, ` +
         `${String(summary.reviews)} reseñas, ${String(summary.contentBlocks)} contenidos, ` +
         `${String(summary.combos)} combos y ` +
-        `${String(summary.users)} usuario admin (${admin.email}).\n`,
+        `${String(summary.users)} usuario admin (${email}).\n`,
     )
   } finally {
     await prisma.$disconnect()

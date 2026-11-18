@@ -1,6 +1,7 @@
 package-lock.json
 node_modules
 dist
+dist-scripts
 coverage
 # Cliente de Prisma generado (generator `prisma-client`, output ../src/generated/prisma)
 src/generated

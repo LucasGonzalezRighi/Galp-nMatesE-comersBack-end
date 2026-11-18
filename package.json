@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
+    "build:scripts": "tsc -p tsconfig.scripts.json",
     "start": "node dist/main",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "node scripts/check-dependency-versions.mjs && eslint .",
@@ -25,7 +26,9 @@
     "db:generate": "prisma generate",
     "db:reset": "prisma migrate reset --force",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:prod": "node dist-scripts/prisma/seed.js",
     "admin:password": "tsx prisma/admin-password.ts",
+    "admin:password:prod": "node dist-scripts/prisma/admin-password.js",
     "prepare": "lefthook install",
     "postinstall": "prisma generate"
   },

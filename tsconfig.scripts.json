@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-scripts",
+    "rootDir": ".",
+    "sourceMap": false
+  },
+  "include": ["prisma/seed.ts", "prisma/admin-password.ts"]
+}

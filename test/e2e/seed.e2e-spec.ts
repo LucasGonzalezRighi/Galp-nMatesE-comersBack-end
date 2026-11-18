@@ -2,7 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { argon2id, hash, verify } from 'argon2'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { comboSeedId, seed } from '../../prisma/seed'
+import { comboSeedId, isDatabaseEmpty, seed, seedIfEmpty } from '../../prisma/seed'
 import { SEED_ADMIN, seedAdminCredentials } from '../../prisma/seed-data/admin'
 import { PrismaClient } from '../../src/generated/prisma/client'
 import { startContainers, type TestContainers } from '../support/containers'
@@ -70,6 +70,44 @@ describe('seed', () => {
   afterAll(async () => {
     await prisma?.$disconnect()
     await containers?.stop()
+  })
+
+  it('--if-empty: una base con un admin y sin productos no está vacía y no se siembra', async () => {
+    expect(await isDatabaseEmpty(db())).toBe(true)
+    // Como queda después de `npm run admin:password` en una base recién migrada.
+    const admin = await db().user.create({
+      data: { email: 'ya-estaba@galponmates.com.ar', passwordHash: 'x', role: 'admin' },
+    })
+    try {
+      expect(await isDatabaseEmpty(db())).toBe(false)
+      await expect(seedIfEmpty(db(), { NODE_ENV: 'test' })).resolves.toBeNull()
+      expect(await db().product.count()).toBe(0)
+    } finally {
+      await db().user.delete({ where: { id: admin.id } })
+    }
+    expect(await isDatabaseEmpty(db())).toBe(true)
+  })
+
+  it('--if-empty: con la base vacía siembra como el seed de siempre (en producción exige las credenciales del admin)', async () => {
+    // Vacía y en producción sin credenciales: falla como el seed de siempre y no deja nada.
+    await expect(seedIfEmpty(db(), { NODE_ENV: 'production' })).rejects.toThrow(
+      'En producción el seed necesita ADMIN_EMAIL y ADMIN_PASSWORD',
+    )
+    expect(await isDatabaseEmpty(db())).toBe(true)
+
+    const summary = await seedIfEmpty(db(), { NODE_ENV: 'test' })
+
+    expect(summary).toEqual({
+      categories: 6,
+      products: 27,
+      reviews: 18,
+      contentBlocks: 9,
+      combos: 5,
+      users: 1,
+    })
+    expect(await isDatabaseEmpty(db())).toBe(false)
+    expect(await db().product.count()).toBe(27)
+    expect(await db().user.count({ where: { role: 'admin', email: SEED_ADMIN.email } })).toBe(1)
   })
 
   it('dos corridas seguidas dejan los mismos conteos (idempotente)', async () => {
@@ -425,6 +463,38 @@ describe('seed', () => {
     })
     const history = await db().productSlugHistory.findMany({ where: { productId: galleta.id } })
     expect(history.map((h) => h.slug)).toEqual(['mate-galleta-renovado'])
+  })
+
+  it('--if-empty: con la base ya sembrada no toca nada, ni un producto renombrado desde el panel, y no pide las credenciales del admin', async () => {
+    const galleta = await db().product.findUniqueOrThrow({ where: { slug: 'mate-galleta' } })
+    // Como el dashboard: el slug anterior pasa al historial del producto.
+    const renamed = await db().product.update({
+      where: { id: galleta.id },
+      data: { slug: 'mate-galleta-del-panel', name: 'Mate Galleta del panel' },
+    })
+    await db().productSlugHistory.create({ data: { slug: 'mate-galleta', productId: galleta.id } })
+    const slugHistory = async (): Promise<string[]> =>
+      (
+        await db().productSlugHistory.findMany({
+          where: { productId: galleta.id },
+          orderBy: { slug: 'asc' },
+        })
+      ).map((h) => h.slug)
+    const before = await countAll(db())
+    const historyBefore = await slugHistory()
+    const hashBefore = await adminHash()
+
+    // Producción sin ADMIN_EMAIL ni ADMIN_PASSWORD: el seed de siempre ni arrancaría.
+    const summary = await seedIfEmpty(db(), { NODE_ENV: 'production' })
+
+    expect(summary).toBeNull()
+    expect(await isDatabaseEmpty(db())).toBe(false)
+    expect(await countAll(db())).toEqual(before)
+    expect(await adminHash()).toBe(hashBefore)
+    // Ni siquiera lo reescribe: la fila queda con el `updatedAt` del cambio del panel.
+    expect(await db().product.findUniqueOrThrow({ where: { id: galleta.id } })).toEqual(renamed)
+    expect(await slugHistory()).toEqual(historyBefore)
+    expect(historyBefore).toContain('mate-galleta')
   })
 })
 
