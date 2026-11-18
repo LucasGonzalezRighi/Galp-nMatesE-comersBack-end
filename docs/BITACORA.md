@@ -2151,3 +2151,11 @@ que repetida sola pasó 10 de 10).
   cambio de contrato; una forma de cambiar la contraseña del admin sin consola (hoy pide el plan
   pago de Render); y un caché compartido de la tienda, solo si algún día hay más de un servidor
   propio.
+- **Mercado Pago: pasar de la API de Payments a la API de Orders.** El 2026-11-18, al crear la
+  aplicación de Mercado Pago (Checkout API), el panel ofrece "API de Orders" y "API de Payments" y
+  avisa que la de Payments "será descontinuada pronto". Se eligió **API de Payments** porque es la
+  que usa el back (`src/modules/payments`: preferencias y `/v1/payments` detrás de
+  `PaymentGatewayPort`). Cuando Mercado Pago anuncie la fecha de corte, hay que migrar el adaptador
+  de Mercado Pago (`MercadoPagoGateway`, `mercadopago.mapper.ts`, el webhook y la conciliación) a
+  la API de Orders, con su prueba contra el sandbox, y crear o reconfigurar la aplicación con
+  "API de Orders". El puerto `PaymentGatewayPort` aísla el cambio del resto del back.
