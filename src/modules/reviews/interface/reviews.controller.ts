@@ -42,9 +42,9 @@ export class ReviewsPageQueryDto extends PickType(PageQueryDto, ['page'] as cons
  * (`POST /products/{slug}/reviews`), que queda pendiente de moderación.
  *
  * Las lecturas son públicas (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP
- * real del cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda no se limita. El
- * `POST` es un formulario público con el límite global por IP y un tope diario de reseñas
- * pendientes por IP real (NV-21).
+ * real del cliente, que solo cuenta con `TRUST_PROXY` o `TRUSTED_PROXY_SECRET`; el servidor de la
+ * tienda no se limita. El `POST` es un formulario público con el límite global por IP y un tope
+ * diario de reseñas pendientes por IP real (NV-21).
  */
 @ApiTags('reviews')
 @ApiExtraModels(ReviewDto, ReviewReceiptDto)

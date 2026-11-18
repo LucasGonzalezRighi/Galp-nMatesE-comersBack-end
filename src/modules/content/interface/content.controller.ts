@@ -40,8 +40,8 @@ export const LEGAL_DOCUMENT_DESCRIPTION =
  * Textos editables de la tienda (`/content/*`).
  *
  * Lectura pública (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP real del
- * cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda (SSR/ISR y `next build`)
- * no se limita.
+ * cliente, que solo cuenta con `TRUST_PROXY` o `TRUSTED_PROXY_SECRET`; el servidor de la tienda
+ * (SSR/ISR y `next build`) no se limita.
  */
 @ApiTags('content')
 @ApiExtraModels(ImageDto, StorySceneDto)

@@ -11,8 +11,8 @@ import { CategoryDto } from './dto/catalog.response.dto'
  * Líneas del catálogo (`GET /categories`).
  *
  * Lectura pública (`@PublicRead()`, NV-18): límite de 300 pedidos por minuto por IP real del
- * cliente, que solo cuenta con `TRUST_PROXY`; el servidor de la tienda (SSR/ISR y `next build`)
- * no se limita.
+ * cliente, que solo cuenta con `TRUST_PROXY` o `TRUSTED_PROXY_SECRET`; el servidor de la tienda
+ * (SSR/ISR y `next build`) no se limita.
  */
 @ApiTags('catalog')
 @PublicRead()

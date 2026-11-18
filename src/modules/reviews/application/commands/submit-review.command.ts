@@ -25,8 +25,8 @@ export interface ReviewInput {
  * responde igual y no guarda nada. No avisa a la tienda: una pendiente no se ve.
  *
  * Cada reseña que se guarda cuenta en el cupo diario de la IP real del cliente (NV-21); sin IP
- * conocida (sin `TRUST_PROXY`, o pedida por el servidor de la tienda sin `X-Forwarded-For`) no se
- * cuenta: queda el límite por IP de la ruta.
+ * conocida (sin `TRUST_PROXY` ni `TRUSTED_PROXY_SECRET`, o pedida por el servidor de la tienda
+ * sin la IP del cliente) no se cuenta: queda el límite por IP de la ruta.
  */
 export class SubmitReviewCommand {
   /**

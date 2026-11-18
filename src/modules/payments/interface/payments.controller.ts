@@ -56,9 +56,10 @@ export const INSTALLMENTS_RATE_LIMIT = { ttl: 60_000, limit: 60 } as const
  *
  * Límite por IP real del cliente (`@ClientRateLimit()`, NV-16; antes, sin límite por el Ruling
  * B-52): {@link PAYMENT_RATE_LIMIT} por ruta y {@link INSTALLMENTS_RATE_LIMIT} en las cuotas. Solo
- * cuenta con `TRUST_PROXY` y un cliente conocido: sin él, todo llega con la IP del servidor de la
- * tienda y un límite frenaría a toda la tienda; los pedidos que origina el servidor de la tienda
- * tampoco se cuentan. El webhook de Mercado Pago es otro controlador y sigue sin límite.
+ * cuenta con `TRUST_PROXY` o `TRUSTED_PROXY_SECRET` y un cliente conocido: sin ellos, todo llega
+ * con la IP del servidor de la tienda y un límite frenaría a toda la tienda; los pedidos que
+ * origina el servidor de la tienda tampoco se cuentan. El webhook de Mercado Pago es otro
+ * controlador y sigue sin límite.
  */
 @ApiTags('payments')
 @ApiExtraModels(InstallmentOptionDto, PaymentChallengeDto)
