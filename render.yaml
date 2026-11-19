@@ -1,6 +1,6 @@
 # Galpón Mates en Render: el back, su base de datos y su Redis, definidos en un solo archivo
 # (un "Blueprint"). En el panel de Render: New > Blueprint > elegir este repo. El paso a paso está
-# en docs/DESPLIEGUE.md.
+# en docs/DESPLIEGUE.md. La tienda y el dashboard tienen su propio Blueprint, en el repo del front.
 #
 # PLANES. Así como está, crea todo en el plan GRATIS, que sirve para probar y nada más: el back se
 # duerme a los 15 minutos sin visitas (no vencen pedidos ni salen mails mientras duerme), la base
@@ -20,6 +20,12 @@ services:
     region: virginia
     healthCheckPath: /api/v1/health
     autoDeployTrigger: commit
+    # Dominio propio del back. Render lo agrega al servicio y espera el registro del DNS (CNAME
+    # `api` hacia galpon-mates-api.onrender.com, en Cloudflare "DNS only"): hasta que esté, sigue
+    # andando la dirección onrender.com. Ver "Todo en Render con el dominio propio" en
+    # docs/DESPLIEGUE.md.
+    domains:
+      - api.galponmates.com.ar
     envVars:
       - key: NODE_ENV
         value: production
@@ -39,9 +45,13 @@ services:
           name: galpon-mates-redis
           property: connectionString
 
-      # Direcciones públicas, sin barra final. Render las pide al crear el Blueprint.
-      # STORE_ORIGIN: la tienda en Vercel. ADMIN_ORIGIN: el dashboard en Vercel.
-      # PUBLIC_API_ORIGIN: este servicio (https://galpon-mates-api.onrender.com).
+      # Direcciones públicas, sin barra final. Render las pide al crear el Blueprint y después se
+      # cambian en Environment. Con el dominio propio (todo en Render):
+      #   STORE_ORIGIN=https://galponmates.com.ar (la tienda)
+      #   ADMIN_ORIGIN=https://admin.galponmates.com.ar (el dashboard; el único con CORS)
+      #   PUBLIC_API_ORIGIN=https://api.galponmates.com.ar (este servicio; arma la URL del webhook)
+      # Mientras la tienda y el dashboard sigan en Vercel: las direcciones vercel.app y
+      # https://galpon-mates-api.onrender.com.
       - key: STORE_ORIGIN
         sync: false
       - key: ADMIN_ORIGIN
@@ -49,12 +59,18 @@ services:
       - key: PUBLIC_API_ORIGIN
         sync: false
 
-      # Secretos compartidos con la tienda: los inventa Render. Después se copian a Vercel
-      # (REVALIDATE_SECRET y API_PROXY_SECRET).
+      # Secretos compartidos con la tienda: los inventa Render. Después se copian a la tienda
+      # (REVALIDATE_SECRET y API_PROXY_SECRET, en el Blueprint del front o en Vercel).
       - key: STORE_REVALIDATE_SECRET
         generateValue: true
       - key: TRUSTED_PROXY_SECRET
         generateValue: true
+      # La IP del visitante para los límites por cliente cuando el pedido no trae el secreto (el
+      # dashboard llamando directo desde el navegador): Cloudflare, que está delante de todos los
+      # servicios de Render, la escribe en True-Client-IP pisando lo que mande el navegador. Lo
+      # que reenvía la tienda con el secreto manda sobre esta cabecera.
+      - key: TRUSTED_CLIENT_IP_HEADER
+        value: true-client-ip
 
       # Mercado Pago.
       - key: MP_MODE
