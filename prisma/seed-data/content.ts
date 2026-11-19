@@ -69,7 +69,7 @@ export const SEED_CONTENT_BLOCKS: readonly SeedContentBlock[] = [
       },
       collection: { eyebrow: 'Colección', title: 'Categorías' },
       featured: { eyebrow: 'Destacados', title: 'Los más vendidos' },
-      reviews: { eyebrow: 'Reseñas', title: 'Lo que dice la ronda' },
+      reviews: { eyebrow: 'Reseñas', title: 'Reseñas' },
       manifesto: {
         eyebrow: 'Manifiesto',
         text: 'Un mate no se compra: se elige. Calabaza curada, alpaca cincelada a mano y cuero cosido punto por punto. Piezas hechas para durar muchas rondas.',
