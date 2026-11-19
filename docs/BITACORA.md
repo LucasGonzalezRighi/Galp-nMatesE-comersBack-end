@@ -2159,3 +2159,7 @@ que repetida sola pasó 10 de 10).
   de Mercado Pago (`MercadoPagoGateway`, `mercadopago.mapper.ts`, el webhook y la conciliación) a
   la API de Orders, con su prueba contra el sandbox, y crear o reconfigurar la aplicación con
   "API de Orders". El puerto `PaymentGatewayPort` aísla el cambio del resto del back.
+
+## "Cuero" pasa a "Color" en la opción del mate (2026-11-19)
+
+Pedido de Lucas: la opción que elige el cliente se llama "color" y no "cuero". El back cambia lo que la nombra (el detalle `Color negro` de las líneas de la cotización, del pedido y de los mails, los mensajes de validación `Elegí el color del mate.`, `Ese color no está disponible para este mate.`, `Elegí un color de la lista`, `Cada color tiene que aparecer una sola vez` y `Solo los mates llevan colores`, y la escena `leather` del seed, regenerado con `scripts/import-fixtures.mjs` desde las fixtures de `feat/colores`), igual que el contrato de la rama `feat/colores` del front; el material, los nombres internos (`leather`, `Leather`, columnas, claves del carrito), los `RangeError` internos y el texto congelado de los pedidos viejos siguen diciendo cuero, y la base publicada en Render no se vuelve a sembrar (Lucas cambia la escena desde Contenido).
