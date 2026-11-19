@@ -3,7 +3,8 @@ import { isIP } from 'node:net'
 
 /**
  * Cabecera con el secreto compartido (`TRUSTED_PROXY_SECRET`, el `API_PROXY_SECRET` de la tienda):
- * la mandan solo nuestros proyectos de Vercel y prueba que el pedido viene de ellos.
+ * la mandan solo nuestros proyectos (la tienda, y el dashboard por el reenvío de Vercel) y prueba
+ * que el pedido viene de ellos.
  */
 export const PROXY_SECRET_HEADER = 'x-galpon-proxy-secret'
 
@@ -27,12 +28,16 @@ export const CLIENT_IP_FROM_FORWARDED_FOR = 'x-forwarded-for'
 const FORWARDED_FOR_HEADER = 'x-forwarded-for'
 
 /**
- * De dónde viene un pedido cuando el back tiene `TRUSTED_PROXY_SECRET`:
+ * De dónde viene un pedido cuando el back tiene `TRUSTED_PROXY_SECRET` o `TRUSTED_CLIENT_IP_HEADER`:
  *
- * - `client`: lo reenvió uno de nuestros proyectos de Vercel por un visitante, con su IP;
+ * - `client`: lo reenvió uno de nuestros proyectos por un visitante, con su IP (o, con la cabecera
+ *   de borde, lo mandó el visitante directo);
  * - `trusted`: lo originó uno de nuestros proyectos (el servidor de la tienda armando sus
  *   páginas), sin visitante;
- * - `direct`: llegó sin el secreto (o con uno equivocado), salteando Vercel.
+ * - `direct`: llegó sin el secreto (o con uno equivocado) y sin una IP válida en la cabecera de
+ *   borde (`TRUSTED_CLIENT_IP_HEADER`).
+ *
+ * Con la cabecera de borde, un pedido sin el secreto que la trae es `client` con esa IP.
  */
 export type ProxyOrigin =
   | {
@@ -139,25 +144,57 @@ function takeHeader(headers: ProxyHeadersRequest['headers'], name: string): stri
   return value
 }
 
+/** Configuración de {@link trustedProxyMiddleware}, ya validada por `parseEnv`. */
+export interface TrustedProxyOptions {
+  /** `TRUSTED_PROXY_SECRET`; `undefined` (o vacío) si no está configurado. */
+  readonly secret: string | undefined
+  /**
+   * `TRUSTED_CLIENT_IP_HEADER`, en minúsculas: la cabecera donde el borde de la plataforma escribe
+   * la IP del visitante pisando lo que mande el navegador (en Render, `true-client-ip`, que pone
+   * Cloudflare); `undefined` si no está configurada.
+   */
+  readonly clientIpHeader?: string | undefined
+}
+
 /**
- * Middleware de Express que autentica la IP del cliente con el secreto compartido
- * (`TRUSTED_PROXY_SECRET`), para cuando no hay IPs fijas que listar en `TRUST_PROXY` (la tienda y
- * el dashboard en Vercel, el back en Render). En cada pedido:
+ * Origen de un pedido que no trae el secreto correcto (o de cualquiera, si el back no tiene
+ * secreto) cuando hay cabecera de borde: el visitante es la IP de esa cabecera, si es válida. Así
+ * el dashboard, que en Render le habla directo al back desde el navegador, se cuenta por la IP de
+ * quien lo usa y no por la del proxy de Render.
+ */
+function edgeOrigin(
+  origin: ProxyOrigin | undefined,
+  edgeIp: string | undefined,
+): ProxyOrigin | undefined {
+  if (origin !== undefined && origin.kind !== 'direct') return origin
+  const ip = edgeIp === undefined ? null : validIp(edgeIp)
+  return ip === null ? origin : { kind: 'client', ip }
+}
+
+/**
+ * Middleware de Express que resuelve la IP del cliente sin `TRUST_PROXY`, para cuando no hay IPs
+ * fijas que listar (la tienda y el dashboard en Render o en Vercel). En cada pedido:
  *
  * 1. Lee {@link PROXY_SECRET_HEADER}, {@link CLIENT_IP_HEADER} y {@link CLIENT_IP_FROM_HEADER} y
  *    las borra de `req.headers`: nunca llegan a los controladores ni a los logs.
- * 2. Sin secreto configurado no hace nada más (todo sigue según `TRUST_PROXY`).
- * 3. Con secreto, resuelve el origen ({@link proxyOriginResolver}) y lo guarda para
- *    {@link proxyOriginOf}. Si hay visitante, `req.ip` pasa a devolver su IP (una propiedad propia
- *    del pedido, que tapa el getter de Express), así el límite por IP cuenta por esa IP.
+ * 2. Con secreto (`TRUSTED_PROXY_SECRET`), resuelve el origen ({@link proxyOriginResolver}): lo que
+ *    reenvía la tienda con el secreto manda sobre cualquier otra cabecera.
+ * 3. Con cabecera de borde (`TRUSTED_CLIENT_IP_HEADER`), un pedido sin el secreto correcto (el
+ *    navegador del dashboard, o quien le pegue directo al back) es de la IP de esa cabecera, si
+ *    es válida; si falta o no es una IP, queda como estaba (`direct`, o sin decidir sin secreto).
+ * 4. Guarda el origen para {@link proxyOriginOf}. Si hay visitante, `req.ip` pasa a devolver su IP
+ *    (una propiedad propia del pedido, que tapa el getter de Express), así el límite por IP cuenta
+ *    por esa IP. Sin secreto ni cabecera de borde no hace nada más (todo sigue según `TRUST_PROXY`).
  *
- * @param secret - `TRUSTED_PROXY_SECRET`; `undefined` (o vacío) si no está configurado.
+ * @param options - El secreto y la cabecera de borde (cualquiera de los dos puede faltar).
  * @returns El middleware, para `app.use()` después de `applyTrustProxy`.
  */
 export function trustedProxyMiddleware(
-  secret: string | undefined,
+  options: TrustedProxyOptions,
 ): (req: ProxyHeadersRequest, res: unknown, next: () => void) => void {
+  const { secret, clientIpHeader } = options
   const resolve = secret === undefined || secret === '' ? null : proxyOriginResolver(secret)
+  const edgeHeader = clientIpHeader === undefined || clientIpHeader === '' ? null : clientIpHeader
   return (req, _res, next) => {
     const claims: ProxyClaims = {
       secret: takeHeader(req.headers, PROXY_SECRET_HEADER),
@@ -165,8 +202,10 @@ export function trustedProxyMiddleware(
       clientIpFrom: takeHeader(req.headers, CLIENT_IP_FROM_HEADER),
       forwardedFor: headerText(req.headers, FORWARDED_FOR_HEADER),
     }
-    if (resolve !== null) {
-      const origin = resolve(claims)
+    const resolved = resolve === null ? undefined : resolve(claims)
+    const origin =
+      edgeHeader === null ? resolved : edgeOrigin(resolved, headerText(req.headers, edgeHeader))
+    if (origin !== undefined) {
       ORIGINS.set(req, origin)
       if (origin.kind === 'client') {
         Object.defineProperty(req, 'ip', {
@@ -184,8 +223,9 @@ export function trustedProxyMiddleware(
  * Origen que {@link trustedProxyMiddleware} resolvió para un pedido.
  *
  * @param req - Pedido de Express.
- * @returns El origen, o `undefined` si el back no tiene `TRUSTED_PROXY_SECRET` (o el pedido no
- *   pasó por el middleware).
+ * @returns El origen, o `undefined` si el back no tiene `TRUSTED_PROXY_SECRET` ni
+ *   `TRUSTED_CLIENT_IP_HEADER` (o, sin secreto, el pedido no trajo una IP válida en esa cabecera,
+ *   o no pasó por el middleware).
  */
 export function proxyOriginOf(req: object): ProxyOrigin | undefined {
   return ORIGINS.get(req)

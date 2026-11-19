@@ -36,6 +36,17 @@ export interface Env {
    * por la IP con la que llega. Sin él (por defecto) nada cambia. Nunca se loguea.
    */
   TRUSTED_PROXY_SECRET?: string | undefined
+  /**
+   * Cabecera donde el borde de la plataforma escribe la IP del visitante, pisando la que mande el
+   * navegador (en minúsculas). En Render es `true-client-ip`: la pone Cloudflare, que está delante
+   * de todos sus servicios. Con ella, un pedido que no trae el secreto compartido (el dashboard
+   * llamando directo desde el navegador, o cualquiera que le pegue al back) cuenta por esa IP en los
+   * límites, y no por la del proxy de Render. Lo que reenvía la tienda con el secreto manda sobre
+   * esta cabecera. Sin ella (por defecto) nada cambia. Solo hay que ponerla si la plataforma
+   * garantiza que el visitante no la puede inventar; nunca `x-forwarded-for` ni `forwarded`, a las
+   * que Render les agrega al final lo que mande el visitante.
+   */
+  TRUSTED_CLIENT_IP_HEADER?: string | undefined
   /** Conexión a Postgres: `postgresql://usuario:clave@host:5432/base`. */
   DATABASE_URL: string
   /** Conexión a Redis: `redis://host:6379` (o `rediss://` con TLS). */
@@ -171,6 +182,30 @@ export function splitTrustProxy(value: string | undefined): string[] {
     .filter((item) => item !== '')
 }
 
+/**
+ * Cabeceras que no pueden ser `TRUSTED_CLIENT_IP_HEADER`: las tres propias del secreto compartido
+ * (las borra `trustedProxyMiddleware`) y las de la cadena de proxies, que traen una lista y a las
+ * que Render les agrega al final lo que mande el visitante en vez de pisarlo.
+ */
+const RESERVED_CLIENT_IP_HEADERS: readonly string[] = [
+  'x-galpon-proxy-secret',
+  'x-galpon-client-ip',
+  'x-galpon-client-ip-from',
+  'x-forwarded-for',
+  'forwarded',
+]
+
+/** Nombre de una cabecera HTTP (un `token` de la RFC 9110). */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/
+
+/** Esquema de `TRUSTED_CLIENT_IP_HEADER`: un nombre de cabecera permitido, en minúsculas. */
+const clientIpHeaderSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(HEADER_NAME)
+  .refine((name) => !RESERVED_CLIENT_IP_HEADERS.includes(name))
+
 /** Indica si `value` es un origen sin ruta, query ni barra final (`https://host[:puerto]`). */
 function isBareOrigin(value: string): boolean {
   return URL.canParse(value) && new URL(value).origin === value
@@ -193,6 +228,7 @@ export const envSchema = z
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     TRUST_PROXY: z.string().optional().transform(splitTrustProxy).pipe(z.array(trustedProxySchema)),
     TRUSTED_PROXY_SECRET: z.string().min(32).optional(),
+    TRUSTED_CLIENT_IP_HEADER: clientIpHeaderSchema.optional(),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     REDIS_URL: z.url({ protocol: /^rediss?$/ }),
     ADMIN_ORIGIN: z.url({ protocol: HTTP_PROTOCOL }).optional(),
@@ -275,6 +311,8 @@ export const ENV_HINTS: Record<keyof Env, string> = {
   TRUST_PROXY:
     'IPs o redes CIDR separadas por comas (por ejemplo 10.0.0.5,10.1.0.0/16), o loopback, linklocal o uniquelocal; vacía para apagarla',
   TRUSTED_PROXY_SECRET: 'el mismo API_PROXY_SECRET de la tienda, de 32 caracteres o más',
+  TRUSTED_CLIENT_IP_HEADER:
+    'el nombre de la cabecera con la IP del visitante (en Render, true-client-ip); ni x-forwarded-for, ni forwarded, ni las x-galpon-',
   DATABASE_URL: 'una URL de Postgres (postgresql://usuario:clave@host:5432/base)',
   REDIS_URL: 'una URL de Redis (redis://host:6379)',
   ADMIN_ORIGIN: 'una URL http o https (por ejemplo http://localhost:5173)',

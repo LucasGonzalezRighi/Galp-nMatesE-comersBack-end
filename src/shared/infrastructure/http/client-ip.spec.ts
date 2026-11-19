@@ -42,16 +42,18 @@ const SECRET = 'secreto-compartido-con-la-tienda-0123456'
 
 /**
  * Arma la app como `setupApp`: `trust proxy` y el middleware del secreto compartido, que sin
- * `secret` (`TRUSTED_PROXY_SECRET` sin configurar) solo borra sus cabeceras.
+ * `secret` (`TRUSTED_PROXY_SECRET` sin configurar) ni `clientIpHeader`
+ * (`TRUSTED_CLIENT_IP_HEADER`) solo borra sus cabeceras.
  */
 async function appTrusting(
   trustProxy: readonly string[],
   secret?: string,
+  clientIpHeader?: string,
 ): Promise<NestExpressApplication> {
   const moduleRef = await Test.createTestingModule({ controllers: [IpController] }).compile()
   const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false })
   applyTrustProxy(app, trustProxy)
-  app.use(trustedProxyMiddleware(secret))
+  app.use(trustedProxyMiddleware({ secret, clientIpHeader }))
   await app.init()
   return app
 }
@@ -218,5 +220,76 @@ describe('IP del cliente autenticada con el secreto compartido (TRUSTED_PROXY_SE
 
     expect(direct).toMatchObject({ ip: '203.0.113.5', known: '203.0.113.5' })
     expect(store).toMatchObject({ ip: '203.0.113.7', known: '203.0.113.7' })
+  })
+})
+
+describe('IP del cliente que escribe el borde de la plataforma (TRUSTED_CLIENT_IP_HEADER)', () => {
+  /** En Render, Cloudflare escribe la IP del visitante en `True-Client-IP`. */
+  const EDGE_HEADER = 'true-client-ip'
+
+  let edgeAndSecret: NestExpressApplication | undefined
+  let edgeOnly: NestExpressApplication | undefined
+
+  beforeAll(async () => {
+    edgeAndSecret = await appTrusting([], SECRET, EDGE_HEADER)
+    edgeOnly = await appTrusting([], undefined, EDGE_HEADER)
+  })
+
+  afterAll(async () => {
+    await edgeAndSecret?.close()
+    await edgeOnly?.close()
+  })
+
+  it('el dashboard llamando directo desde el navegador cuenta por la IP del borde', async () => {
+    const response = await seenBy(edgeAndSecret, {
+      'True-Client-IP': '198.51.100.23',
+      'X-Forwarded-For': '192.0.2.66, 198.51.100.23',
+    })
+
+    expect(response).toEqual({ ip: '198.51.100.23', known: '198.51.100.23', proxyHeaders: [] })
+  })
+
+  it('lo que reenvía la tienda con el secreto manda sobre la IP del borde (la de su servidor)', async () => {
+    const visitor = await seenBy(edgeAndSecret, {
+      [PROXY_SECRET_HEADER]: SECRET,
+      [CLIENT_IP_HEADER]: '203.0.113.7',
+      'True-Client-IP': '10.20.30.40',
+    })
+    const storeItself = await seenBy(edgeAndSecret, {
+      [PROXY_SECRET_HEADER]: SECRET,
+      'True-Client-IP': '10.20.30.40',
+    })
+
+    expect(visitor).toMatchObject({ ip: '203.0.113.7', known: '203.0.113.7' })
+    expect(storeItself.ip).toMatch(/127\.0\.0\.1$/)
+    expect(storeItself.known).toBeNull()
+  })
+
+  it('sin el secreto, x-galpon-client-ip no vale: manda la IP del borde', async () => {
+    const response = await seenBy(edgeAndSecret, {
+      [PROXY_SECRET_HEADER]: `${SECRET.slice(0, -1)}7`,
+      [CLIENT_IP_HEADER]: '203.0.113.7',
+      'True-Client-IP': '198.51.100.23',
+    })
+
+    expect(response).toEqual({ ip: '198.51.100.23', known: '198.51.100.23', proxyHeaders: [] })
+  })
+
+  it('sin la cabecera del borde, o con algo que no es una IP, queda la IP del socket', async () => {
+    const missing = await seenBy(edgeAndSecret, { 'X-Forwarded-For': '192.0.2.66' })
+    const garbage = await seenBy(edgeAndSecret, { 'True-Client-IP': '198.51.100.23, 192.0.2.66' })
+
+    expect(missing.ip).toMatch(/127\.0\.0\.1$/)
+    expect(missing.known).toBe(missing.ip)
+    expect(garbage.ip).toMatch(/127\.0\.0\.1$/)
+  })
+
+  it('sin secreto también toma la IP del borde, y sin ella todo sigue como sin configurar', async () => {
+    const edge = await seenBy(edgeOnly, { 'True-Client-IP': '2001:db8:1:2::9' })
+    const none = await seenBy(edgeOnly, { 'X-Forwarded-For': '203.0.113.5' })
+
+    expect(edge).toMatchObject({ ip: '2001:db8:1:2::9', known: '2001:db8:1:2::9' })
+    expect(none.ip).toMatch(/127\.0\.0\.1$/)
+    expect(none.known).toBeNull()
   })
 })

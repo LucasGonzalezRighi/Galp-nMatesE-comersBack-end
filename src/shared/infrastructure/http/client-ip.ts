@@ -45,11 +45,12 @@ export function applyTrustProxy(app: TrustProxyApp, trustProxy: readonly string[
 /**
  * IP real del cliente, cuando se puede saber. Hay dos mecanismos independientes:
  *
- * - Con `TRUSTED_PROXY_SECRET` (el pedido pasó por `trustedProxyMiddleware`), manda el origen que
- *   resolvió el secreto compartido: la IP del visitante que reenvió la tienda o el dashboard;
- *   `null` si el pedido lo originó uno de nuestros proyectos sin visitante (el servidor de la
- *   tienda armando sus páginas); y `req.ip` si llegó directo, sin el secreto: quien saltea Vercel
- *   se cuenta por la IP con la que llega y comparte un solo contador.
+ * - Con `TRUSTED_PROXY_SECRET` o `TRUSTED_CLIENT_IP_HEADER` (el pedido pasó por
+ *   `trustedProxyMiddleware`), manda el origen que resolvió: la IP del visitante que reenvió la
+ *   tienda o el dashboard, o la que escribió el borde de la plataforma (el dashboard llamando
+ *   directo desde el navegador); `null` si el pedido lo originó uno de nuestros proyectos sin
+ *   visitante (el servidor de la tienda armando sus páginas); y `req.ip` si llegó directo, sin el
+ *   secreto ni una IP de borde válida: esos se cuentan por la IP con la que llegan.
  * - Sin ese secreto, `TRUST_PROXY`: `req.ip` si `trust proxy` está configurado y esa IP no es la de
  *   un proxy de confianza. Devuelve `null` sin `TRUST_PROXY` (todo lo que pasa por la tienda llega
  *   con la IP de su servidor) y cuando el pedido lo originó un proxy de confianza: el servidor de

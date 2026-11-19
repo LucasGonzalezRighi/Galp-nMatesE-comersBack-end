@@ -193,6 +193,39 @@ describe('parseEnv', () => {
     })
   })
 
+  describe('TRUSTED_CLIENT_IP_HEADER (la IP que escribe el borde de la plataforma)', () => {
+    it('es opcional', () => {
+      expect(parseEnv(REQUIRED).TRUSTED_CLIENT_IP_HEADER).toBeUndefined()
+    })
+
+    it('devuelve el nombre recortado y en minúsculas', () => {
+      expect(
+        parseEnv({ ...REQUIRED, TRUSTED_CLIENT_IP_HEADER: ' True-Client-IP ' })
+          .TRUSTED_CLIENT_IP_HEADER,
+      ).toBe('true-client-ip')
+      expect(
+        parseEnv({ ...REQUIRED, TRUSTED_CLIENT_IP_HEADER: 'cf-connecting-ip' })
+          .TRUSTED_CLIENT_IP_HEADER,
+      ).toBe('cf-connecting-ip')
+    })
+
+    it.each([
+      'x-forwarded-for',
+      'X-Forwarded-For',
+      'forwarded',
+      'x-galpon-proxy-secret',
+      'x-galpon-client-ip',
+      'x-galpon-client-ip-from',
+      'true client ip',
+      'true-client-ip:',
+      '',
+    ])('rechaza %j con la pista', (value) => {
+      expect(errorOf({ ...REQUIRED, TRUSTED_CLIENT_IP_HEADER: value })).toContain(
+        '- TRUSTED_CLIENT_IP_HEADER: tiene un valor inválido; se espera el nombre de la cabecera con la IP del visitante (en Render, true-client-ip)',
+      )
+    })
+  })
+
   it('con un PORT que no es número lanza un error que nombra PORT', () => {
     expect(errorOf({ ...REQUIRED, PORT: 'abc' })).toContain('PORT')
   })

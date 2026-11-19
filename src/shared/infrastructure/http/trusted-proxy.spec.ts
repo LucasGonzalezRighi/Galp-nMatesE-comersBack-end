@@ -154,7 +154,7 @@ describe('trustedProxyMiddleware', () => {
   ): { req: FakeRequest; next: ReturnType<typeof vi.fn> } {
     const req = new FakeRequest({ ...headers })
     const next = vi.fn()
-    trustedProxyMiddleware(secret)(req, undefined, next)
+    trustedProxyMiddleware({ secret })(req, undefined, next)
     return { req, next }
   }
 
@@ -237,5 +237,51 @@ describe('trustedProxyMiddleware', () => {
 
     expect(proxyOriginOf(req)).toEqual({ kind: 'direct' })
     expect(req.headers).toEqual({})
+  })
+})
+
+describe('trustedProxyMiddleware con TRUSTED_CLIENT_IP_HEADER', () => {
+  /** Pasa un pedido por el middleware con la cabecera de borde `true-client-ip`. */
+  function handledAtEdge(
+    secret: string | undefined,
+    headers: Record<string, string | string[] | undefined>,
+  ): FakeRequest {
+    const req = new FakeRequest({ ...headers })
+    trustedProxyMiddleware({ secret, clientIpHeader: 'true-client-ip' })(req, undefined, vi.fn())
+    return req
+  }
+
+  it('un pedido sin el secreto es del visitante de la cabecera de borde', () => {
+    for (const secret of [SECRET, undefined]) {
+      const req = handledAtEdge(secret, { 'true-client-ip': ' 198.51.100.23 ' })
+
+      expect(proxyOriginOf(req)).toEqual({ kind: 'client', ip: '198.51.100.23' })
+      expect(req.ip).toBe('198.51.100.23')
+    }
+  })
+
+  it('con el secreto correcto manda lo de la tienda: con cliente o sin él', () => {
+    const visitor = handledAtEdge(SECRET, {
+      [PROXY_SECRET_HEADER]: SECRET,
+      [CLIENT_IP_HEADER]: '203.0.113.7',
+      'true-client-ip': '10.20.30.40',
+    })
+    const store = handledAtEdge(SECRET, {
+      [PROXY_SECRET_HEADER]: SECRET,
+      'true-client-ip': '10.20.30.40',
+    })
+
+    expect(proxyOriginOf(visitor)).toEqual({ kind: 'client', ip: '203.0.113.7' })
+    expect(proxyOriginOf(store)).toEqual({ kind: 'trusted' })
+    expect(store.ip).toBe(SOCKET_IP)
+  })
+
+  it('sin una IP válida en la cabecera de borde queda como sin ella', () => {
+    for (const value of [undefined, '', 'no-es-una-ip', '198.51.100.23, 192.0.2.66', ['1.2.3.4']]) {
+      expect(proxyOriginOf(handledAtEdge(SECRET, { 'true-client-ip': value }))).toEqual({
+        kind: 'direct',
+      })
+      expect(proxyOriginOf(handledAtEdge(undefined, { 'true-client-ip': value }))).toBeUndefined()
+    }
   })
 })

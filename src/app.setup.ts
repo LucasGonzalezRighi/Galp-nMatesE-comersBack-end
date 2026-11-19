@@ -77,7 +77,8 @@ export function setupBodyParsers(
  * Aplica la configuración que comparten `main.ts` y los E2E (`test/support/app.ts`), para no
  * duplicarla: logger pino para los logs de Nest, prefijo `/api/v1`, `trust proxy` según
  * `TRUST_PROXY` (NV-25: los límites por IP cuentan la IP real del cliente), la IP del cliente
- * autenticada con `TRUSTED_PROXY_SECRET` (`trustedProxyMiddleware`: va antes que todo lo demás,
+ * autenticada con `TRUSTED_PROXY_SECRET` o tomada de `TRUSTED_CLIENT_IP_HEADER`
+ * (`trustedProxyMiddleware`: va antes que todo lo demás,
  * así sus cabeceras nunca llegan a los controladores ni a los logs), body parsers acotados
  * ({@link setupBodyParsers}), cookies parseadas en `req.cookies` (`cookie-parser`, para los guards
  * de sesión), cabeceras de seguridad con `helmet`, CORS solo para el admin (`buildCorsOptions`),
@@ -92,7 +93,12 @@ export function setupApp(app: NestExpressApplication): void {
   app.useLogger(app.get(Logger))
   app.setGlobalPrefix(API_PREFIX)
   applyTrustProxy(app, env.TRUST_PROXY)
-  app.use(trustedProxyMiddleware(env.TRUSTED_PROXY_SECRET))
+  app.use(
+    trustedProxyMiddleware({
+      secret: env.TRUSTED_PROXY_SECRET,
+      clientIpHeader: env.TRUSTED_CLIENT_IP_HEADER,
+    }),
+  )
   setupBodyParsers(app, env)
   app.use(cookieParser())
   app.use(helmet())

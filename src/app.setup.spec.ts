@@ -93,6 +93,7 @@ describe('setupApp (CORS, sin base ni Redis)', () => {
     vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:1')
     vi.stubEnv('ADMIN_ORIGIN', ADMIN_ORIGIN)
     vi.stubEnv('TRUSTED_PROXY_SECRET', PROXY_SECRET)
+    vi.stubEnv('TRUSTED_CLIENT_IP_HEADER', 'true-client-ip')
     const moduleRef = await Test.createTestingModule({
       imports: [ConfigModule, LoggerModule],
       controllers: [PingController],
@@ -154,6 +155,22 @@ describe('setupApp (CORS, sin base ni Redis)', () => {
     expect(fromStore.body).toEqual({ ip: '203.0.113.7', proxyHeaders: [] })
     expect((direct.body as { ip: string }).ip).toMatch(/127\.0\.0\.1$/)
     expect((direct.body as { proxyHeaders: string[] }).proxyHeaders).toEqual([])
+  })
+
+  it('con TRUSTED_CLIENT_IP_HEADER, el dashboard llamando directo cuenta por la IP del borde', async () => {
+    const fromAdmin = await request(server())
+      .get('/api/v1/ping/ip')
+      .set('Origin', ADMIN_ORIGIN)
+      .set('True-Client-IP', '198.51.100.23')
+    const fromStore = await request(server())
+      .get('/api/v1/ping/ip')
+      .set(PROXY_SECRET_HEADER, PROXY_SECRET)
+      .set(CLIENT_IP_HEADER, '203.0.113.7')
+      .set('True-Client-IP', '10.20.30.40')
+
+    expect(fromAdmin.body).toEqual({ ip: '198.51.100.23', proxyHeaders: [] })
+    expect(fromAdmin.headers['access-control-allow-origin']).toBe(ADMIN_ORIGIN)
+    expect(fromStore.body).toEqual({ ip: '203.0.113.7', proxyHeaders: [] })
   })
 
   it('no agrega cabeceras CORS para otro origen (la tienda en 3000)', async () => {
