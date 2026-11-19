@@ -2163,3 +2163,52 @@ que repetida sola pasó 10 de 10).
 ## "Cuero" pasa a "Color" en la opción del mate (2026-11-19)
 
 Pedido de Lucas: la opción que elige el cliente se llama "color" y no "cuero". El back cambia lo que la nombra (el detalle `Color negro` de las líneas de la cotización, del pedido y de los mails, los mensajes de validación `Elegí el color del mate.`, `Ese color no está disponible para este mate.`, `Elegí un color de la lista`, `Cada color tiene que aparecer una sola vez` y `Solo los mates llevan colores`, y la escena `leather` del seed, regenerado con `scripts/import-fixtures.mjs` desde las fixtures de `feat/colores`), igual que el contrato de la rama `feat/colores` del front; el material, los nombres internos (`leather`, `Leather`, columnas, claves del carrito), los `RangeError` internos y el texto congelado de los pedidos viejos siguen diciendo cuero, y la base publicada en Render no se vuelve a sembrar (Lucas cambia la escena desde Contenido).
+
+## Todo en Render con el dominio propio (2026-11-19)
+
+Lucas decidió mudar la tienda y el dashboard de Vercel a Render (cuenta Hobby, sin el plan Pro;
+las instancias se pagan al abrir al público) con el dominio `galponmates.com.ar`, delegado de NIC
+Argentina a Cloudflare (plan gratis): tienda en la raíz (`www` redirige), dashboard en `admin.` y
+back en `api.`. Rama `feat/render-todo` en los dos repos; el front suma su propio `render.yaml`.
+
+- **El dashboard llama directo al back** desde `admin.galponmates.com.ar`, como en el camino del
+  servidor propio: CORS con credenciales para `ADMIN_ORIGIN` y la cookie `__Host-` con
+  `SameSite=Lax` ya andaban (mismo sitio), no cambian.
+- **IP del borde (`TRUSTED_CLIENT_IP_HEADER`).** Esos pedidos llegan sin el secreto compartido, y
+  en Render ni el socket (su proxy interno) ni `X-Forwarded-For` (Render le agrega al final lo que
+  manda el cliente) dan la IP real. Con la variable, `trustedProxyMiddleware` toma la IP de esa
+  cabecera para todo pedido sin el secreto correcto; lo que manda la tienda con el secreto sigue
+  ganando (con o sin `x-galpon-client-ip`). Funciona con o sin `TRUSTED_PROXY_SECRET`. `parseEnv`
+  la pasa a minúsculas y rechaza `x-forwarded-for`, `forwarded` y las tres `x-galpon-`.
+  `render.yaml` la pone en `true-client-ip`.
+- **Por qué `True-Client-IP`.** La documentación de Render no dice nada de las cabeceras de IP.
+  Según su soporte, citado en
+  [rohitpaulk.com/articles/render-rails-remote-ip](https://rohitpaulk.com/articles/render-rails-remote-ip),
+  Cloudflare (que Render pone delante de todos sus servicios) escribe ahí la IP del visitante y el
+  cliente no la puede inventar; el mismo artículo muestra `X-Forwarded-For` falsificable. Falta
+  comprobarlo publicado: el último punto del paso 13.7 de la guía.
+- **`render.yaml`**: el dominio `api.galponmates.com.ar` declarado en el servicio (Render espera el
+  `CNAME` y mientras tanto sigue la dirección `onrender.com`), `TRUSTED_CLIENT_IP_HEADER` y los
+  valores nuevos de `STORE_ORIGIN`, `ADMIN_ORIGIN` y `PUBLIC_API_ORIGIN` en los comentarios (se
+  cambian en el panel). Sigue válido contra el esquema oficial de Render.
+- **Guía:** [`DESPLIEGUE.md`](DESPLIEGUE.md), sección 13, "Todo en Render con el dominio propio":
+  el Blueprint del front, los registros de Cloudflare (cuatro `CNAME` en "DNS only"), la
+  verificación de los dominios, las direcciones nuevas del back y del webhook de Mercado Pago,
+  Brevo con el dominio y `hola@galponmates.com.ar`, la lista para comprobar, cuándo apagar Vercel y
+  qué pasar a pago (unos 30 USD por mes).
+- **Lo averiguado en la documentación de Render** (2026-11-19): un Blueprint puede estar en otro
+  repo y referir con `fromService` a un servicio de otro Blueprint si existe en la cuenta
+  ([blueprint-spec](https://render.com/docs/blueprint-spec)); `domains:` va en servicios web y
+  sitios estáticos, y la raíz suma sola el `www` que redirige; con Cloudflare, `CNAME` en "DNS
+  only" hasta que salga el certificado y sin `AAAA`
+  ([configure-cloudflare-dns](https://render.com/docs/configure-cloudflare-dns)); `PORT` vale 10000
+  y hay que escuchar en `0.0.0.0` ([web-services](https://render.com/docs/web-services)); la
+  versión de Node sale de `NODE_VERSION`, `.node-version`, `.nvmrc` o `engines`, en ese orden
+  ([node-version](https://render.com/docs/node-version)); la cuenta Hobby trae 2 dominios y cada
+  uno más cuesta 0,25 USD por mes ([custom-domains](https://render.com/docs/custom-domains)); las
+  750 horas gratis por mes son de toda la cuenta ([free](https://render.com/docs/free)). Render
+  cambió los nombres de los planes (`0.5c-512mb`, `256mb`, `0.1c-256mb`); el esquema oficial sigue
+  aceptando `starter` y `basic-256mb`.
+- Verificado: `typecheck`, `lint`, `format:check` y las pruebas unitarias (135 archivos, 1682
+  pruebas), con las nuevas de `trusted-proxy`, `client-ip`, `env` y `app.setup`. Sin E2E (no
+  cambia nada que no cubran las unitarias y la de `setupApp`).

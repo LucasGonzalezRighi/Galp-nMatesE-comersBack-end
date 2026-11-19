@@ -16,7 +16,8 @@ La tienda y el admin del front la consumen en `http://localhost:3001/api/v1`.
   [ADR 0008 · datos personales](docs/adr/0008-datos-personales.md).
 - **Lanzamiento legal** (lo que tienen que hacer Lucas, el dueño, el abogado y el contador antes de
   abrir la tienda): [`docs/LANZAMIENTO-LEGAL.md`](docs/LANZAMIENTO-LEGAL.md).
-- **Despliegue** (publicar la tienda y el dashboard en Vercel y el back en Render, paso a paso):
+- **Despliegue** (publicar el back en Render y la tienda y el dashboard en Vercel o, con el dominio
+  propio, también en Render; paso a paso):
   [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md), con [`render.yaml`](render.yaml). El camino
   alternativo, un servidor propio con Docker, está en
   [`docs/DESPLIEGUE-SERVIDOR-PROPIO.md`](docs/DESPLIEGUE-SERVIDOR-PROPIO.md) y [`deploy/`](deploy).
@@ -70,9 +71,9 @@ día; los pedidos que origina un proxy de confianza (el servidor de la tienda, s
   la red interna del compose (`172.28.0.0/24`), donde solo están Caddy y la tienda delante del back.
 
 **Secreto compartido (`TRUSTED_PROXY_SECRET`, apagado por defecto):** la alternativa a `TRUST_PROXY`
-cuando no hay IPs fijas que listar. Es el caso del camino elegido: la tienda y el dashboard en
-Vercel (sus IPs de salida cambian) y el back en Render (que no documenta su cadena de
-`X-Forwarded-For`). Con el secreto (32 caracteres o más, el mismo `API_PROXY_SECRET` de la tienda y
+cuando no hay IPs fijas que listar. Es el caso del camino elegido: la tienda en Render (o en
+Vercel, mientras dure la mudanza; sus IPs de salida cambian) y el back en Render (que no documenta
+su cadena de `X-Forwarded-For`). Con el secreto (32 caracteres o más, el mismo `API_PROXY_SECRET` de la tienda y
 del dashboard), `trustedProxyMiddleware` (`src/shared/infrastructure/http/trusted-proxy.ts`) decide
 en cada pedido quién es el cliente:
 
@@ -92,6 +93,30 @@ en cada pedido quién es el cliente:
   cupo de reseñas). Están pensados como alternativas: no hace falta definir los dos.
 - Probado de punta a punta en `test/e2e/trusted-proxy.e2e-spec.ts` y, con la tienda compilada y la
   imagen de producción, en la bitácora (B8).
+
+**IP del borde (`TRUSTED_CLIENT_IP_HEADER`, apagada por defecto):** con todo en Render y el dominio
+propio, el dashboard (`admin.galponmates.com.ar`) le habla directo al back
+(`api.galponmates.com.ar`) desde el navegador, sin el secreto. Render deja el socket en su proxy
+interno y a `X-Forwarded-For` le agrega al final lo que mande el visitante, así que ninguna de las
+dos sirve. Cloudflare, que está delante de todos los servicios de Render, escribe la IP del
+visitante en `True-Client-IP` pisando la que mande el navegador (no lo dice la documentación de
+Render: lo dice su soporte, citado en
+[rohitpaulk.com/articles/render-rails-remote-ip](https://rohitpaulk.com/articles/render-rails-remote-ip)).
+Con `TRUSTED_CLIENT_IP_HEADER=true-client-ip` (lo pone `render.yaml`), `trustedProxyMiddleware`
+resuelve:
+
+| El pedido trae                                             | Cliente para los límites                    |
+| ---------------------------------------------------------- | ------------------------------------------- |
+| El secreto (la tienda), con o sin `x-galpon-client-ip`     | Lo de la tabla de arriba: el secreto manda. |
+| Sin el secreto y una IP válida en la cabecera de borde     | Esa IP (`req.ip` pasa a ser esa).           |
+| Sin el secreto y sin una IP válida en la cabecera de borde | La IP con la que llega, como antes.         |
+
+- Funciona con o sin `TRUSTED_PROXY_SECRET`; sin el secreto, lo que reenvía la tienda contaría por
+  la IP de su servidor, así que en Render van los dos.
+- No acepta `x-forwarded-for`, `forwarded` ni las tres `x-galpon-`. Solo hay que ponerla detrás de
+  una plataforma que pise esa cabecera: en un servidor propio con Caddy alcanza con `TRUST_PROXY`.
+- Con el proxy de Cloudflare propio (nube naranja) delante de Render no está probado qué IP llega en
+  esa cabecera: por eso la guía pide los registros en "DNS only".
 
 **Cuerpos de los pedidos:** JSON de hasta 100 kB y sin comprimir (`Content-Encoding: gzip` da 415).
 Los formularios (`application/x-www-form-urlencoded`) solo se aceptan con el simulador de pagos
@@ -147,16 +172,19 @@ de nuevo).
 Los E2E no usan esos contenedores: cada archivo levanta los suyos con Testcontainers (puertos
 aleatorios) y los cierra al terminar. Solo necesitan Docker Desktop abierto.
 
-### Producción: Vercel y Render (el camino elegido)
+### Producción: Render (el camino elegido)
 
-El back va en **Render** y la tienda y el dashboard en **Vercel**. La guía paso a paso es
-[`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md).
+El back va en **Render**. La tienda y el dashboard están hoy en **Vercel** y se mudan a Render con
+el dominio propio (`galponmates.com.ar`, `admin.` y `api.`), con el Blueprint del repo del front.
+La guía paso a paso es [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md) (la mudanza, en "Todo en Render
+con el dominio propio").
 
 - [`render.yaml`](render.yaml): el Blueprint de Render. Crea el servicio web `galpon-mates-api`
   (desde el `Dockerfile`), Postgres 17 (`galpon-mates-db`) y Render Key Value
   (`galpon-mates-redis`, sin desalojo y sin acceso desde internet), los tres en la región Virginia.
   Arranca en los planes gratis (para probar); las tres líneas marcadas con `PLAN` pasan a los
-  pagos. Es válido contra el esquema oficial de Render.
+  pagos. Declara el dominio `api.galponmates.com.ar`. Es válido contra el esquema oficial de
+  Render.
 - [`Dockerfile`](Dockerfile): la etapa `runtime` es la imagen que corre en Render. Lleva `dist`,
   las dependencias de producción y el seed y `admin:password` compilados (`dist-scripts`, con
   `npm run build:scripts`); corre como el usuario `node`. Al arrancar hace
@@ -165,8 +193,9 @@ El back va en **Render** y la tienda y el dashboard en **Vercel**. La guía paso
   hace falta consola ni comando previo al despliegue, que el plan gratis de Render no tiene.
 - El servicio escucha en `PORT` (10000 en Render) y en `0.0.0.0`; la ruta de salud es
   `/api/v1/health`.
-- La IP real de cada cliente llega con `TRUSTED_PROXY_SECRET` (ver "Proxies de confianza").
-  `TRUST_PROXY` queda sin definir.
+- La IP real de cada cliente llega con `TRUSTED_PROXY_SECRET` (lo que reenvía la tienda) y
+  `TRUSTED_CLIENT_IP_HEADER=true-client-ip` (el dashboard llamando directo; ver "Proxies de
+  confianza"). `TRUST_PROXY` queda sin definir.
 - En la consola de Render (plan pago): `npm run admin:password:prod` y, solo sobre una base vacía,
   `npm run db:seed:prod`.
 - El pool de Postgres tiene `connectionTimeoutMillis` de 10 s y `statement_timeout` de 30 s
