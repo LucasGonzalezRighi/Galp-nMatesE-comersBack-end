@@ -92,7 +92,7 @@ function withdrawalBlocks(store: StoreInfo, since: string): MailBlock[] {
   ]
 }
 
-/** Renglón de una línea del pedido: `2 × Mate (Cuero negro): $40.000`. */
+/** Renglón de una línea del pedido: `2 × Mate (Color negro): $40.000`. */
 function lineText(line: OrderMailLine): string {
   if (!Number.isInteger(line.quantity) || line.quantity < 1) {
     throw new RangeError(`Las unidades de una línea del mail tienen que ser un entero positivo`)

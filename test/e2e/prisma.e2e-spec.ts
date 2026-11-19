@@ -400,7 +400,7 @@ describe('prisma', () => {
         productId: null,
         productSlug: null,
         name: 'Kit',
-        detail: 'Mate pedido + Bombilla + Yerba · Cuero negro',
+        detail: 'Mate pedido + Bombilla + Yerba · Color negro',
         quantity: 2,
         unitPriceArs: 75997,
         kitSavingsArs: 15200,

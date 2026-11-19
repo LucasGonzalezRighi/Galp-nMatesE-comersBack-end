@@ -28,7 +28,7 @@ describe('order-received', () => {
       number: 'GLP-10001',
       firstName: 'Ana',
       lines: [
-        { name: 'Mate Imperial', detail: 'Cuero negro', quantity: 1, totalArs: 46_499 },
+        { name: 'Mate Imperial', detail: 'Color negro', quantity: 1, totalArs: 46_499 },
         { name: 'Yerba <Suave>', detail: '', quantity: 2, totalArs: 9_000 },
       ],
       shippingCostArs: 6_500,
@@ -45,7 +45,7 @@ describe('order-received', () => {
   it('tiene el resumen, el total, el pago pendiente con la reserva y el arrepentimiento', () => {
     for (const body of bodies(mail)) {
       expect(body).toContain('GLP-10001')
-      expect(body).toContain('Mate Imperial (Cuero negro)')
+      expect(body).toContain('Mate Imperial (Color negro)')
       expect(body).toContain('$46.499')
       expect(body).toContain('$6.500')
       expect(body).toContain('$61.999')

@@ -164,7 +164,7 @@ describe('CreateOrderCommand', () => {
         {
           type: 'product',
           name: 'Mate Imperial Premium',
-          detail: 'Cuero negro',
+          detail: 'Color negro',
           quantity: 1,
           unitPriceArs: 39999,
           kitSavingsArs: 0,
@@ -398,7 +398,7 @@ describe('CreateOrderCommand', () => {
       {
         type: 'combo',
         name: 'Dúo Imperial',
-        detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
+        detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Color marrón',
         quantity: 1,
         unitPriceArs: 68998,
         kitSavingsArs: 6999,

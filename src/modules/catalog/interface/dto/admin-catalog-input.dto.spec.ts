@@ -45,6 +45,18 @@ describe('AdminProductInputDto', () => {
     expect(fields.tabsOverride).toBeNull()
   })
 
+  it('un color que no existe o repetido da los mensajes del contrato', async () => {
+    expect(await product({ ...BODY, leathers: ['Rosa'] })).toEqual([
+      expect.objectContaining({ field: 'leathers.0', message: 'Elegí un color de la lista' }),
+    ])
+    expect(await product({ ...BODY, leathers: ['Negro', 'Negro'] })).toEqual([
+      expect.objectContaining({
+        field: 'leathers',
+        message: 'Cada color tiene que aparecer una sola vez',
+      }),
+    ])
+  })
+
   it('una pestaña que falta usa la del grupo (como el mock) y la otra queda recortada', async () => {
     const dto = (await product({
       ...BODY,

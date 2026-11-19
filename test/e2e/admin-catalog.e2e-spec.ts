@@ -502,7 +502,7 @@ describe('productos y líneas del dashboard (HTTP + Postgres + Redis + tienda fa
       expect(firstError(bombilla)).toEqual({
         field: 'leathers',
         code: 'leathers_not_allowed',
-        message: 'Solo los mates llevan cuero',
+        message: 'Solo los mates llevan colores',
       })
       const image = await http('post', '/admin/products', {
         body: await newProduct({

@@ -54,9 +54,9 @@ export const CART_MESSAGES = {
   /** Id de combo vacío, largo o que no es texto. */
   comboId: 'Elegí un combo válido.',
   /** Cuero que no es uno de los del contrato. */
-  leather: 'Elegí el cuero del mate.',
+  leather: 'Elegí el color del mate.',
   /** Opciones que no son un objeto. */
-  options: 'Elegí el cuero del mate.',
+  options: 'Elegí el color del mate.',
   /** Precio visto que no es un monto entero válido. */
   expectedPrice: 'El precio visto tiene que ser un monto entero en pesos.',
 } as const

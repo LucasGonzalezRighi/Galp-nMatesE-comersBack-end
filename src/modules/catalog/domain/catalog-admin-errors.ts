@@ -10,7 +10,7 @@ export const CATALOG_ADMIN_MESSAGES = {
   /** 422 `unknown_category` en `categoryId`. */
   unknownCategory: 'Esa línea no existe',
   /** 422 `leathers_not_allowed` en `leathers` (`MESSAGES.leathersOnlyMates` del front). */
-  leathersOnlyMates: 'Solo los mates llevan cuero',
+  leathersOnlyMates: 'Solo los mates llevan colores',
   /** 422 `category_has_products` en `group` (propio del back, Ruling B-81). */
   groupHasProducts: 'La línea tiene productos: mové los productos antes de cambiarle el grupo.',
   /** 422 `invalid_value` en `ids` del orden de las líneas. */

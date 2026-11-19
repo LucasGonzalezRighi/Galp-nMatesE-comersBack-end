@@ -215,7 +215,7 @@ describe('CartController (HTTP con casos de uso simulados)', () => {
     [
       'cuero que no existe en un kit',
       { items: [{ ...KIT_LINE, leather: 'Verde' }] },
-      { field: 'items.0.leather', code: 'invalid_value', message: 'Elegí el cuero del mate.' },
+      { field: 'items.0.leather', code: 'invalid_value', message: 'Elegí el color del mate.' },
     ],
     [
       'campo de más en un producto',

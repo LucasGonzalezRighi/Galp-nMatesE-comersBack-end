@@ -79,10 +79,10 @@ export const PRODUCT_INPUT_MESSAGES = {
   invalidStatus: 'Elegí un estado',
   /** Más de 8 fotos. */
   maxImages: `Máximo ${String(MAX_IMAGES)} fotos`,
-  /** Cuero que no es de la lista. */
-  invalidLeather: 'Elegí un cuero de la lista',
-  /** Cuero repetido. */
-  duplicateLeathers: 'Cada cuero tiene que aparecer una sola vez',
+  /** Color (cuero) que no es de la lista. */
+  invalidLeather: 'Elegí un color de la lista',
+  /** Color (cuero) repetido. */
+  duplicateLeathers: 'Cada color tiene que aparecer una sola vez',
   /** `expectedUpdatedAt` que no es una fecha ISO con zona (el del mock). */
   invalidExpectedUpdatedAt: 'La fecha de la última modificación no es válida.',
 } as const
@@ -131,7 +131,7 @@ function canonicalLeathers({ obj, key }: TransformFnParams): unknown {
   return LEATHERS.filter((leather) => items.includes(leather))
 }
 
-/** Cada cuero es uno de `LEATHERS`: si no, "Elegí un cuero de la lista" en su índice. */
+/** Cada cuero es uno de `LEATHERS`: si no, "Elegí un color de la lista" en su índice. */
 const LEATHER_ITEM: ItemRule = {
   name: 'leatherItem',
   code: 'invalid_value',

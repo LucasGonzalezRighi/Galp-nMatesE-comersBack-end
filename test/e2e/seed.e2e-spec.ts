@@ -248,6 +248,15 @@ describe('seed', () => {
     ])
   })
 
+  it('la escena leather del inicio nombra la opción como color, no como cuero', async () => {
+    const home = await db().contentBlock.findUniqueOrThrow({ where: { key: 'home' } })
+    const { scenes } = home.data as { scenes: { key: string }[] }
+    expect(scenes.find((s) => s.key === 'leather')).toMatchObject({
+      titleLines: ['Elegí', 'el color.'],
+      text: 'Negro, marrón, crudo o borravino. Elegís el color en la página de cada mate.',
+    })
+  })
+
   it('guarda los combos del diseño por posición, con sus piezas en el orden del combo', async () => {
     const combos = await db().combo.findMany({
       orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],

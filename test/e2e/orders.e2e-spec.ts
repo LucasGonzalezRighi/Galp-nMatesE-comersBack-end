@@ -144,7 +144,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
             key: `product:${mate.id}:Negro`,
             type: 'product',
             name: 'Mate Imperial Premium',
-            detail: 'Cuero negro',
+            detail: 'Color negro',
             unitPriceArs: 39999,
             netUnitPriceArs: 33057,
             kitSavingsArs: 0,
@@ -156,7 +156,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
             key: `product:${galleta.id}:Negro`,
             type: 'product',
             name: galleta.name,
-            detail: 'Cuero negro',
+            detail: 'Color negro',
             unitPriceArs: 0,
             netUnitPriceArs: 0,
             kitSavingsArs: 0,
@@ -273,7 +273,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           type: 'product',
           name: 'Mate Imperial Premium',
-          detail: 'Cuero negro',
+          detail: 'Color negro',
           quantity: 1,
           unitPriceArs: 39999,
           kitSavingsArs: 0,
@@ -782,7 +782,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
       })
       expect(missing.status).toBe(422)
       expect((missing.body as { errors: unknown }).errors).toEqual([
-        { field: 'items.0.options', code: 'required', message: 'Elegí el cuero del mate.' },
+        { field: 'items.0.options', code: 'required', message: 'Elegí el color del mate.' },
       ])
 
       const brown = await send(newJar(), 'post', '/cart/quote', {
@@ -793,7 +793,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           field: 'items.0.options.leather',
           code: 'leather_not_offered',
-          message: 'Ese cuero no está disponible para este mate.',
+          message: 'Ese color no está disponible para este mate.',
         },
       ])
 
@@ -802,7 +802,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         { type: 'product', productId: bombilla.id, quantity: 1, options: { leather: 'Negro' } },
       ])
       expect(result.lines.map(({ key, detail }) => [key, detail])).toEqual([
-        [`product:${coquito.id}:Crudo`, 'Cuero crudo'],
+        [`product:${coquito.id}:Crudo`, 'Color crudo'],
         [`product:${bombilla.id}:Negro`, ''],
       ])
     })
@@ -881,7 +881,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
             key: `combo:${duoId}:Marrón`,
             type: 'combo',
             name: 'Dúo Imperial',
-            detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
+            detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Color marrón',
             unitPriceArs: 68998,
             netUnitPriceArs: 51239,
             kitSavingsArs: 13998,
@@ -920,7 +920,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           field: 'items.0.options',
           code: 'required',
-          message: 'Elegí el cuero del mate.',
+          message: 'Elegí el color del mate.',
         },
       ])
     })
@@ -949,7 +949,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         {
           type: 'combo',
           name: 'Dúo Imperial',
-          detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
+          detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Color marrón',
           quantity: 1,
           unitPriceArs: 68998,
           kitSavingsArs: 6999,
@@ -1094,7 +1094,7 @@ describe('pedidos por HTTP (Postgres + Redis + BullMQ)', () => {
         })
 
         expect(result.lines[0]?.detail).toBe(
-          'Yerba Canarias 1 kg + Mate Imperial Premium · Cuero negro',
+          'Yerba Canarias 1 kg + Mate Imperial Premium · Color negro',
         )
         expect(read.status).toBe(200)
         expect((read.body as OrderView).lines[0]?.kitItems?.map((piece) => piece.slug)).toEqual([

@@ -93,7 +93,7 @@ describe('priceCart: Review Focus 5', () => {
       key: `kit:${imperialPremium.id}:${bombillon100.id}:${yerbaCanarias.id}:Negro`,
       type: 'kit',
       name: 'Kit',
-      detail: 'Mate Imperial Premium + Bombillón 100% Alpaca + Yerba Canarias 1 kg · Cuero negro',
+      detail: 'Mate Imperial Premium + Bombillón 100% Alpaca + Yerba Canarias 1 kg · Color negro',
       unitPriceArs: 75997,
       netUnitPriceArs: 56526,
       kitSavingsArs: 15200,
@@ -155,13 +155,13 @@ describe('priceCart: Review Focus 5', () => {
     ])
   })
 
-  it('la clave de un mate es product:{id}:{cuero} y el detail "Cuero negro", como el mock', () => {
+  it('la clave de un mate es product:{id}:{cuero} y el detail "Color negro", como el mock', () => {
     const priced = price([mate(1)])
 
     expect(priced.quote.lines[0]).toMatchObject({
       key: `product:${imperialPremium.id}:Negro`,
       name: 'Mate Imperial Premium',
-      detail: 'Cuero negro',
+      detail: 'Color negro',
     })
     expect(priced.lines[0]).toMatchObject({
       productId: imperialPremium.id,
@@ -365,16 +365,16 @@ describe('priceCart: líneas', () => {
     )
 
     expect(priced.optionErrors).toEqual([
-      { field: 'items.1.options', code: 'required', message: 'Elegí el cuero del mate.' },
+      { field: 'items.1.options', code: 'required', message: 'Elegí el color del mate.' },
       {
         field: 'items.2.options.leather',
         code: 'leather_not_offered',
-        message: 'Ese cuero no está disponible para este mate.',
+        message: 'Ese color no está disponible para este mate.',
       },
     ])
     expect(priced.quote.lines[3]).toMatchObject({
       key: `product:${imperialPremium.id}:Crudo`,
-      detail: 'Cuero crudo',
+      detail: 'Color crudo',
     })
   })
 
@@ -389,7 +389,7 @@ describe('priceCart: líneas', () => {
   it('un kit sigue los cueros del mate: null pide cuero, uno que no ofrece da error en leather', () => {
     const priced = price([kit(1, { leather: null }), kit(1, { leather: 'Borravino' })])
     expect(priced.optionErrors).toEqual([
-      { field: 'items.0.leather', code: 'required', message: 'Elegí el cuero del mate.' },
+      { field: 'items.0.leather', code: 'required', message: 'Elegí el color del mate.' },
     ])
 
     const twoLeathers = imperialWith(['Negro', 'Crudo'])
@@ -398,7 +398,7 @@ describe('priceCart: líneas', () => {
       {
         field: 'items.0.leather',
         code: 'leather_not_offered',
-        message: 'Ese cuero no está disponible para este mate.',
+        message: 'Ese color no está disponible para este mate.',
       },
     ])
   })
@@ -503,7 +503,7 @@ describe('priceCart: combos', () => {
       key: 'combo:cmb-duo-imperial:Marrón',
       type: 'combo',
       name: 'Dúo Imperial',
-      detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Cuero marrón',
+      detail: 'Mate Imperial Premium + Bombillón Premium Curvo · Color marrón',
       unitPriceArs: 68998,
       netUnitPriceArs: 51239,
       kitSavingsArs: 13998,
@@ -605,7 +605,7 @@ describe('priceCart: combos', () => {
         ...blocked,
         key: 'combo:cmb-galleta-y-canarias:Marrón',
         name: 'Galleta y Canarias',
-        detail: 'Mate Galleta + Yerba Canarias 1 kg · Cuero marrón',
+        detail: 'Mate Galleta + Yerba Canarias 1 kg · Color marrón',
       },
       {
         ...blocked,
@@ -688,11 +688,11 @@ describe('priceCart: combos', () => {
     )
 
     expect(priced.optionErrors).toEqual([
-      { field: 'items.1.options', code: 'required', message: 'Elegí el cuero del mate.' },
+      { field: 'items.1.options', code: 'required', message: 'Elegí el color del mate.' },
       {
         field: 'items.2.options.leather',
         code: 'leather_not_offered',
-        message: 'Ese cuero no está disponible para este mate.',
+        message: 'Ese color no está disponible para este mate.',
       },
     ])
   })
@@ -813,7 +813,7 @@ describe('priceCart: combos', () => {
     )
 
     expect(priced.quote.lines[0]?.detail).toBe(
-      'Yerba Canarias 1 kg + Mate Imperial Premium · Cuero negro',
+      'Yerba Canarias 1 kg + Mate Imperial Premium · Color negro',
     )
     expect(priced.lines[0]?.kitItems?.map((piece) => [piece.position, piece.role])).toEqual([
       [1, 'yerba'],

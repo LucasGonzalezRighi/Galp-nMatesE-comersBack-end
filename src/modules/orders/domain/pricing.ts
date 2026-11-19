@@ -34,10 +34,10 @@ export const MISSING_PRODUCT_NAME = 'Producto no disponible'
 export const MISSING_COMBO_NAME = 'Combo no disponible'
 
 /** Mensaje de un mate que ofrece cueros (suelto, en un kit o en un combo) y llega sin cuero. */
-export const MISSING_LEATHER_MESSAGE = 'Elegí el cuero del mate.'
+export const MISSING_LEATHER_MESSAGE = 'Elegí el color del mate.'
 
 /** Mensaje de un mate que llega con un cuero que no ofrece. */
-export const LEATHER_NOT_OFFERED_MESSAGE = 'Ese cuero no está disponible para este mate.'
+export const LEATHER_NOT_OFFERED_MESSAGE = 'Ese color no está disponible para este mate.'
 
 /** Producto como lo necesita la cotización. */
 export interface PricedProduct {

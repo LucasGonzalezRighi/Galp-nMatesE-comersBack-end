@@ -301,7 +301,7 @@ describe('productos del dashboard', () => {
     )
     expect(leathers.status).toBe(422)
     expect(leathers.errors).toEqual([
-      { field: 'leathers', code: 'leathers_not_allowed', message: 'Solo los mates llevan cuero' },
+      { field: 'leathers', code: 'leathers_not_allowed', message: 'Solo los mates llevan colores' },
     ])
 
     const image = await failure(() =>

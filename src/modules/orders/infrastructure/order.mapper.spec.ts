@@ -76,7 +76,7 @@ function row(overrides: Partial<OrderRow> = {}): OrderRow {
         productId: null,
         productSlug: null,
         name: 'Kit',
-        detail: 'Mate Imperial Premium + Bombillón 100% Alpaca + Yerba Canarias 1 kg · Cuero negro',
+        detail: 'Mate Imperial Premium + Bombillón 100% Alpaca + Yerba Canarias 1 kg · Color negro',
         quantity: 1,
         unitPriceArs: 75997,
         kitSavingsArs: 7600,

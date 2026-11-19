@@ -119,11 +119,11 @@ export function cartProductIds(
 }
 
 /**
- * Cuero escrito como en el carrito de la tienda.
+ * Color (cuero) escrito como en el carrito de la tienda.
  *
  * @param leather - Color del cuero.
- * @returns `Cuero ` y el color en minúsculas (por ejemplo `Cuero negro`).
+ * @returns `Color ` y el color en minúsculas (por ejemplo `Color negro`).
  */
 export function leatherLabel(leather: Leather): string {
-  return `Cuero ${leather.toLowerCase()}`
+  return `Color ${leather.toLowerCase()}`
 }
