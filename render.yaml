@@ -16,7 +16,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: free # PLAN: para vender, starter
+    plan: starter # sin sueño y con 0,5 CPU
     region: virginia
     healthCheckPath: /api/v1/health
     autoDeployTrigger: commit
@@ -127,7 +127,7 @@ services:
 databases:
   # Postgres 17, la misma versión con la que corren las pruebas.
   - name: galpon-mates-db
-    plan: free # PLAN: para vender, basic-256mb (copias automáticas; la gratis se borra a los 30 días)
+    plan: basic-256mb # copias automáticas; la gratis se borraba a los 30 días
     region: virginia
     postgresMajorVersion: '17'
     databaseName: galpon
