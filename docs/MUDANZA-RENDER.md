@@ -22,9 +22,9 @@ quedar", **frená ahí** y mirá "Si algo sale mal".
 | Cosa                                   | ¿Se muda?                                                                  |
 | -------------------------------------- | -------------------------------------------------------------------------- |
 | El código                              | No hace falta: sale de GitHub, igual que antes                             |
-| La base (productos, pedidos, ajustes)  | Sí, con una copia (etapas 7 y 10)                                          |
+| La base (productos, pedidos, ajustes)  | Sí, con una copia (etapas 7 y 9)                                           |
 | Las fotos                              | No: viven en Cloudinary. La base guarda sus direcciones                    |
-| El Redis (colas, sesiones)             | No: arranca vacío. Hay que volver a entrar al dashboard                    |
+| El Redis (colas, sesiones)             | No: arranca vacío. Todos tienen que volver a iniciar sesión                |
 | Las variables con claves               | Se vuelven a cargar a mano (etapas 8 y 11)                                 |
 | Los dominios                           | Se sacan de los servicios viejos y se agregan a los nuevos (etapas 6 a 12) |
 | Mercado Pago, Brevo, Cloudflare (mail) | No cambian: apuntan al dominio, no a Render                                |
@@ -62,8 +62,10 @@ Precios de [render.com/pricing](https://render.com/pricing) al 2026-11-26. La cu
 - [ ] La cuenta **vieja** de Render en el navegador de siempre y la **nueva** en **otro navegador**
       (o en una ventana privada). Dos pestañas del mismo navegador se pisan la sesión.
 - [ ] Cloudflare, en los registros DNS de `galponmates.com.ar`.
-- [ ] Las claves de **producción** de Mercado Pago (Public Key, Access Token y la clave secreta
-      del webhook), **renovadas** si alguna vez se pegaron en un chat o en una captura.
+- [ ] El panel de Mercado Pago abierto en las credenciales de **producción** (Public Key, Access
+      Token y la clave secreta del webhook). Si hay que renovarlas porque se pegaron en un chat o
+      en una captura, **no antes del corte**: renovarlas deja sin cobrar al back que esté andando.
+      Se renuevan en la etapa 6.
 
 Las claves no se mandan por chat ni se muestran en capturas: se copian de una ventana a la otra.
 
@@ -105,6 +107,11 @@ cantidad de filas que la original`, y en `C:\galpon-copia` un archivo `galpon-FE
 El script hace la copia, la carga en una base de prueba dentro de Docker (que borra al terminar) y
 compara tabla por tabla contra la original.
 
+En esta etapa la tienda sigue abierta: si justo entra un pedido o alguien usa el dashboard, el
+cartel sale en **amarillo** con tablas de registro (`audit_logs`, `outbox_events`,
+`webhook_events`, `idempotency_keys`). Es normal: volvé a correrlo o seguí. En la etapa 7 tiene
+que salir en verde sí o sí.
+
 ## Etapa 2. Congelar los Blueprints de la cuenta vieja
 
 Sin esto, al subir el código Render pasaría a planes pagos los servicios **viejos**, y al borrar
@@ -121,6 +128,11 @@ un servicio viejo lo volvería a crear.
 - [ ] Cuenta **nueva** → ícono de la cuenta → **Account Settings** → **Account Security** →
       **Git Deployment Credentials** → **Add credential** → GitHub → autorizar con el GitHub de
       Lucas (los repos son de él).
+
+- [ ] Cuenta **vieja** → `galpon-mates-api` → **Environment**: comprobar que estén y se puedan
+      ver `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `SMTP_USER`,
+      `SMTP_PASS`, `ADMIN_EMAIL` y `ADMIN_PASSWORD`. Se copian en la etapa 8, ya con la tienda
+      cerrada: mejor saber ahora si falta alguna.
 
 **Tiene que quedar:** en **New → Blueprint**, la lista muestra los dos repos de Galpón. **No
 apretar "Connect" todavía.**
@@ -185,7 +197,11 @@ Un dominio no puede estar en dos servicios de Render a la vez. Y el back viejo n
 andando: tiene las claves reales de Mercado Pago y del mail, y sus tareas automáticas seguirían
 mandando mails y venciendo pedidos sobre datos viejos.
 
-Primero las tres comprobaciones de "Antes de cada paso que borra o suspende algo".
+- [ ] En el dashboard, **Pedidos**: si hay alguno esperando pago creado en los últimos 30
+      minutos, esperar a que se pague o venza antes de seguir. Un pedido a medio pagar durante el
+      corte puede terminar cobrado y sin registrar.
+
+Después, las tres comprobaciones de "Antes de cada paso que borra o suspende algo".
 
 En la cuenta **vieja**, en cada servicio → **Settings** → **Custom Domains** → borrar el dominio:
 
@@ -194,10 +210,15 @@ En la cuenta **vieja**, en cada servicio → **Settings** → **Custom Domains**
       la lista, borrarlo también.
 - [ ] `galpon-mates-admin`: borrar `admin.galponmates.com.ar`.
 
+- [ ] **Esperar dos minutos**, para que el back viejo termine de mandar lo que tenga en cola
+      (mails, devoluciones). El Redis no se muda: lo que quede en cola se pierde.
+
 Después, suspender (al pie de **Settings** de cada servicio, el botón **Suspend**):
 
 - [ ] Suspender `galpon-mates-api`.
 - [ ] Suspender `galpon-mates-tienda`.
+- [ ] Si hay que **renovar las claves de Mercado Pago**, es ahora: con el back viejo suspendido y
+      antes de crear el nuevo.
 
 **No borrar nada**, y **no tocar la base** (`galpon-mates-db`): hace falta para la etapa 7.
 
@@ -240,10 +261,13 @@ Con la tienda cerrada ya no entra ningún pedido: esta copia tiene todo.
   | `SMTP_PASS`             | Igual que en la cuenta vieja                                 |
   | `MAIL_FROM`             | `Galpón Mates <hola@galponmates.com.ar>`                     |
   | `ADMIN_EMAIL`           | Igual que en la cuenta vieja                                 |
-  | `ADMIN_PASSWORD`        | Igual que en la cuenta vieja                                 |
+  | `ADMIN_PASSWORD`        | Igual que en la cuenta vieja (ver la nota de abajo)          |
 
   Las tres direcciones van **sin barra al final**. Ninguna variable puede quedar vacía: sin las
   de Mercado Pago, Cloudinary o el mail, el back no arranca.
+
+  Si `ADMIN_PASSWORD` ya no está en la cuenta vieja, inventá una de **12 caracteres o más**. Solo
+  sirve hasta la etapa 9: después vale la contraseña de siempre, que viene en la copia.
 
 - [ ] **Deploy Blueprint** y esperar a que `galpon-mates-api` diga **Live** (unos minutos).
 - [ ] Comprobar los planes: en `galpon-mates-db` → **Info** tiene que decir 256 MB de memoria y
@@ -251,7 +275,8 @@ Con la tienda cerrada ya no entra ningún pedido: esta copia tiene todo.
       512 MB; `galpon-mates-redis`, **Free**.
 
 **Tiene que quedar:** los tres recursos en verde (Live / Available), uno de cada uno. El back
-arranca con el catálogo de ejemplo: es normal, la etapa 10 lo reemplaza por los datos reales.
+arranca con el catálogo de ejemplo: es normal, la etapa 9 lo reemplaza por los datos reales.
+Todavía nadie llega a él: el dominio `api` no apunta a ningún lado.
 
 **Si falla, no vuelvas a hacer New → Blueprint:** eso crea un segundo juego de recursos pagos con
 otro nombre. Entrá a **Blueprints**, abrí el que ya se creó y usá **Manual sync**. Si el back no
@@ -261,23 +286,16 @@ llega a **Live**, mirá **Logs**: si nombra una variable, corregila en **Environ
 Render pide estas variables **solo esta vez**. Después se cambian en `galpon-mates-api` →
 **Environment**.
 
-## Etapa 9. Pasar el dominio `api` al back nuevo
-
-- [ ] Cuenta **nueva** → `galpon-mates-api` → **Settings** → **Custom Domains**: ahí está
-      `api.galponmates.com.ar` y la dirección `onrender.com` a la que tiene que apuntar (no es la
-      de antes: mientras exista el servicio viejo, la nueva lleva un sufijo).
-- [ ] Cloudflare → registro `CNAME` `api` → cambiar el destino por esa dirección. **DNS only**
-      (nube gris).
-- [ ] En Render, **Verify** al lado del dominio. Si falla, esperar unos minutos y repetir.
-
-**Tiene que quedar:** el dominio en **Verified** con **Certificate Issued**, y
-`https://api.galponmates.com.ar/api/v1/health` respondiendo `"status":"ok"`.
-
-## Etapa 10. Cargar la copia en la base nueva
+## Etapa 9. Cargar la copia en la base nueva
 
 Reemplaza todo el contenido de la base nueva por el de la copia de la etapa 7. Va en una sola
 transacción: si falla, la base nueva queda como estaba.
 
+Va **antes** de pasar el dominio: si el back nuevo atendiera `api.galponmates.com.ar` con el
+catálogo de ejemplo, un aviso de pago de Mercado Pago se daría por recibido y se perdería.
+
+- [ ] Cuenta **nueva** → `galpon-mates-api`: anotar su dirección `onrender.com` (arriba, debajo
+      del nombre; lleva un sufijo).
 - [ ] Cuenta **nueva** → `galpon-mates-api` → **Settings** → al pie, **Suspend**. Así el back no
       usa la base mientras se carga.
 - [ ] Cuenta **nueva** → `galpon-mates-db` → **Connect** → pestaña **External** → copiar la
@@ -296,14 +314,28 @@ transacción: si falla, la base nueva queda como estaba.
       vuelva a **Live**.
 
 **Tiene que quedar:** en verde, `BASE CARGADA Y COMPROBADA: 30 tablas, todas con la misma cantidad
-de filas que la copia`, y `https://api.galponmates.com.ar/api/v1/health` otra vez en
-`"status":"ok"`.
+de filas que la copia`, y la dirección `onrender.com` del back nuevo, seguida de
+`/api/v1/health`, respondiendo `"status":"ok"`.
 
 El script se niega a seguir si se le pega la dirección de la base vieja o si la copia es de un
 ensayo local.
 
+**Si `pg_restore` falla, dejá el back nuevo suspendido** y no sigas a la etapa 10.
+
 Después de esto, el usuario y la contraseña del dashboard son **los de siempre** (vienen en la
 copia), no importa lo que se haya escrito en `ADMIN_PASSWORD`.
+
+## Etapa 10. Pasar el dominio `api` al back nuevo
+
+- [ ] Cuenta **nueva** → `galpon-mates-api` → **Settings** → **Custom Domains**: ahí está
+      `api.galponmates.com.ar` y la dirección `onrender.com` a la que tiene que apuntar (no es la
+      de antes: mientras exista el servicio viejo, la nueva lleva un sufijo).
+- [ ] Cloudflare → registro `CNAME` `api` → cambiar el destino por esa dirección. **DNS only**
+      (nube gris).
+- [ ] En Render, **Verify** al lado del dominio. Si falla, esperar unos minutos y repetir.
+
+**Tiene que quedar:** el dominio en **Verified** con **Certificate Issued**, y
+`https://api.galponmates.com.ar/api/v1/health` respondiendo `"status":"ok"`.
 
 ## Etapa 11. Crear la tienda y el dashboard en la cuenta nueva
 
@@ -331,7 +363,7 @@ La tienda lee el catálogo de `https://api.galponmates.com.ar` al compilar: por 
 
 **Si falla, no vuelvas a hacer New → Blueprint:** abrí el Blueprint que ya se creó y usá
 **Manual sync**. Si la tienda no compila, casi siempre es que `https://api.galponmates.com.ar`
-no responde: revisá las etapas 9 y 10 y usá **Manual Deploy** en `galpon-mates-tienda`.
+no responde: revisá la etapa 10 y usá **Manual Deploy** en `galpon-mates-tienda`.
 
 ## Etapa 12. Pasar los dominios de la tienda y del dashboard
 
@@ -358,8 +390,13 @@ en **Verified** con **Certificate Issued**. Acá termina el corte.
 - [ ] Mercado Pago → la aplicación → **Webhooks**: la dirección sigue siendo
       `https://api.galponmates.com.ar/api/v1/webhooks/mercadopago` y la clave secreta es la misma
       que se cargó en `MP_WEBHOOK_SECRET`.
+- [ ] Mercado Pago → **Actividad**: revisar los cobros aprobados desde que empezó el corte. Cada
+      uno tiene que tener su pedido en **Pagado** o su devolución. Si alguno no, hay que
+      resolverlo a mano.
 - [ ] Una compra real de prueba (con tarjeta en el sitio y por Mercado Pago), ver el pedido en
       **Pagado**, el mail y el stock, y devolverla.
+
+Los clientes que tenían la sesión iniciada tienen que volver a entrar: las sesiones no se mudan.
 
 ---
 
@@ -380,9 +417,8 @@ borrado, las tres comprobaciones de "Antes de cada paso que borra o suspende alg
 ## Si algo sale mal
 
 - **Antes de la etapa 6:** no se cambió nada. Se puede frenar y retomar otro día.
-- **`pg_restore fallo`** en la etapa 10: la base nueva quedó como estaba. Reanudá el back nuevo
-  y mandá el mensaje de error (no trae la clave). Si dice `deadlock detected`, alcanza con volver
-  a correr el script.
+- **`pg_restore fallo`** en la etapa 9: la base nueva quedó como estaba. **Dejá el back nuevo
+  suspendido** y mandá el mensaje de error (no trae la clave).
 - **"La carga SI se hizo, pero no pude contar"**: volver a correr el script. Cargar dos veces la
   misma copia no hace daño.
 - **El dashboard no deja entrar:** revisar que `ADMIN_ORIGIN` del back sea exactamente
@@ -392,15 +428,22 @@ borrado, las tres comprobaciones de "Antes de cada paso que borra o suspende alg
 
 En este orden, porque un dominio no puede estar en las dos cuentas:
 
-1. Cuenta **nueva** → **Blueprints** → en cada uno, **Settings** → **Auto Sync: No**.
-2. Cuenta **nueva** → en cada servicio, **Settings** → **Custom Domains** → borrar los dominios
+1. Cuenta **nueva** → **suspender** `galpon-mates-api` y `galpon-mates-tienda`. No pueden quedar
+   dos backs andando con las mismas claves de Mercado Pago y del mail: los dos vencerían pedidos
+   y mandarían mails.
+2. Cuenta **nueva** → **Blueprints** → en cada uno, **Settings** → **Auto Sync: No**.
+3. Cuenta **nueva** → en cada servicio, **Settings** → **Custom Domains** → borrar los dominios
    propios (los cuatro, con el `www`).
-3. Cuenta **vieja** → reanudar `galpon-mates-api` y `galpon-mates-tienda` (**Resume**) y volver a
+4. Si se renovaron las claves de Mercado Pago: cargar las nuevas en la cuenta **vieja**,
+   `galpon-mates-api` → **Environment**.
+5. Cuenta **vieja** → reanudar `galpon-mates-api` y `galpon-mates-tienda` (**Resume**) y volver a
    agregar los dominios en cada servicio.
-4. Cloudflare → los `CNAME` a las direcciones de antes: `galpon-mates-api.onrender.com`,
+6. Cloudflare → los `CNAME` a las direcciones de antes: `galpon-mates-api.onrender.com`,
    `galpon-mates-tienda.onrender.com` y `galpon-mates-admin.onrender.com`.
-5. **Verify** en cada dominio y esperar el certificado. Los servicios gratis tardan alrededor de
+7. **Verify** en cada dominio y esperar el certificado. Los servicios gratis tardan alrededor de
    un minuto en despertar.
+8. Si no se va a reintentar en el día: borrar los recursos de la cuenta **nueva**, para que no
+   facturen (la base cobra aunque el back esté suspendido).
 
 La base vieja no se toca en ningún momento de la mudanza. Si se vuelve atrás, **lo que se haya
 cargado o vendido en la cuenta nueva no está en la vieja**.
