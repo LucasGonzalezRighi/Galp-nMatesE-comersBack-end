@@ -2,11 +2,11 @@
 # (un "Blueprint"). En el panel de Render: New > Blueprint > elegir este repo. El paso a paso está
 # en docs/DESPLIEGUE.md. La tienda y el dashboard tienen su propio Blueprint, en el repo del front.
 #
-# PLANES. Así como está, crea todo en el plan GRATIS, que sirve para probar y nada más: el back se
-# duerme a los 15 minutos sin visitas (no vencen pedidos ni salen mails mientras duerme), la base
-# gratis se borra a los 30 días y el Redis gratis pierde las colas si se reinicia. Para salir a
-# vender, cambiá las tres líneas marcadas con "PLAN" por el valor pago que dice al lado y subí el
-# cambio: Render lo aplica solo.
+# PLANES (identificadores de https://render.com/docs/blueprint-spec, precios de render.com/pricing
+# al 2026-11-26). El back y la base van en plan pago: el back gratis se duerme a los 15 minutos sin
+# visitas (no vencen pedidos ni salen mails mientras duerme) y la base gratis se borra a los 30
+# días. El Redis sigue gratis: pierde las colas si se reinicia. Un recurso SIN línea "plan" no sale
+# gratis: Render le pone el plan pago por omisión, así que cada uno lleva el suyo escrito.
 services:
   # El back (NestJS), desde el Dockerfile de este repo. Al arrancar aplica las migraciones
   # (`npx prisma migrate deploy`) y, si la base está vacía, carga el catálogo inicial y crea el
@@ -16,14 +16,14 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: starter # sin sueño y con 0,5 CPU
+    plan: 0.5c-512mb # 0,5 CPU y 512 MB, sin sueño: USD 7 por mes
     region: virginia
     healthCheckPath: /api/v1/health
     autoDeployTrigger: commit
     # Dominio propio del back. Render lo agrega al servicio y espera el registro del DNS (CNAME
-    # `api` hacia galpon-mates-api.onrender.com, en Cloudflare "DNS only"): hasta que esté, sigue
-    # andando la dirección onrender.com. Ver "Todo en Render con el dominio propio" en
-    # docs/DESPLIEGUE.md.
+    # `api` hacia la dirección onrender.com que muestra el servicio, en Cloudflare "DNS only"):
+    # hasta que esté, sigue andando la dirección onrender.com. Un dominio no puede estar en dos
+    # servicios a la vez: para mudarlo de cuenta, ver docs/MUDANZA-RENDER.md.
     domains:
       - api.galponmates.com.ar
     envVars:
@@ -119,7 +119,7 @@ services:
   # (una cola no puede perder trabajos por falta de memoria).
   - type: keyvalue
     name: galpon-mates-redis
-    plan: free # PLAN: para vender, starter (guarda las colas en disco)
+    plan: free # el pago más chico es 256mb (USD 10 por mes): guarda las colas en disco
     region: virginia
     maxmemoryPolicy: noeviction
     ipAllowList: []
@@ -127,7 +127,10 @@ services:
 databases:
   # Postgres 17, la misma versión con la que corren las pruebas.
   - name: galpon-mates-db
-    plan: basic-256mb # copias automáticas; la gratis se borraba a los 30 días
+    plan: 0.1c-256mb # USD 6 por mes, con copias automáticas; la gratis se borraba a los 30 días
+    # El disco se cobra aparte (USD 0,30 por GB al mes) y, si falta esta línea, Render pone 15 GB.
+    # Vale 1 o un múltiplo de 5; se puede agrandar pero nunca achicar. La base pesa menos de 1 MB.
+    diskSizeGB: 1
     region: virginia
     postgresMajorVersion: '17'
     databaseName: galpon

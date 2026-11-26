@@ -287,11 +287,11 @@ combos a sus valores de fábrica y pisa lo que cambiaste desde el dashboard.
 1. **Render, planes pagos.** En el repo del back, abrí `render.yaml` y cambiá las tres líneas
    marcadas con `PLAN`:
 
-   | Línea                          | Gratis | Para vender   |
-   | ------------------------------ | ------ | ------------- |
-   | `plan` de `galpon-mates-api`   | `free` | `starter`     |
-   | `plan` de `galpon-mates-redis` | `free` | `starter`     |
-   | `plan` de `galpon-mates-db`    | `free` | `basic-256mb` |
+   | Línea                          | Gratis | Para vender  |
+   | ------------------------------ | ------ | ------------ |
+   | `plan` de `galpon-mates-api`   | `free` | `0.5c-512mb` |
+   | `plan` de `galpon-mates-redis` | `free` | `256mb`      |
+   | `plan` de `galpon-mates-db`    | `free` | `0.1c-256mb` |
 
    Subí el cambio a GitHub: Render lo aplica solo. Los precios de hoy están en
    [render.com/pricing](https://render.com/pricing); cuando se escribió esta guía eran del orden de
@@ -638,20 +638,24 @@ Mientras se prueba, todo queda gratis. Tené en cuenta:
 **Al abrir al público**, pasá a pago lo que atiende gente. Sigue siendo la cuenta **Hobby** de
 Render, sin el plan Pro de 25 USD: se pagan solo las instancias.
 
-| Qué               | Dónde se cambia                                                    | Gratis | Pago          | Precio aprox. por mes                  |
-| ----------------- | ------------------------------------------------------------------ | ------ | ------------- | -------------------------------------- |
-| Tienda            | `render.yaml` del **front**, línea `PLAN` de `galpon-mates-tienda` | `free` | `starter`     | 7 USD                                  |
-| Back              | `render.yaml` del **back**, línea `PLAN` de `galpon-mates-api`     | `free` | `starter`     | 7 USD                                  |
-| Base (Postgres)   | `render.yaml` del **back**, línea `PLAN` de `galpon-mates-db`      | `free` | `basic-256mb` | 6 USD                                  |
-| Redis (Key Value) | `render.yaml` del **back**, línea `PLAN` de `galpon-mates-redis`   | `free` | `starter`     | 10 USD                                 |
-| Dashboard         | Nada: es un sitio estático                                         | gratis | gratis        | 0                                      |
-| Dominios propios  | Nada: Render los cobra solo                                        | —      | —             | 0,25 USD cada uno a partir del tercero |
-| **Total**         |                                                                    |        |               | **unos 30 USD**                        |
+| Qué               | Dónde se cambia                                                    | Gratis | Pago         | Precio aprox. por mes                  |
+| ----------------- | ------------------------------------------------------------------ | ------ | ------------ | -------------------------------------- |
+| Tienda            | `render.yaml` del **front**, línea `PLAN` de `galpon-mates-tienda` | `free` | `0.5c-512mb` | 7 USD                                  |
+| Back              | `render.yaml` del **back**, línea `PLAN` de `galpon-mates-api`     | `free` | `0.5c-512mb` | 7 USD                                  |
+| Base (Postgres)   | `render.yaml` del **back**, línea `PLAN` de `galpon-mates-db`      | `free` | `0.1c-256mb` | 6 USD                                  |
+| Redis (Key Value) | `render.yaml` del **back**, línea `PLAN` de `galpon-mates-redis`   | `free` | `256mb`      | 10 USD                                 |
+| Dashboard         | Nada: es un sitio estático                                         | gratis | gratis       | 0                                      |
+| Dominios propios  | Nada: Render los cobra solo                                        | —      | —            | 0,25 USD cada uno a partir del tercero |
+| **Total**         |                                                                    |        |              | **unos 30 USD**                        |
 
 - Se cambia la palabra, se sube el cambio a GitHub y Render lo aplica solo.
-- Render cambió hace poco los nombres de los planes en su página (`0.5c-512mb` en vez de
-  `starter`, `256mb` para el Key Value y `0.1c-256mb` para la base); los nombres de la tabla los
-  sigue aceptando. Confirmá los precios en [render.com/pricing](https://render.com/pricing).
+- Los nombres de plan son los de la
+  [referencia de Blueprints](https://render.com/docs/blueprint-spec) (`0.5c-512mb`, `256mb`,
+  `0.1c-256mb`). Render sigue aceptando los viejos (`starter`, `basic-256mb`). Confirmá los
+  precios en [render.com/pricing](https://render.com/pricing).
+- **El disco de la base se cobra aparte** (0,30 USD por GB al mes) y no se puede achicar. Sin la
+  línea `diskSizeGB`, Render pone 15 GB: en `render.yaml` está fijo en 1.
+- Para pasar todo a **otra cuenta de Render**, ver [MUDANZA-RENDER.md](MUDANZA-RENDER.md).
 - Dominios: la cuenta Hobby trae 2 y cada uno más cuesta 0,25 USD por mes. Acá son tres
   (`galponmates.com.ar`, `admin` y `api`); Render no aclara si el `www` que agrega solo cuenta
   aparte, así que son entre 0,25 y 0,50 USD por mes.
@@ -689,8 +693,8 @@ Render, sin el plan Pro de 25 USD: se pagan solo las instancias.
   secreto no aparece en los logs.
 - **El ingreso al dashboard tal como le llegaría al back desde Vercel**: entra y limita por
   visitante.
-- El `render.yaml` es válido contra el esquema oficial de Render, y los planes (`free`, `starter`,
-  `basic-256mb`) existen.
+- El `render.yaml` es válido contra el esquema oficial de Render, y los planes (`free`,
+  `0.5c-512mb`, `0.1c-256mb`) existen.
 - Las suites de pruebas completas del back y del front, con Next 16.4.5.
 - El camino alternativo (el compose con Docker) también se levantó entero en esa compu.
 
