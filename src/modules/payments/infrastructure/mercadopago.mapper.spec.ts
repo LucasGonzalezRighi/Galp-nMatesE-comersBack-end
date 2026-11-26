@@ -204,17 +204,53 @@ describe('toPaymentBody (Ruling B-35)', () => {
       binary_mode: false,
       three_d_secure_mode: 'optional',
       additional_info: {
-        items: [
-          {
-            id: 'line-1',
-            title: 'Mate Imperial Premium',
-            quantity: 2,
-            unit_price: 39999,
-            currency_id: 'ARS',
-          },
-        ],
+        items: [{ id: 'line-1', title: 'Mate Imperial Premium', quantity: 2, unit_price: 39999 }],
       },
     })
+  })
+
+  it('solo manda los campos que documenta POST /v1/payments (si no, Mercado Pago responde 400 con la causa 8)', () => {
+    // https://www.mercadopago.com.ar/developers/es/reference/online-payments/checkout-api-payments/create-payment/post
+    // y la guía de 3DS de Checkout API para three_d_secure_mode. currency_id vale en los ítems de
+    // una preferencia, no en los de un pago: con él, todo cobro con tarjeta fallaba.
+    const PAYMENT_FIELDS = new Set([
+      'token',
+      'transaction_amount',
+      'installments',
+      'payment_method_id',
+      'issuer_id',
+      'payer',
+      'description',
+      'external_reference',
+      'notification_url',
+      'metadata',
+      'statement_descriptor',
+      'capture',
+      'binary_mode',
+      'three_d_secure_mode',
+      'additional_info',
+    ])
+    const ITEM_FIELDS = new Set([
+      'id',
+      'title',
+      'description',
+      'picture_url',
+      'category_id',
+      'quantity',
+      'unit_price',
+      'type',
+      'event_date',
+      'warranty',
+      'category_descriptor',
+    ])
+    const body = toPaymentBody(cardInput())
+
+    expect(Object.keys(body).filter((key) => !PAYMENT_FIELDS.has(key))).toEqual([])
+    const items = body.additional_info?.items ?? []
+    expect(items.length).toBeGreaterThan(0)
+    for (const item of items) {
+      expect(Object.keys(item).filter((key) => !ITEM_FIELDS.has(key))).toEqual([])
+    }
   })
 
   it('sin banco emisor ni notification_url no los manda', () => {
@@ -415,5 +451,19 @@ describe('errores del SDK', () => {
       'status 400, error bad_request, causas [3003: Invalid card_token_id]',
     )
     expect(describeMercadoPagoError(new Error('socket hang up'))).toBe('socket hang up')
+  })
+
+  it('con la causa 8 nombra los parámetros que Mercado Pago no acepta', () => {
+    const error = new MPBadRequestError({
+      status: 400,
+      error: 'bad_request',
+      message:
+        'The name of the following parameters is wrong : [additional_info.items[0].currency_id]',
+      cause: [{ code: 8, description: 'The name of the parameters is wrong.' }],
+    })
+
+    expect(describeMercadoPagoError(error)).toBe(
+      'status 400, error bad_request, causas [8: The name of the parameters is wrong.], parámetros [additional_info.items[0].currency_id]',
+    )
   })
 })

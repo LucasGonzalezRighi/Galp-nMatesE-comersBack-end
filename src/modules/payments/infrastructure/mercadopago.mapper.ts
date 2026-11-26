@@ -23,8 +23,14 @@ export type PreferenceBody = Parameters<Preference['create']>[0]['body']
 /** Cuerpo de `POST /v1/payments` (tipo del SDK). */
 export type PaymentBody = Parameters<MpPayment['create']>[0]['body']
 
-/** Ítem de una preferencia o de `additional_info.items` (tipo del SDK). */
+/** Ítem de una preferencia (tipo del SDK). */
 type MercadoPagoItem = PreferenceBody['items'][number]
+
+/**
+ * Ítem de `additional_info.items` de un pago: solo los campos que documenta `POST /v1/payments`
+ * que se usan acá (el tipo del SDK admite también `currency_id`, que la API rechaza).
+ */
+type PaymentItem = Pick<MercadoPagoItem, 'id' | 'title' | 'quantity' | 'unit_price'>
 
 /**
  * Lo que se lee de un pago de Mercado Pago (`POST /v1/payments`, `GET /v1/payments/{id}`,
@@ -243,8 +249,22 @@ export function toPaymentBody(input: CardChargeInput): PaymentBody {
     capture: true,
     binary_mode: false,
     three_d_secure_mode: 'optional',
-    additional_info: { items: lineItems(order) },
+    additional_info: { items: paymentItems(order) },
   }
+}
+
+/**
+ * Ítems de `additional_info` de un pago: los de las líneas sin `currency_id`. Ese campo vale en
+ * una preferencia pero no en `POST /v1/payments`, que lo rechaza con 400 (causa 8, "The name of
+ * the parameters is wrong") y deja sin cobrar todo pago con tarjeta.
+ */
+function paymentItems(order: OrderForPayment): PaymentItem[] {
+  return lineItems(order).map(({ id, title, quantity, unit_price }) => ({
+    id,
+    title,
+    quantity,
+    unit_price,
+  }))
 }
 
 /** Monto de Mercado Pago (puede traer centavos) en pesos enteros. */
@@ -419,5 +439,10 @@ export function describeMercadoPagoError(error: unknown): string {
     const codeText = typeof code === 'number' || typeof code === 'string' ? String(code) : '?'
     return [`${codeText}: ${typeof description === 'string' ? description : ''}`]
   })
-  return `status ${String(error.status)}, error ${error.error}, causas [${causes.join('; ')}]`
+  // Con la causa 8, Mercado Pago nombra en el mensaje los campos que no acepta: son nombres de
+  // campos, sin datos del pago, y es lo único que dice qué cambiar.
+  // Hasta el último corchete: los nombres traen los suyos (`additional_info.items[0].currency_id`).
+  const wrong = /parameters is wrong\s*:\s*\[(.*)\]/.exec(error.message)?.[1]
+  const names = wrong === undefined ? '' : `, parámetros [${wrong}]`
+  return `status ${String(error.status)}, error ${error.error}, causas [${causes.join('; ')}]${names}`
 }
