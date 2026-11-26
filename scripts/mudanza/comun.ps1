@@ -20,17 +20,23 @@ function Leer-Secreto([string]$texto) {
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($puntero) }
 }
 
-# Devuelve el servidor (host y puerto, sin usuario ni clave) de una direccion de Postgres, o falla
-# con un mensaje claro si no es una External Database URL.
+# Saca el puerto por omision y pasa a minusculas, para comparar dos servidores sin que una
+# diferencia de forma (la misma base escrita con :5432 o sin puerto) los haga parecer distintos.
+function Normalizar-Servidor([string]$servidor) {
+  return ($servidor -replace ':5432$', '').ToLower()
+}
+
+# Devuelve el servidor (host y, si no es el 5432, puerto; sin usuario ni clave) de una direccion de
+# Postgres, o falla con un mensaje claro si no es una External Database URL.
 function Servidor-De([string]$url) {
-  if ($url -notmatch '^postgres(ql)?://[^:/@\s]+:[^@\s]+@([^/\s]+)/[^\s]+$') {
+  if ($url -notmatch '^postgres(ql)?://[^:/@\s]+:[^@\s]+@([^/@\s]+)/[^\s]+$') {
     Fallar 'Eso no parece una direccion de base de datos. Tiene que empezar con postgresql:// y la copias de Render: la base > Connect > External > External Database URL.'
   }
   $servidor = $Matches[2]
   if ($servidor -notmatch '\.') {
     Fallar 'Pegaste la Internal Database URL. Necesito la External (en Render: Connect > pestana External).'
   }
-  return $servidor
+  return (Normalizar-Servidor $servidor)
 }
 
 # Corre un comando sin mostrar nada. Baja $ErrorActionPreference dentro de la funcion: en Windows
@@ -58,9 +64,13 @@ order by table_name;
 }
 
 # Cuenta las filas de cada tabla de una base remota. Devuelve lineas "tabla=cantidad".
-function Contar-Remota([string]$url, [string]$carpeta) {
+function Contar-Remota(
+  [string]$url,
+  [string]$carpeta,
+  [string]$siFalla = 'No pude leer la base. Revisa que la direccion sea la External Database URL completa y que tengas internet.'
+) {
   $lineas = docker run --rm -v "${carpeta}:/copia" $ImagenPostgres psql $url -At -v ON_ERROR_STOP=1 -f /copia/conteo.sql
-  if ($LASTEXITCODE -ne 0) { Fallar 'No pude leer la base. Revisa que la direccion sea la External Database URL completa y que tengas internet.' }
+  if ($LASTEXITCODE -ne 0) { Fallar $siFalla }
   return @($lineas | Where-Object { $_ -match '=' })
 }
 

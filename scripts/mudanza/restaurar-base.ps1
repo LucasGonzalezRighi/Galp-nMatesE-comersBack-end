@@ -29,7 +29,13 @@ $rutaConteo = Join-Path $Carpeta ($Archivo -replace '\.dump$', '.conteo.txt')
 if (-not (Test-Path (Join-Path $Carpeta $Archivo))) { Fallar "No encuentro la copia $Archivo en $Carpeta." }
 if (-not (Test-Path $rutaConteo)) { Fallar "Falta ${rutaConteo}: la copia no fue comprobada. Volve a correr copiar-base.ps1." }
 $informe = Get-Content $rutaConteo
-$servidorOrigen = ($informe | Where-Object { $_ -like 'origen-servidor=*' }) -replace '^origen-servidor=', ''
+$servidorOrigen = Normalizar-Servidor ("$($informe | Where-Object { $_ -like 'origen-servidor=*' } | Select-Object -First 1)" -replace '^origen-servidor=', '')
+if (-not $servidorOrigen) { Fallar "El archivo ${rutaConteo} no dice de que servidor salio la copia. Volve a correr copiar-base.ps1." }
+$fechaCopia = "$($informe | Where-Object { $_ -like 'fecha=*' } | Select-Object -First 1)" -replace '^fecha=', ''
+# Una copia que no salio de Render es de un ensayo local: no se carga en produccion.
+if (-not $UrlDePrueba -and $servidorOrigen -notlike '*.render.com') {
+  Fallar "La copia $Archivo salio de $servidorOrigen, que no es una base de Render: es de un ensayo. Borrala o indica la correcta con -Archivo."
+}
 $esperado = @($informe | Where-Object { $_ -match '^[A-Za-z0-9_]+=\d+$' -and $_ -notlike 'bytes=*' })
 if ($esperado.Count -eq 0) { Fallar "El archivo $rutaConteo no tiene el conteo de tablas. Volve a correr copiar-base.ps1." }
 
@@ -42,7 +48,20 @@ if ($servidor -eq $servidorOrigen) {
 Escribir-Conteo $Carpeta
 Write-Host ''
 Write-Host "Copia a cargar : $Archivo  (sacada de $servidorOrigen)"
+Write-Host "Hecha el       : $fechaCopia"
 Write-Host "Base destino   : $servidor"
+$minutos = -1
+try { $minutos = [int]((Get-Date) - [datetime]::ParseExact($fechaCopia, 'yyyy-MM-dd HH:mm', $null)).TotalMinutes } catch { }
+if ($minutos -lt 0 -or $minutos -gt 60) {
+  Write-Host ''
+  $edad = if ($minutos -lt 0) { 'de fecha desconocida' } elseif ($minutos -lt 120) { "de hace $minutos minutos" } else { "de hace $([int]($minutos / 60)) horas" }
+  Aviso "ATENCION: esta copia es $edad. Todo lo que entro a la base original despues (pedidos, pagos, stock) NO esta adentro."
+  Aviso 'Para la mudanza de verdad, la copia se hace despues de sacar los dominios y suspender los servicios viejos.'
+  if (-not ($UrlDePrueba -and $SinPreguntar)) {
+    $vieja = Read-Host 'Si es un ensayo y queres seguir igual, escribi COPIA VIEJA y Enter'
+    if ($vieja -cne 'COPIA VIEJA') { Fallar 'Cancelado: no se toco nada. Volve a correr copiar-base.ps1 y despues este script.' }
+  }
+}
 Write-Host ''
 Write-Host 'Lo que hay hoy en la base destino (se va a REEMPLAZAR):'
 $antes = Contar-Remota $url $Carpeta
@@ -58,12 +77,12 @@ docker run --rm -v "${Carpeta}:/copia" $ImagenPostgres pg_restore --clean --if-e
 if ($LASTEXITCODE -ne 0) { Fallar 'pg_restore fallo. Como va en una sola transaccion, la base destino quedo como estaba. Mandale a Claude lo que salio arriba (no tiene la clave).' }
 
 Write-Host '2/2  Comprobando las filas de cada tabla ...'
-$despues = Contar-Remota $url $Carpeta
+$despues = Contar-Remota $url $Carpeta 'La carga SI se hizo, pero no pude contar las filas para comprobarla. Volve a correr este script: cargar dos veces la misma copia no hace dano.'
 $dif = Comparar-Conteos $esperado $despues
 Write-Host ''
 if ($dif.Count -eq 0) {
   Bien "BASE CARGADA Y COMPROBADA: $($despues.Count) tablas, todas con la misma cantidad de filas que la copia."
-  Write-Host 'Ahora reinicia el back en Render: galpon-mates-api > Manual Deploy > Restart service.'
+  Write-Host 'Ahora volve a la guia: falta reanudar el back nuevo en Render (galpon-mates-api).'
 } else {
   Aviso 'La carga termino, pero estas tablas no coinciden con la copia (copia -> destino):'
   $dif | ForEach-Object { Aviso "   $_" }

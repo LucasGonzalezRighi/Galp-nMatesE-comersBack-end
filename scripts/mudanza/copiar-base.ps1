@@ -42,6 +42,7 @@ $origen = Contar-Remota $url $Carpeta
 Write-Host '3/3  Cargando la copia en una base de prueba de esta compu para comprobarla ...'
 $contenedor = "galpon-verif-$PID"
 docker run -d --name $contenedor -e POSTGRES_USER=galpon -e POSTGRES_PASSWORD=verif -e POSTGRES_DB=galpon -v "${Carpeta}:/copia" $ImagenPostgres | Out-Null
+if ($LASTEXITCODE -ne 0) { Fallar 'No pude crear la base de prueba en Docker: la copia NO esta comprobada.' }
 try {
   $lista = $false
   foreach ($i in 1..60) {
@@ -52,11 +53,15 @@ try {
   if (-not $lista) { Fallar 'La base de prueba no arranco.' }
   docker exec $contenedor pg_restore --no-owner --no-privileges --exit-on-error -U galpon -d galpon "/copia/$archivo"
   if ($LASTEXITCODE -ne 0) { Fallar 'La copia no se pudo cargar en la base de prueba: NO sirve. Mandale a Claude lo que salio arriba.' }
-  $copia = @(docker exec $contenedor psql -U galpon -d galpon -At -v ON_ERROR_STOP=1 -f /copia/conteo.sql | Where-Object { $_ -match '=' })
+  $salida = docker exec $contenedor psql -U galpon -d galpon -At -v ON_ERROR_STOP=1 -f /copia/conteo.sql
+  if ($LASTEXITCODE -ne 0) { Fallar 'No pude contar las filas de la copia: NO esta comprobada.' }
+  $copia = @($salida | Where-Object { $_ -match '=' })
 }
 finally {
-  Callado { docker rm -f $contenedor }
+  # -v borra tambien el volumen de la base de prueba: adentro hay datos de clientes.
+  Callado { docker rm -f -v $contenedor }
 }
+if ($copia.Count -eq 0 -or $origen.Count -eq 0) { Fallar 'El conteo vino vacio: la copia NO esta comprobada.' }
 
 $informe = @("origen-servidor=$servidor", "archivo=$archivo", "bytes=$peso", "fecha=$(Get-Date -Format 'yyyy-MM-dd HH:mm')", '--- filas por tabla en la copia ---') + $copia
 Set-Content -Path (Join-Path $Carpeta "$nombre.conteo.txt") -Value $informe -Encoding ASCII
